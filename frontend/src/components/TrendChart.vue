@@ -11,6 +11,24 @@ const canvasRef = ref(null);
 let chart = null;
 
 function renderChart() {
+  // Never construct Chart.js on a hidden canvas: Chart.js snapshots the
+  // canvas's *own* inline style on construction and restores it verbatim on
+  // destroy(). If v-show had set display:none directly on the canvas at
+  // that moment, every future destroy()+recreate cycle keeps restoring
+  // "none" (Chart.js's own display fallback is `style.display || 'block'`,
+  // and the non-empty string 'none' is truthy, so the fallback never
+  // kicks in) - the chart gets permanently stuck invisible even after the
+  // data (and v-show) say it should be visible again. Skipping
+  // construction entirely while there's nothing to show avoids ever
+  // creating that poisoned snapshot.
+  if (props.buckets.length <= 1) {
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+    return;
+  }
+
   const histLen = props.buckets.length;
   const forecastLen = props.forecastBuckets.length;
 
@@ -100,7 +118,9 @@ onBeforeUnmount(() => {
     <p v-else-if="buckets.length === 1" class="hint">
       За этот период есть только один опрос — слишком мало для графика. Выберите период подольше.
     </p>
-    <canvas v-show="buckets.length > 1" ref="canvasRef"></canvas>
+    <div v-show="buckets.length > 1" class="canvas-wrap">
+      <canvas ref="canvasRef"></canvas>
+    </div>
   </div>
 </template>
 
@@ -108,5 +128,10 @@ onBeforeUnmount(() => {
 .chart-box {
   position: relative;
   height: 280px;
+}
+
+.canvas-wrap {
+  position: relative;
+  height: 100%;
 }
 </style>
