@@ -15,7 +15,7 @@ const postLogin = asyncHandler(async (req, res) => {
 });
 
 const getMe = asyncHandler(async (req, res) => {
-  res.json({ user: { id: req.user.sub, username: req.user.username } });
+  res.json({ user: { id: req.user.sub, username: req.user.username, role: req.user.role } });
 });
 
 module.exports = { postLogin, getMe };

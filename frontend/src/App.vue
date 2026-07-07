@@ -18,12 +18,14 @@ function handleLogout() {
     <header v-if="isAuthenticated" class="topbar">
       <div class="brand">⛽ Топливо — Мониторинг</div>
       <nav class="nav">
-        <router-link to="/regions">Районы</router-link>
+        <router-link v-if="auth.isAdmin" to="/regions">Районы</router-link>
         <router-link to="/map">Карта</router-link>
         <router-link to="/reports">Отчёты</router-link>
+        <router-link v-if="auth.isAdmin" to="/users">Пользователи</router-link>
       </nav>
       <div class="user">
         <span>{{ auth.username }}</span>
+        <span v-if="auth.isAdmin" class="role-badge">админ</span>
         <button class="link-btn" @click="handleLogout">Выйти</button>
       </div>
     </header>

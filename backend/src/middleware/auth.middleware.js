@@ -15,4 +15,12 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { requireAuth };
+// Must run after requireAuth (relies on req.user being set).
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return next(new HttpError(403, 'Admin role required'));
+  }
+  return next();
+}
+
+module.exports = { requireAuth, requireAdmin };

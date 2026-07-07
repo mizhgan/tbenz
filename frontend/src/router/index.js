@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../store/auth';
 
 const routes = [
-  { path: '/', redirect: '/regions' },
+  { path: '/', redirect: '/map' },
   {
     path: '/login',
     name: 'login',
@@ -13,6 +13,7 @@ const routes = [
     path: '/regions',
     name: 'regions',
     component: () => import('../views/RegionsView.vue'),
+    meta: { adminOnly: true },
   },
   {
     path: '/map',
@@ -23,6 +24,12 @@ const routes = [
     path: '/reports',
     name: 'reports',
     component: () => import('../views/ReportsView.vue'),
+  },
+  {
+    path: '/users',
+    name: 'users',
+    component: () => import('../views/UsersView.vue'),
+    meta: { adminOnly: true },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -43,7 +50,10 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
   if (to.name === 'login' && auth.isAuthenticated) {
-    return { name: 'regions' };
+    return { name: 'map' };
+  }
+  if (to.meta.adminOnly && !auth.isAdmin) {
+    return { name: 'map' };
   }
   return true;
 });

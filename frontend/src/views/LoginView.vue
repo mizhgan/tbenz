@@ -17,7 +17,7 @@ async function handleSubmit() {
   loading.value = true;
   try {
     await auth.login(username.value, password.value);
-    router.push(route.query.redirect || { name: 'regions' });
+    router.push(route.query.redirect || { name: 'map' });
   } catch (err) {
     error.value = err.response?.data?.error || 'Не удалось войти';
   } finally {

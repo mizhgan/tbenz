@@ -17,17 +17,20 @@ const {
   getHeatmap,
   getTrendForecast,
 } = require('../controllers/metrics.controller');
-const { requireAuth } = require('../middleware/auth.middleware');
+const { requireAuth, requireAdmin } = require('../middleware/auth.middleware');
 
 const router = Router();
 router.use(requireAuth);
 
+// Read-only endpoints - available to any authenticated user (admin or viewer).
 router.get('/', listRegions);
-router.post('/', createRegion);
 router.get('/:id', getRegion);
-router.put('/:id', updateRegion);
-router.delete('/:id', deleteRegion);
-router.post('/:id/poll', pollRegionNow);
+
+// Mutating endpoints - admins only.
+router.post('/', requireAdmin, createRegion);
+router.put('/:id', requireAdmin, updateRegion);
+router.delete('/:id', requireAdmin, deleteRegion);
+router.post('/:id/poll', requireAdmin, pollRegionNow);
 router.get('/:id/history-range', getHistoryRange);
 router.get('/:id/snapshot-times', getSnapshotTimes);
 router.get('/:id/snapshot', getRegionSnapshot);
