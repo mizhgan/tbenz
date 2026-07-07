@@ -32,6 +32,12 @@ const routes = [
     meta: { adminOnly: true },
   },
   {
+    path: '/proxies',
+    name: 'proxies',
+    component: () => import('../views/ProxiesView.vue'),
+    meta: { adminOnly: true },
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
     component: () => import('../views/NotFoundView.vue'),

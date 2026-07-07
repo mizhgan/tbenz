@@ -30,6 +30,7 @@ function handleLogout() {
         <router-link to="/map">Карта</router-link>
         <router-link to="/reports">Отчёты</router-link>
         <router-link v-if="auth.isAdmin" to="/users">Пользователи</router-link>
+        <router-link v-if="auth.isAdmin" to="/proxies">Прокси</router-link>
       </nav>
       <div class="user">
         <span>{{ auth.username }}</span>

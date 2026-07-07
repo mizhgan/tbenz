@@ -18,4 +18,7 @@ module.exports = {
   tbankApiBaseUrl: process.env.TBANK_API_BASE_URL || 'https://toplivo.tbank.ru/api/v1/stations',
   minPollIntervalMinutes: Number(process.env.MIN_POLL_INTERVAL_MINUTES || 1),
   corsOrigin: process.env.CORS_ORIGIN || '*',
+  proxyFailureThreshold: Number(process.env.PROXY_FAILURE_THRESHOLD || 3),
+  proxyRequestTimeoutMs: Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 20000),
+  proxyCheckUrl: process.env.PROXY_CHECK_URL || 'https://toplivo.tbank.ru/api/v1/stations',
 };
