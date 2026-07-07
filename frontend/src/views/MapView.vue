@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
 import StationHistoryChart from '../components/StationHistoryChart.vue';
+import { statusMeta } from '../utils/fuelStatus';
 
 const route = useRoute();
 
@@ -72,17 +73,18 @@ function renderMarkers() {
   if (!map) return;
   markersLayer.clearLayers();
   for (const s of stations.value) {
+    const meta = statusMeta(s.status);
     const marker = L.circleMarker([s.lat, s.lon], {
       radius: 7,
-      color: '#1d4ed8',
-      fillColor: '#3b82f6',
+      color: meta.color,
+      fillColor: meta.color,
       fillOpacity: 0.85,
       weight: 2,
     });
     marker.on('click', () => {
       selectedStation.value = s;
     });
-    marker.bindTooltip(s.name || s.brand || 'АЗС');
+    marker.bindTooltip(`${s.name || 'АЗС'} — ${meta.label}`);
     markersLayer.addLayer(marker);
   }
   if (stations.value.length && !hasFitted.value) {
@@ -179,21 +181,35 @@ onBeforeUnmount(() => {
 
       <div class="sidebar card">
         <div v-if="!selectedStation">
-          <p class="hint">Кликните по станции на карте, чтобы увидеть детали и историю цен.</p>
+          <p class="hint">Кликните по станции на карте, чтобы увидеть детали и историю.</p>
           <p class="hint">Всего станций на выбранный момент: {{ stations.length }}</p>
+          <div class="legend">
+            <div v-for="key in ['available', 'maybe_available', 'not_available', 'no_data']" :key="key" class="legend-row">
+              <span class="dot" :style="{ background: statusMeta(key).color }"></span>
+              {{ statusMeta(key).label }}
+            </div>
+          </div>
         </div>
         <div v-else>
-          <h3>{{ selectedStation.name || selectedStation.brand || 'АЗС' }}</h3>
-          <p v-if="selectedStation.brand">Бренд: {{ selectedStation.brand }}</p>
+          <h3>{{ selectedStation.name || 'АЗС' }}</h3>
           <p v-if="selectedStation.address">{{ selectedStation.address }}</p>
+          <p>
+            <span class="badge-dot" :style="{ background: statusMeta(selectedStation.status).color }"></span>
+            {{ statusMeta(selectedStation.status).label }}
+          </p>
           <ul class="fuel-list">
-            <li v-for="f in selectedStation.fuels" :key="f.type">
-              <strong>{{ f.type }}</strong
-              >: {{ f.price }}
+            <li v-for="f in selectedStation.fuelStatuses" :key="f.fuelType">
+              <strong>АИ-{{ f.fuelType }}</strong>
+              <span class="badge-dot" :style="{ background: statusMeta(f.status).color }"></span>
+              {{ statusMeta(f.status).label }}
             </li>
           </ul>
-          <p class="hint">На момент: {{ formatDateTime(new Date(selectedStation.polledAt).getTime()) }}</p>
-          <h4>История цен</h4>
+          <p class="hint">
+            Последняя транзакция:
+            {{ selectedStation.lastTransactionAt ? formatDateTime(new Date(selectedStation.lastTransactionAt).getTime()) : 'нет данных' }}
+          </p>
+          <p class="hint">Снимок на момент: {{ formatDateTime(new Date(selectedStation.polledAt).getTime()) }}</p>
+          <h4>История по видам топлива</h4>
           <StationHistoryChart :station-id="selectedStation.stationId" />
         </div>
       </div>
@@ -273,5 +289,31 @@ onBeforeUnmount(() => {
 .fuel-list li {
   padding: 4px 0;
   border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #445;
+}
+
+.dot,
+.badge-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
 }
 </style>

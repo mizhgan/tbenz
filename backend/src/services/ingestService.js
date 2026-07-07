@@ -10,12 +10,14 @@ async function storeStation(parsed, region, polledAt) {
     {
       $set: {
         name: parsed.name,
-        brand: parsed.brand,
         address: parsed.address,
         lat: parsed.lat,
         lon: parsed.lon,
+        yandexOrgId: parsed.yandexOrgId,
         lastSeenAt: polledAt,
-        lastFuels: parsed.fuels,
+        lastStatus: parsed.status,
+        lastFuelStatuses: parsed.fuelStatuses,
+        lastTransactionAt: parsed.lastTransactionAt,
         lastRaw: parsed.raw,
       },
       $setOnInsert: { firstSeenAt: polledAt },
@@ -30,7 +32,9 @@ async function storeStation(parsed, region, polledAt) {
     polledAt,
     lat: parsed.lat,
     lon: parsed.lon,
-    fuels: parsed.fuels,
+    status: parsed.status,
+    fuelStatuses: parsed.fuelStatuses,
+    lastTransactionAt: parsed.lastTransactionAt,
     raw: parsed.raw,
   });
 }

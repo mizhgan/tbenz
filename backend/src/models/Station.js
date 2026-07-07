@@ -6,24 +6,28 @@ const stationSchema = new Schema(
   {
     externalId: { type: String, required: true, unique: true, index: true },
     name: { type: String, default: null },
-    brand: { type: String, default: null },
     address: { type: String, default: null },
     lat: { type: Number, required: true },
     lon: { type: Number, required: true },
+    yandexOrgId: { type: String, default: null },
     regions: [{ type: Schema.Types.ObjectId, ref: 'Region' }],
     firstSeenAt: { type: Date, default: Date.now },
     lastSeenAt: { type: Date, default: Date.now },
-    // Best-effort parsed latest fuel prices, kept for quick display without
-    // joining the snapshot collection.
-    lastFuels: [
+    // Last known overall availability status and per-fuel-type breakdown, as
+    // reported by the source (inferred from recent transaction activity, not
+    // an actual price/stock feed): "available" | "maybe_available" |
+    // "not_available" | "no_data".
+    lastStatus: { type: String, default: 'no_data' },
+    lastFuelStatuses: [
       {
         _id: false,
-        type: { type: String },
-        price: { type: Number },
+        fuelType: { type: String },
+        status: { type: String },
       },
     ],
+    lastTransactionAt: { type: Date, default: null },
     // Full raw payload for this station as last received from the source API,
-    // kept so nothing is lost if our field-mapping guesses above are wrong.
+    // kept so nothing is lost if our field-mapping assumptions above change.
     lastRaw: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: true }

@@ -1,12 +1,27 @@
 /**
- * Best-effort, defensive parsing of the toplivo.tbank.ru station payload.
+ * Parsing of the toplivo.tbank.ru station payload.
  *
- * IMPORTANT: the exact response shape has not been verified against a live
- * call (the API host is unreachable from this dev sandbox). Field names
- * below are educated guesses covering the most common conventions. The full
- * raw object is always preserved (Station.lastRaw / StationSnapshot.raw) so
- * data is never lost even if these guesses are wrong - adjust the
- * `parseStation` mapping below once the real payload has been inspected.
+ * Verified against a real sample response:
+ *
+ *   { "status": "ok", "payload": [
+ *     {
+ *       "id": "01KWVDAV7KA8JZR0A7Q22X4SJS",
+ *       "name": "Движение",
+ *       "addr": "Кировская область, ...",
+ *       "lat": 58.454438,
+ *       "lon": 49.262675,
+ *       "status": "no_data",
+ *       "statusByFuelType": { "92": "no_data", "95": "no_data" },
+ *       "yandexOrgId": "1033437067",
+ *       "lastTransactionAt": null
+ *     }, ...
+ *   ] }
+ *
+ * Note there is no price data - the source only reports a fuel *availability*
+ * status per fuel type, inferred from how recently a card transaction was
+ * seen at that pump: "available" | "maybe_available" | "not_available" |
+ * "no_data". `lastTransactionAt` (nullable ISO string) is the most recent
+ * transaction across all fuel types at the station.
  */
 
 function firstDefined(...values) {
@@ -24,14 +39,7 @@ function toFiniteNumber(value) {
 function extractStationsArray(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== 'object') return [];
-  const candidates = [
-    payload.stations,
-    payload.data,
-    payload.items,
-    payload.result,
-    payload.results,
-    payload.data && payload.data.stations,
-  ];
+  const candidates = [payload.payload, payload.stations, payload.data, payload.items];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
   }
@@ -39,62 +47,25 @@ function extractStationsArray(payload) {
 }
 
 function parseLatLon(raw) {
-  let lat = toFiniteNumber(firstDefined(raw.lat, raw.latitude, raw.point && raw.point.lat));
-  let lon = toFiniteNumber(
-    firstDefined(raw.lon, raw.lng, raw.longitude, raw.point && raw.point.lon)
-  );
-
-  if ((lat === undefined || lon === undefined) && Array.isArray(raw.coordinates)) {
-    // GeoJSON-style [lon, lat]
-    const [maybeLon, maybeLat] = raw.coordinates;
-    lat = lat ?? toFiniteNumber(maybeLat);
-    lon = lon ?? toFiniteNumber(maybeLon);
-  }
-  if ((lat === undefined || lon === undefined) && raw.location) {
-    lat = lat ?? toFiniteNumber(raw.location.lat ?? raw.location.latitude);
-    lon = lon ?? toFiniteNumber(raw.location.lon ?? raw.location.lng ?? raw.location.longitude);
-  }
-
+  const lat = toFiniteNumber(firstDefined(raw.lat, raw.latitude));
+  const lon = toFiniteNumber(firstDefined(raw.lon, raw.lng, raw.longitude));
   if (lat === undefined || lon === undefined) return null;
   return { lat, lon };
 }
 
-function parseExternalId(raw, lat, lon) {
-  const id = firstDefined(raw.id, raw.stationId, raw.station_id, raw.uuid, raw.code, raw._id);
-  if (id !== undefined) return String(id);
-  return `geo:${lat.toFixed(6)}:${lon.toFixed(6)}`;
+function parseFuelStatuses(raw) {
+  const map = raw.statusByFuelType;
+  if (!map || typeof map !== 'object') return [];
+  return Object.entries(map).map(([fuelType, status]) => ({
+    fuelType,
+    status: String(status),
+  }));
 }
 
-function normalizeFuelEntry(item) {
-  if (!item || typeof item !== 'object') return null;
-  const type = firstDefined(item.type, item.name, item.fuelType, item.fuel_type, item.title);
-  const price = toFiniteNumber(firstDefined(item.price, item.cost, item.value, item.amount));
-  if (type === undefined || price === undefined) return null;
-  return { type: String(type), price };
-}
-
-function parseFuels(raw) {
-  const arrayCandidates = [
-    raw.prices,
-    raw.fuels,
-    raw.fuelPrices,
-    raw.fuel_prices,
-    raw.offers,
-    raw.products,
-    raw.fuelTypes,
-  ];
-  for (const candidate of arrayCandidates) {
-    if (Array.isArray(candidate)) {
-      const parsed = candidate.map(normalizeFuelEntry).filter(Boolean);
-      if (parsed.length) return parsed;
-    }
-  }
-
-  const singleCandidate = firstDefined(raw.lastTransaction, raw.transaction, raw.last_transaction);
-  const single = normalizeFuelEntry(singleCandidate);
-  if (single) return [single];
-
-  return [];
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function parseStation(raw) {
@@ -102,21 +73,18 @@ function parseStation(raw) {
   const latLon = parseLatLon(raw);
   if (!latLon) return null;
 
-  const externalId = parseExternalId(raw, latLon.lat, latLon.lon);
-  const name = firstDefined(raw.name, raw.stationName, raw.title) ?? null;
-  const brand = firstDefined(raw.brand, raw.brandName, raw.network, raw.provider) ?? null;
-  const address =
-    firstDefined(raw.address, raw.addr, raw.location && raw.location.address) ?? null;
-  const fuels = parseFuels(raw);
+  const externalId = firstDefined(raw.id, raw.stationId) ?? `geo:${latLon.lat.toFixed(6)}:${latLon.lon.toFixed(6)}`;
 
   return {
-    externalId,
-    name,
-    brand,
-    address,
+    externalId: String(externalId),
+    name: raw.name ?? null,
+    address: raw.addr ?? null,
     lat: latLon.lat,
     lon: latLon.lon,
-    fuels,
+    yandexOrgId: raw.yandexOrgId ? String(raw.yandexOrgId) : null,
+    status: raw.status ?? 'no_data',
+    fuelStatuses: parseFuelStatuses(raw),
+    lastTransactionAt: parseDate(raw.lastTransactionAt),
     raw,
   };
 }
