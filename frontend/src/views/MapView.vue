@@ -78,6 +78,36 @@ function setAllBrands(visible) {
   renderMarkers();
 }
 
+// The dropdown panel is teleported to <body> and positioned by fixed
+// coordinates rather than living inline inside the controls card. Leaflet's
+// own panes/markers use fairly high z-indexes within their own stacking
+// context, and an ordinary in-place `position: absolute` popover here ended
+// up rendered behind the map instead of above it - the same class of issue
+// already worked around for RegionForm/UserForm/ProxyForm via Teleport.
+const brandButtonRef = ref(null);
+const brandPanelOpen = ref(false);
+const brandPanelPos = reactive({ top: 0, left: 0 });
+
+function updateBrandPanelPos() {
+  if (!brandButtonRef.value) return;
+  const rect = brandButtonRef.value.getBoundingClientRect();
+  brandPanelPos.top = rect.bottom + 6;
+  brandPanelPos.left = rect.left;
+}
+
+function toggleBrandPanel() {
+  if (brandPanelOpen.value) {
+    brandPanelOpen.value = false;
+    return;
+  }
+  updateBrandPanelPos();
+  brandPanelOpen.value = true;
+}
+
+function closeBrandPanel() {
+  brandPanelOpen.value = false;
+}
+
 const showExportPanel = ref(false);
 const exportGenerating = ref(false);
 const exportFetchProgress = ref(0);
@@ -397,6 +427,11 @@ onMounted(async () => {
   });
   resizeObserver.observe(mapContainer.value);
 
+  // Close the teleported brand dropdown rather than let it drift out of
+  // place if the page scrolls or the window resizes while it's open.
+  window.addEventListener('scroll', closeBrandPanel, true);
+  window.addEventListener('resize', closeBrandPanel);
+
   await loadRegions();
   if (selectedRegionId.value) {
     await loadRange();
@@ -411,6 +446,8 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('scroll', closeBrandPanel, true);
+  window.removeEventListener('resize', closeBrandPanel);
   clearInterval(liveTimer);
   clearTimeout(sliderDebounceTimer);
   if (resizeObserver) resizeObserver.disconnect();
@@ -463,35 +500,48 @@ onBeforeUnmount(() => {
           {{ statusMeta(key).label }}
         </label>
 
-        <details v-if="availableBrands.length" class="brand-filter">
-          <summary>
-            Сети
-            <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
-              фильтр
-            </span>
-          </summary>
-          <div class="brand-filter-panel card">
-            <div class="brand-filter-actions">
-              <input
-                v-model="brandSearch"
-                type="text"
-                class="brand-search"
-                placeholder="Поиск сети..."
-              />
-              <button type="button" class="btn secondary" @click="setAllBrands(true)">Все</button>
-              <button type="button" class="btn secondary" @click="setAllBrands(false)">Ничего</button>
-            </div>
-            <div class="brand-filter-list">
-              <label v-for="brand in visibleBrandOptions" :key="brand" class="filter-checkbox">
-                <input type="checkbox" v-model="brandFilters[brand]" @change="handleFilterChange" />
-                {{ brand }}
-              </label>
-              <p v-if="!visibleBrandOptions.length" class="hint">Ничего не найдено</p>
-            </div>
-          </div>
-        </details>
+        <button
+          v-if="availableBrands.length"
+          ref="brandButtonRef"
+          type="button"
+          class="btn secondary brand-filter-toggle"
+          :class="{ active: brandPanelOpen }"
+          @click="toggleBrandPanel"
+        >
+          Сети
+          <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
+            фильтр
+          </span>
+        </button>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div v-if="brandPanelOpen" class="brand-filter-overlay" @click.self="closeBrandPanel">
+        <div
+          class="brand-filter-panel card"
+          :style="{ top: `${brandPanelPos.top}px`, left: `${brandPanelPos.left}px` }"
+        >
+          <div class="brand-filter-actions">
+            <input
+              v-model="brandSearch"
+              type="text"
+              class="brand-search"
+              placeholder="Поиск сети..."
+            />
+            <button type="button" class="btn secondary" @click="setAllBrands(true)">Все</button>
+            <button type="button" class="btn secondary" @click="setAllBrands(false)">Ничего</button>
+          </div>
+          <div class="brand-filter-list">
+            <label v-for="brand in visibleBrandOptions" :key="brand" class="filter-checkbox">
+              <input type="checkbox" v-model="brandFilters[brand]" @change="handleFilterChange" />
+              {{ brand }}
+            </label>
+            <p v-if="!visibleBrandOptions.length" class="hint">Ничего не найдено</p>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
@@ -661,41 +711,24 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-.brand-filter {
-  position: relative;
-}
-
-.brand-filter summary {
-  cursor: pointer;
-  font-size: 13px;
-  color: #445;
-  list-style: none;
-  padding: 4px 10px;
-  border: 1px solid #ccd2d9;
-  border-radius: 6px;
-  user-select: none;
-}
-
-.brand-filter summary::-webkit-details-marker {
-  display: none;
-}
-
-.brand-filter[open] summary {
-  border-color: #1d4ed8;
-  color: #1d4ed8;
-}
-
 .brand-filter-badge {
   margin-left: 6px;
   font-size: 11px;
   color: #1d4ed8;
 }
 
+/* Teleported to <body> (see the template) so it paints above Leaflet's own
+   panes/controls regardless of DOM position - the same reason RegionForm/
+   UserForm/ProxyForm use Teleport + a high z-index instead of an in-place
+   absolutely-positioned popover. */
+.brand-filter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+}
+
 .brand-filter-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 10;
+  position: fixed;
   width: 260px;
   padding: 10px;
 }
