@@ -4,7 +4,13 @@ import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
 import StationHistoryChart from '../components/StationHistoryChart.vue';
+import GifExportPanel from '../components/GifExportPanel.vue';
 import { statusMeta } from '../utils/fuelStatus';
+import { captureMapBase, createGifEncoder, lockMapInteraction } from '../utils/gifExport';
+
+// leaflet-image (used for GIF export below) expects a global `L`, as most
+// pre-ES-module Leaflet plugins do.
+window.L = L;
 
 const route = useRoute();
 
@@ -27,6 +33,13 @@ const statusFilters = reactive({
   not_available: true,
   no_data: false,
 });
+
+const showGifPanel = ref(false);
+const gifGenerating = ref(false);
+const gifFetchProgress = ref(0);
+const gifEncodeProgress = ref(0);
+const gifResultUrl = ref(null);
+const gifError = ref('');
 
 const mapContainer = ref(null);
 let map = null;
@@ -140,11 +153,112 @@ async function jumpToNow() {
   await loadSnapshot();
 }
 
+function openGifPanel() {
+  if (!hasRange.value) return;
+  gifError.value = '';
+  showGifPanel.value = true;
+}
+
+function resetGifResult() {
+  if (gifResultUrl.value) {
+    URL.revokeObjectURL(gifResultUrl.value);
+    gifResultUrl.value = null;
+  }
+  gifError.value = '';
+}
+
+function closeGifPanel() {
+  showGifPanel.value = false;
+  resetGifResult();
+}
+
+async function handleGenerateGif({ fromMs, toMs, frameCount, frameDelayMs }) {
+  if (!map || !selectedRegionId.value) return;
+
+  resetGifResult();
+  gifGenerating.value = true;
+  gifFetchProgress.value = 0;
+  gifEncodeProgress.value = 0;
+
+  const unlock = lockMapInteraction(map);
+  try {
+    const size = map.getSize();
+
+    markersLayer.remove();
+    let baseCanvas;
+    try {
+      baseCanvas = await captureMapBase(map);
+    } finally {
+      markersLayer.addTo(map);
+    }
+
+    const frameCanvas = document.createElement('canvas');
+    frameCanvas.width = size.x;
+    frameCanvas.height = size.y;
+    const ctx = frameCanvas.getContext('2d');
+
+    const encoder = createGifEncoder({ width: size.x, height: size.y });
+    encoder.on('progress', (ratio) => {
+      gifEncodeProgress.value = Math.round(ratio * 100);
+    });
+
+    const timestamps =
+      frameCount > 1
+        ? Array.from(
+            { length: frameCount },
+            (_, i) => fromMs + (i * (toMs - fromMs)) / (frameCount - 1)
+          )
+        : [toMs];
+
+    for (let i = 0; i < timestamps.length; i++) {
+      const ts = timestamps[i];
+      const data = await regionsApi.snapshotAt(selectedRegionId.value, new Date(ts).toISOString());
+      const frameStations = data.stations.filter((s) => statusFilters[s.status] !== false);
+
+      ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
+      for (const s of frameStations) {
+        const pt = map.latLngToContainerPoint([s.lat, s.lon]);
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = statusMeta(s.status).color;
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+      }
+
+      const label = formatDateTime(ts);
+      ctx.font = '13px sans-serif';
+      const textWidth = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.fillRect(8, 8, textWidth + 16, 24);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, 16, 25);
+
+      encoder.addFrame(ctx, { copy: true, delay: frameDelayMs });
+      gifFetchProgress.value = Math.round(((i + 1) / timestamps.length) * 100);
+    }
+
+    const blob = await new Promise((resolve, reject) => {
+      encoder.on('finished', resolve);
+      encoder.on('abort', () => reject(new Error('Генерация прервана')));
+      encoder.render();
+    });
+    gifResultUrl.value = URL.createObjectURL(blob);
+  } catch (err) {
+    gifError.value = `Не удалось создать GIF: ${err.message || 'неизвестная ошибка'}`;
+  } finally {
+    gifGenerating.value = false;
+    unlock();
+  }
+}
+
 onMounted(async () => {
   map = L.map(mapContainer.value).setView([55.75, 37.62], 6);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
+    crossOrigin: true,
   }).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
 
@@ -164,6 +278,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(liveTimer);
   clearTimeout(sliderDebounceTimer);
+  if (gifResultUrl.value) URL.revokeObjectURL(gifResultUrl.value);
   if (map) map.remove();
 });
 </script>
@@ -198,6 +313,7 @@ onBeforeUnmount(() => {
         <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
           {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
         </button>
+        <button class="btn secondary" @click="openGifPanel">🎞 Создать GIF</button>
       </template>
       <p v-else class="hint">
         Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
@@ -247,6 +363,21 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <GifExportPanel
+      v-if="showGifPanel"
+      :visible="showGifPanel"
+      :range-from-ms="range.from"
+      :range-to-ms="range.to"
+      :generating="gifGenerating"
+      :fetch-progress="gifFetchProgress"
+      :encode-progress="gifEncodeProgress"
+      :result-url="gifResultUrl"
+      :error-message="gifError"
+      @close="closeGifPanel"
+      @generate="handleGenerateGif"
+      @reset="resetGifResult"
+    />
   </div>
 </template>
 
