@@ -43,6 +43,41 @@ const statusFilters = reactive({
   no_data: false,
 });
 
+const UNKNOWN_BRAND = 'Без сети';
+function brandOf(station) {
+  return station.name || UNKNOWN_BRAND;
+}
+
+// Keyed by brand name -> visible. Populated lazily as brands show up in
+// loaded snapshots (see ensureBrandFilterKeys) rather than rebuilt from
+// scratch each time, so a user's unchecked brands stay unchecked as the
+// time slider moves or live refresh brings in a new snapshot.
+const brandFilters = reactive({});
+const brandSearch = ref('');
+
+const availableBrands = computed(() =>
+  Array.from(new Set(stations.value.map(brandOf))).sort((a, b) => a.localeCompare(b, 'ru'))
+);
+
+const visibleBrandOptions = computed(() => {
+  const query = brandSearch.value.trim().toLowerCase();
+  if (!query) return availableBrands.value;
+  return availableBrands.value.filter((b) => b.toLowerCase().includes(query));
+});
+
+function ensureBrandFilterKeys() {
+  for (const brand of availableBrands.value) {
+    if (!(brand in brandFilters)) brandFilters[brand] = true;
+  }
+}
+
+function setAllBrands(visible) {
+  for (const brand of availableBrands.value) {
+    brandFilters[brand] = visible;
+  }
+  renderMarkers();
+}
+
 const showExportPanel = ref(false);
 const exportGenerating = ref(false);
 const exportFetchProgress = ref(0);
@@ -66,7 +101,7 @@ let resizeObserver = null;
 const hasRange = computed(() => range.value.from !== null && range.value.to !== null);
 const atLabel = computed(() => formatDateTime(atMs.value));
 const filteredStations = computed(() =>
-  stations.value.filter((s) => statusFilters[s.status] !== false)
+  stations.value.filter((s) => statusFilters[s.status] !== false && brandFilters[brandOf(s)] !== false)
 );
 
 function formatDateTime(ms) {
@@ -105,6 +140,7 @@ async function loadSnapshot() {
     const data = await regionsApi.snapshotAt(selectedRegionId.value, at);
     if (requestId !== snapshotRequestId) return; // a newer request has since started
     stations.value = data.stations;
+    ensureBrandFilterKeys();
     renderMarkers();
   } catch (err) {
     if (requestId !== snapshotRequestId) return;
@@ -146,6 +182,11 @@ function handleFilterChange() {
 async function handleRegionChange() {
   selectedStation.value = null;
   hasFitted.value = false;
+  // Brand names from the previous region don't apply here - drop them so
+  // the checklist starts fresh (all visible) instead of carrying over an
+  // unrelated, stale selection.
+  for (const key of Object.keys(brandFilters)) delete brandFilters[key];
+  brandSearch.value = '';
   await loadRange();
   await loadSnapshot();
 }
@@ -248,7 +289,9 @@ async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, for
     // label) over the frozen base map image already on `ctx`.
     async function drawFrame(ts) {
       const data = await regionsApi.snapshotAt(selectedRegionId.value, new Date(ts).toISOString());
-      const frameStations = data.stations.filter((s) => statusFilters[s.status] !== false);
+      const frameStations = data.stations.filter(
+        (s) => statusFilters[s.status] !== false && brandFilters[brandOf(s)] !== false
+      );
 
       ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
       for (const s of frameStations) {
@@ -419,6 +462,34 @@ onBeforeUnmount(() => {
           <span class="dot" :style="{ background: statusMeta(key).color }"></span>
           {{ statusMeta(key).label }}
         </label>
+
+        <details v-if="availableBrands.length" class="brand-filter">
+          <summary>
+            Сети
+            <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
+              фильтр
+            </span>
+          </summary>
+          <div class="brand-filter-panel card">
+            <div class="brand-filter-actions">
+              <input
+                v-model="brandSearch"
+                type="text"
+                class="brand-search"
+                placeholder="Поиск сети..."
+              />
+              <button type="button" class="btn secondary" @click="setAllBrands(true)">Все</button>
+              <button type="button" class="btn secondary" @click="setAllBrands(false)">Ничего</button>
+            </div>
+            <div class="brand-filter-list">
+              <label v-for="brand in visibleBrandOptions" :key="brand" class="filter-checkbox">
+                <input type="checkbox" v-model="brandFilters[brand]" @change="handleFilterChange" />
+                {{ brand }}
+              </label>
+              <p v-if="!visibleBrandOptions.length" class="hint">Ничего не найдено</p>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -588,5 +659,67 @@ onBeforeUnmount(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+.brand-filter {
+  position: relative;
+}
+
+.brand-filter summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #445;
+  list-style: none;
+  padding: 4px 10px;
+  border: 1px solid #ccd2d9;
+  border-radius: 6px;
+  user-select: none;
+}
+
+.brand-filter summary::-webkit-details-marker {
+  display: none;
+}
+
+.brand-filter[open] summary {
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+}
+
+.brand-filter-badge {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #1d4ed8;
+}
+
+.brand-filter-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: 260px;
+  padding: 10px;
+}
+
+.brand-filter-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.brand-search {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccd2d9;
+  font-size: 13px;
+}
+
+.brand-filter-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 </style>
