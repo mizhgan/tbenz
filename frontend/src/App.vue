@@ -1,11 +1,19 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from './store/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
 const isAuthenticated = computed(() => auth.isAuthenticated);
+
+onMounted(() => {
+  // Locally cached role can be stale (pre-role token, or a role change made
+  // elsewhere) - refresh it from the backend once on load.
+  if (auth.isAuthenticated) {
+    auth.fetchMe().catch(() => {});
+  }
+});
 
 function handleLogout() {
   auth.logout();

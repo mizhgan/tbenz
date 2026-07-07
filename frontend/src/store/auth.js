@@ -34,5 +34,21 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('username');
       localStorage.removeItem('role');
     },
+    // Re-syncs username/role from the backend. Needed because the locally
+    // cached role (set at login) can go stale: a token issued before the
+    // role field existed has no role in it, and role changes made by an
+    // admin don't retroactively update a token already sitting in another
+    // tab's localStorage. A 401 here (e.g. the account no longer exists)
+    // is handled by the http interceptor, which clears the session and
+    // redirects to /login.
+    async fetchMe() {
+      const { data } = await http.get('/auth/me');
+      this.userId = data.user.id;
+      this.username = data.user.username;
+      this.role = data.user.role;
+      localStorage.setItem('userId', data.user.id);
+      localStorage.setItem('username', data.user.username);
+      localStorage.setItem('role', data.user.role);
+    },
   },
 });
