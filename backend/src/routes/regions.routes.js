@@ -10,6 +10,12 @@ const {
   getSnapshotTimes,
   getRegionSnapshot,
 } = require('../controllers/regions.controller');
+const {
+  getTrend,
+  getStations,
+  getBrands,
+  getHeatmap,
+} = require('../controllers/metrics.controller');
 const { requireAuth } = require('../middleware/auth.middleware');
 
 const router = Router();
@@ -24,5 +30,9 @@ router.post('/:id/poll', pollRegionNow);
 router.get('/:id/history-range', getHistoryRange);
 router.get('/:id/snapshot-times', getSnapshotTimes);
 router.get('/:id/snapshot', getRegionSnapshot);
+router.get('/:id/metrics/trend', getTrend);
+router.get('/:id/metrics/stations', getStations);
+router.get('/:id/metrics/brands', getBrands);
+router.get('/:id/metrics/heatmap', getHeatmap);
 
 module.exports = router;

@@ -20,6 +20,7 @@ function handleLogout() {
       <nav class="nav">
         <router-link to="/regions">Районы</router-link>
         <router-link to="/map">Карта</router-link>
+        <router-link to="/reports">Отчёты</router-link>
       </nav>
       <div class="user">
         <span>{{ auth.username }}</span>
