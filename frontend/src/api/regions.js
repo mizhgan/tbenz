@@ -1,0 +1,18 @@
+import http from './http';
+
+export const regionsApi = {
+  list: () => http.get('/regions').then((r) => r.data),
+  get: (id) => http.get(`/regions/${id}`).then((r) => r.data),
+  create: (payload) => http.post('/regions', payload).then((r) => r.data),
+  update: (id, payload) => http.put(`/regions/${id}`, payload).then((r) => r.data),
+  remove: (id) => http.delete(`/regions/${id}`),
+  pollNow: (id) => http.post(`/regions/${id}/poll`).then((r) => r.data),
+  historyRange: (id) => http.get(`/regions/${id}/history-range`).then((r) => r.data),
+  snapshotAt: (id, at) =>
+    http.get(`/regions/${id}/snapshot`, { params: at ? { at } : {} }).then((r) => r.data),
+};
+
+export const stationsApi = {
+  get: (id) => http.get(`/stations/${id}`).then((r) => r.data),
+  history: (id, params) => http.get(`/stations/${id}/history`, { params }).then((r) => r.data),
+};
