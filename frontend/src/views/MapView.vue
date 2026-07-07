@@ -61,6 +61,7 @@ let markersLayer = null;
 let liveTimer = null;
 let sliderDebounceTimer = null;
 let snapshotRequestId = 0;
+let resizeObserver = null;
 
 const hasRange = computed(() => range.value.from !== null && range.value.to !== null);
 const atLabel = computed(() => formatDateTime(atMs.value));
@@ -342,6 +343,17 @@ onMounted(async () => {
   }).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
 
+  // The map's container is stretched by flex layout to match the sidebar's
+  // height (see .map-body), which grows when a station is selected (more
+  // details, forecast, history chart). Leaflet has no way to know its
+  // container was resized by something other than itself, so without this
+  // it keeps clipping tiles/markers to whatever size it was at
+  // construction time - invalidateSize() tells it to re-measure.
+  resizeObserver = new ResizeObserver(() => {
+    map.invalidateSize();
+  });
+  resizeObserver.observe(mapContainer.value);
+
   await loadRegions();
   if (selectedRegionId.value) {
     await loadRange();
@@ -358,6 +370,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(liveTimer);
   clearTimeout(sliderDebounceTimer);
+  if (resizeObserver) resizeObserver.disconnect();
   if (exportResultUrl.value) URL.revokeObjectURL(exportResultUrl.value);
   if (map) map.remove();
 });
