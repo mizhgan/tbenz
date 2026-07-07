@@ -97,7 +97,10 @@ onBeforeUnmount(() => {
 <template>
   <div class="chart-box">
     <p v-if="!buckets.length" class="hint">Нет данных за выбранный период.</p>
-    <canvas v-show="buckets.length" ref="canvasRef"></canvas>
+    <p v-else-if="buckets.length === 1" class="hint">
+      За этот период есть только один опрос — слишком мало для графика. Выберите период подольше.
+    </p>
+    <canvas v-show="buckets.length > 1" ref="canvasRef"></canvas>
   </div>
 </template>
 

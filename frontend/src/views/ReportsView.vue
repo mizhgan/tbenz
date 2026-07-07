@@ -26,6 +26,15 @@ const forecastDirection = ref('unknown');
 const stations = ref([]);
 const brands = ref([]);
 const heatmapCells = ref([]);
+const stationsSort = ref('best');
+
+const sectionErrors = ref({
+  trend: '',
+  forecast: '',
+  stations: '',
+  brands: '',
+  heatmap: '',
+});
 
 const DIRECTION_META = {
   improving: { label: 'Улучшается', icon: '📈', color: '#16a34a' },
@@ -44,14 +53,20 @@ const fromInput = computed({
   get: () => msToLocalInputValue(fromMs.value),
   set: (v) => {
     const parsed = new Date(v).getTime();
-    if (Number.isFinite(parsed)) fromMs.value = parsed;
+    if (Number.isFinite(parsed)) {
+      fromMs.value = parsed;
+      loadMetrics();
+    }
   },
 });
 const toInput = computed({
   get: () => msToLocalInputValue(toMs.value),
   set: (v) => {
     const parsed = new Date(v).getTime();
-    if (Number.isFinite(parsed)) toMs.value = parsed;
+    if (Number.isFinite(parsed)) {
+      toMs.value = parsed;
+      loadMetrics();
+    }
   },
 });
 
@@ -95,48 +110,96 @@ const summary = computed(() => {
   };
 });
 
-const worstStations = computed(() =>
-  [...stations.value]
+const highlightedStations = computed(() => {
+  const dir = stationsSort.value === 'best' ? -1 : 1;
+  return [...stations.value]
     .filter((s) => s.availablePct !== null)
-    .sort((a, b) => a.availablePct - b.availablePct)
-    .slice(0, 5)
-);
+    .sort((a, b) => dir * (a.availablePct - b.availablePct))
+    .slice(0, 5);
+});
 
 async function loadRegions() {
-  regions.value = await regionsApi.list();
-  if (!selectedRegionId.value && regions.value.length) {
-    selectedRegionId.value = regions.value[0]._id;
+  try {
+    regions.value = await regionsApi.list();
+    if (!selectedRegionId.value && regions.value.length) {
+      selectedRegionId.value = regions.value[0]._id;
+    }
+  } catch (err) {
+    errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список районов';
   }
 }
 
+function describeFailure(result) {
+  return result.reason?.response?.data?.error || result.reason?.message || 'Не удалось загрузить';
+}
+
+// Each metric endpoint is independent - one failing (or returning slowly)
+// must not blank out the others. Promise.all would reject as a whole and
+// silently leave every section showing stale data from the previous period
+// with no indication anything went wrong; Promise.allSettled lets each
+// section update (or report its own error) on its own.
 async function loadMetrics() {
   if (!selectedRegionId.value) return;
   loading.value = true;
   errorMessage.value = '';
-  try {
-    const from = new Date(fromMs.value).toISOString();
-    const to = new Date(toMs.value).toISOString();
-    const bucketHours = pickBucketHours(toMs.value - fromMs.value);
 
-    const [trendRes, forecastRes, stationsRes, brandsRes, heatmapRes] = await Promise.all([
-      metricsApi.trend(selectedRegionId.value, { from, to, bucketHours }),
-      metricsApi.trendForecast(selectedRegionId.value, { from, to, bucketHours }),
-      metricsApi.stations(selectedRegionId.value, { from, to }),
-      metricsApi.brands(selectedRegionId.value, { from, to }),
-      metricsApi.heatmap(selectedRegionId.value, { from, to }),
+  const regionId = selectedRegionId.value;
+  const from = new Date(fromMs.value).toISOString();
+  const to = new Date(toMs.value).toISOString();
+  const bucketHours = pickBucketHours(toMs.value - fromMs.value);
+
+  const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult] =
+    await Promise.allSettled([
+      metricsApi.trend(regionId, { from, to, bucketHours }),
+      metricsApi.trendForecast(regionId, { from, to, bucketHours }),
+      metricsApi.stations(regionId, { from, to }),
+      metricsApi.brands(regionId, { from, to }),
+      metricsApi.heatmap(regionId, { from, to }),
     ]);
 
-    trendBuckets.value = trendRes.buckets;
-    forecastBuckets.value = forecastRes.forecast;
-    forecastDirection.value = forecastRes.direction;
-    stations.value = stationsRes.stations;
-    brands.value = brandsRes.brands;
-    heatmapCells.value = heatmapRes.cells;
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось загрузить отчёт';
-  } finally {
-    loading.value = false;
+  if (trendResult.status === 'fulfilled') {
+    trendBuckets.value = trendResult.value.buckets;
+    sectionErrors.value.trend = '';
+  } else {
+    trendBuckets.value = [];
+    sectionErrors.value.trend = describeFailure(trendResult);
   }
+
+  if (forecastResult.status === 'fulfilled') {
+    forecastBuckets.value = forecastResult.value.forecast;
+    forecastDirection.value = forecastResult.value.direction;
+    sectionErrors.value.forecast = '';
+  } else {
+    forecastBuckets.value = [];
+    forecastDirection.value = 'unknown';
+    sectionErrors.value.forecast = describeFailure(forecastResult);
+  }
+
+  if (stationsResult.status === 'fulfilled') {
+    stations.value = stationsResult.value.stations;
+    sectionErrors.value.stations = '';
+  } else {
+    stations.value = [];
+    sectionErrors.value.stations = describeFailure(stationsResult);
+  }
+
+  if (brandsResult.status === 'fulfilled') {
+    brands.value = brandsResult.value.brands;
+    sectionErrors.value.brands = '';
+  } else {
+    brands.value = [];
+    sectionErrors.value.brands = describeFailure(brandsResult);
+  }
+
+  if (heatmapResult.status === 'fulfilled') {
+    heatmapCells.value = heatmapResult.value.cells;
+    sectionErrors.value.heatmap = '';
+  } else {
+    heatmapCells.value = [];
+    sectionErrors.value.heatmap = describeFailure(heatmapResult);
+  }
+
+  loading.value = false;
 }
 
 async function handleRegionChange() {
@@ -211,6 +274,9 @@ onMounted(async () => {
           {{ DIRECTION_META[forecastDirection].icon }} {{ DIRECTION_META[forecastDirection].label }}
         </span>
       </div>
+      <p v-if="sectionErrors.trend || sectionErrors.forecast" class="error-text">
+        {{ sectionErrors.trend || sectionErrors.forecast }}
+      </p>
       <TrendChart :buckets="trendBuckets" :forecast-buckets="forecastBuckets" />
       <p class="hint small">
         Пунктир — простая линейная экстраполяция последних данных, а не точный прогноз: это
@@ -220,22 +286,47 @@ onMounted(async () => {
 
     <div class="two-col">
       <div class="card section">
-        <h2>Худшие станции</h2>
-        <StationsTable :stations="worstStations" />
+        <div class="section-header">
+          <h2>{{ stationsSort === 'best' ? 'Лучшие станции' : 'Худшие станции' }}</h2>
+          <div class="sort-toggle">
+            <button
+              class="btn secondary"
+              :class="{ active: stationsSort === 'best' }"
+              @click="stationsSort = 'best'"
+            >
+              Лучшие
+            </button>
+            <button
+              class="btn secondary"
+              :class="{ active: stationsSort === 'worst' }"
+              @click="stationsSort = 'worst'"
+            >
+              Худшие
+            </button>
+          </div>
+        </div>
+        <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
+        <StationsTable
+          :stations="highlightedStations"
+          :default-sort-dir="stationsSort === 'best' ? 'desc' : 'asc'"
+        />
       </div>
       <div class="card section">
         <h2>Сравнение по сетям</h2>
+        <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
         <BrandsChart :brands="brands" />
       </div>
     </div>
 
     <div class="card section">
       <h2>Доступность по дню недели и часу</h2>
+      <p v-if="sectionErrors.heatmap" class="error-text">{{ sectionErrors.heatmap }}</p>
       <AvailabilityHeatmap :cells="heatmapCells" />
     </div>
 
     <div class="card section">
       <h2>Все станции</h2>
+      <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
       <StationsTable :stations="stations" />
     </div>
   </div>
@@ -313,6 +404,16 @@ onMounted(async () => {
 .direction-badge {
   font-size: 14px;
   font-weight: 600;
+}
+
+.sort-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.sort-toggle .btn.active {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .hint.small {

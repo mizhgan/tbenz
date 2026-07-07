@@ -1,13 +1,26 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { availabilityColor, formatMinutes, formatPct } from '../utils/colorScale';
 
 const props = defineProps({
   stations: { type: Array, default: () => [] },
+  defaultSortKey: { type: String, default: 'availablePct' },
+  defaultSortDir: { type: String, default: 'asc' },
 });
 
-const sortKey = ref('availablePct');
-const sortDir = ref('asc');
+const sortKey = ref(props.defaultSortKey);
+const sortDir = ref(props.defaultSortDir);
+
+// A parent toggling e.g. "best" vs "worst" changes what default order makes
+// sense - follow it, since otherwise the table would keep showing whatever
+// order was picked before the toggle, silently ignoring it.
+watch(
+  () => [props.defaultSortKey, props.defaultSortDir],
+  ([key, dir]) => {
+    sortKey.value = key;
+    sortDir.value = dir;
+  }
+);
 
 const COLUMNS = [
   { key: 'name', label: 'Станция' },
