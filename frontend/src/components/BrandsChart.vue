@@ -10,7 +10,10 @@ const props = defineProps({
 const canvasRef = ref(null);
 let chart = null;
 
-const boxHeight = computed(() => `${Math.min(400, Math.max(120, props.brands.length * 32))}px`);
+// Uncapped on purpose - each row needs enough height for its label to stay
+// readable, otherwise Chart.js's tick autoSkip starts hiding every other
+// network name. The outer .chart-box scrolls instead of capping this.
+const boxHeight = computed(() => `${Math.max(120, props.brands.length * 28)}px`);
 
 async function renderChart() {
   // Never construct Chart.js while the canvas is hidden: Chart.js snapshots
@@ -63,6 +66,10 @@ async function renderChart() {
       plugins: { legend: { display: false } },
       scales: {
         x: { min: 0, max: 100, ticks: { callback: (v) => `${v}%` } },
+        // Autoskip would otherwise hide every other network name once
+        // there are more than a handful of rows - we'd rather scroll the
+        // container (see .chart-box) than lose labels.
+        y: { ticks: { autoSkip: false } },
       },
     },
   });
@@ -76,9 +83,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="chart-box" :style="{ height: boxHeight }">
+  <div class="chart-box">
     <p v-if="!brands.length" class="hint">Нет данных за выбранный период.</p>
-    <div v-show="brands.length" class="canvas-wrap">
+    <div v-show="brands.length" class="canvas-wrap" :style="{ height: boxHeight }">
       <canvas ref="canvasRef"></canvas>
     </div>
   </div>
@@ -87,10 +94,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .chart-box {
   position: relative;
+  max-height: 480px;
+  overflow-y: auto;
 }
 
 .canvas-wrap {
   position: relative;
-  height: 100%;
 }
 </style>
