@@ -66,6 +66,7 @@ function handleGenerate() {
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="modal-backdrop" @click.self="!generating && emit('close')">
     <div class="card modal-card">
       <h2>Экспорт GIF-анимации</h2>
@@ -136,9 +137,13 @@ function handleGenerate() {
       </template>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
+/* Leaflet's own panes/controls use z-index up to 1000 and aren't contained
+   in a stacking context, so they'd otherwise render above a lower z-index
+   fixed overlay like this one - keep this comfortably above that. */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -148,7 +153,7 @@ function handleGenerate() {
   justify-content: center;
   padding: 40px 16px;
   overflow-y: auto;
-  z-index: 100;
+  z-index: 2000;
 }
 
 .modal-card {
