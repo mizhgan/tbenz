@@ -85,6 +85,7 @@ function setAllBrands(visible) {
 // up rendered behind the map instead of above it - the same class of issue
 // already worked around for RegionForm/UserForm/ProxyForm via Teleport.
 const brandButtonRef = ref(null);
+const brandPanelRef = ref(null);
 const brandPanelOpen = ref(false);
 const brandPanelPos = reactive({ top: 0, left: 0 });
 
@@ -106,6 +107,14 @@ function toggleBrandPanel() {
 
 function closeBrandPanel() {
   brandPanelOpen.value = false;
+}
+
+// Scroll events don't bubble, but a capturing listener on window still sees
+// them - including scrolling the panel's own internal checkbox list, which
+// should NOT close the panel. Only close for scrolls happening outside it.
+function handleWindowScroll(event) {
+  if (brandPanelRef.value && brandPanelRef.value.contains(event.target)) return;
+  closeBrandPanel();
 }
 
 const showExportPanel = ref(false);
@@ -429,7 +438,7 @@ onMounted(async () => {
 
   // Close the teleported brand dropdown rather than let it drift out of
   // place if the page scrolls or the window resizes while it's open.
-  window.addEventListener('scroll', closeBrandPanel, true);
+  window.addEventListener('scroll', handleWindowScroll, true);
   window.addEventListener('resize', closeBrandPanel);
 
   await loadRegions();
@@ -446,7 +455,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', closeBrandPanel, true);
+  window.removeEventListener('scroll', handleWindowScroll, true);
   window.removeEventListener('resize', closeBrandPanel);
   clearInterval(liveTimer);
   clearTimeout(sliderDebounceTimer);
@@ -519,6 +528,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div v-if="brandPanelOpen" class="brand-filter-overlay" @click.self="closeBrandPanel">
         <div
+          ref="brandPanelRef"
           class="brand-filter-panel card"
           :style="{ top: `${brandPanelPos.top}px`, left: `${brandPanelPos.left}px` }"
         >
