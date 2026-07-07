@@ -16,6 +16,12 @@ const proxySchema = new Schema(
     // (active set to false) so the scheduler stops picking it.
     consecutiveFailures: { type: Number, default: 0 },
     disabledReason: { type: String, default: null },
+    // Lifetime counters across all actual data-fetch requests routed through
+    // this proxy (not reset on success, unlike consecutiveFailures above;
+    // manual "Проверить" checks don't count towards these).
+    totalRequests: { type: Number, default: 0 },
+    successCount: { type: Number, default: 0 },
+    failureCount: { type: Number, default: 0 },
     lastUsedAt: { type: Date, default: null },
     lastSuccessAt: { type: Date, default: null },
     lastErrorAt: { type: Date, default: null },

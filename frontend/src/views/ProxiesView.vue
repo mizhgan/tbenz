@@ -121,6 +121,7 @@ onMounted(loadProxies);
             <th>Прокси</th>
             <th>Тип</th>
             <th>Статус</th>
+            <th>Запросов</th>
             <th>Ошибок подряд</th>
             <th>Последняя проверка</th>
             <th></th>
@@ -136,6 +137,12 @@ onMounted(loadProxies);
               </span>
               <div v-if="!p.active && p.disabledReason" class="sub-note">{{ p.disabledReason }}</div>
               <div v-if="p.lastError" class="sub-note">{{ p.lastError }}</div>
+            </td>
+            <td>
+              {{ p.totalRequests }}
+              <div v-if="p.totalRequests" class="sub-note">
+                {{ p.successCount }} успешно / {{ p.failureCount }} ошибок
+              </div>
             </td>
             <td>{{ p.consecutiveFailures }}</td>
             <td>

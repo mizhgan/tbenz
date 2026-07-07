@@ -36,6 +36,7 @@ async function recordSuccess(proxyId) {
       lastSuccessAt: new Date(),
       lastError: null,
     },
+    $inc: { totalRequests: 1, successCount: 1 },
   });
 }
 
@@ -44,6 +45,8 @@ async function recordFailure(proxyId, err) {
   if (!proxy) return;
 
   proxy.consecutiveFailures += 1;
+  proxy.totalRequests += 1;
+  proxy.failureCount += 1;
   proxy.lastUsedAt = new Date();
   proxy.lastErrorAt = new Date();
   proxy.lastError = err?.message || String(err);
