@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
 import StationHistoryChart from '../components/StationHistoryChart.vue';
+import StationForecast from '../components/StationForecast.vue';
 import ExportPanel from '../components/ExportPanel.vue';
 import { statusMeta } from '../utils/fuelStatus';
 import {
@@ -437,6 +438,8 @@ onBeforeUnmount(() => {
             {{ selectedStation.lastTransactionAt ? formatDateTime(new Date(selectedStation.lastTransactionAt).getTime()) : 'нет данных' }}
           </p>
           <p class="hint">Снимок на момент: {{ formatDateTime(new Date(selectedStation.polledAt).getTime()) }}</p>
+          <h4>Прогноз на ближайшие часы</h4>
+          <StationForecast :station-id="selectedStation.stationId" />
           <h4>История по видам топлива</h4>
           <StationHistoryChart :station-id="selectedStation.stationId" />
         </div>

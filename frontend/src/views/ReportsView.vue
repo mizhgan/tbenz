@@ -21,9 +21,18 @@ const fromMs = ref(now - 7 * 24 * 60 * 60 * 1000);
 const toMs = ref(now);
 
 const trendBuckets = ref([]);
+const forecastBuckets = ref([]);
+const forecastDirection = ref('unknown');
 const stations = ref([]);
 const brands = ref([]);
 const heatmapCells = ref([]);
+
+const DIRECTION_META = {
+  improving: { label: 'Улучшается', icon: '📈', color: '#16a34a' },
+  worsening: { label: 'Ухудшается', icon: '📉', color: '#dc2626' },
+  stable: { label: 'Стабильно', icon: '➖', color: '#6b7280' },
+  unknown: { label: 'Недостаточно данных', icon: '❔', color: '#6b7280' },
+};
 
 function msToLocalInputValue(ms) {
   const d = new Date(ms);
@@ -109,14 +118,17 @@ async function loadMetrics() {
     const to = new Date(toMs.value).toISOString();
     const bucketHours = pickBucketHours(toMs.value - fromMs.value);
 
-    const [trendRes, stationsRes, brandsRes, heatmapRes] = await Promise.all([
+    const [trendRes, forecastRes, stationsRes, brandsRes, heatmapRes] = await Promise.all([
       metricsApi.trend(selectedRegionId.value, { from, to, bucketHours }),
+      metricsApi.trendForecast(selectedRegionId.value, { from, to, bucketHours }),
       metricsApi.stations(selectedRegionId.value, { from, to }),
       metricsApi.brands(selectedRegionId.value, { from, to }),
       metricsApi.heatmap(selectedRegionId.value, { from, to }),
     ]);
 
     trendBuckets.value = trendRes.buckets;
+    forecastBuckets.value = forecastRes.forecast;
+    forecastDirection.value = forecastRes.direction;
     stations.value = stationsRes.stations;
     brands.value = brandsRes.brands;
     heatmapCells.value = heatmapRes.cells;
@@ -193,8 +205,17 @@ onMounted(async () => {
     </div>
 
     <div class="card section">
-      <h2>Динамика доступности</h2>
-      <TrendChart :buckets="trendBuckets" />
+      <div class="section-header">
+        <h2>Динамика доступности</h2>
+        <span class="direction-badge" :style="{ color: DIRECTION_META[forecastDirection].color }">
+          {{ DIRECTION_META[forecastDirection].icon }} {{ DIRECTION_META[forecastDirection].label }}
+        </span>
+      </div>
+      <TrendChart :buckets="trendBuckets" :forecast-buckets="forecastBuckets" />
+      <p class="hint small">
+        Пунктир — простая линейная экстраполяция последних данных, а не точный прогноз: это
+        грубая оценка направления тренда, без учёта сезонности.
+      </p>
     </div>
 
     <div class="two-col">
@@ -275,6 +296,27 @@ onMounted(async () => {
 .section h2 {
   font-size: 16px;
   margin-top: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.direction-badge {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hint.small {
+  font-size: 12px;
 }
 
 .two-col {

@@ -15,6 +15,7 @@ const {
   getStations,
   getBrands,
   getHeatmap,
+  getTrendForecast,
 } = require('../controllers/metrics.controller');
 const { requireAuth } = require('../middleware/auth.middleware');
 
@@ -34,5 +35,6 @@ router.get('/:id/metrics/trend', getTrend);
 router.get('/:id/metrics/stations', getStations);
 router.get('/:id/metrics/brands', getBrands);
 router.get('/:id/metrics/heatmap', getHeatmap);
+router.get('/:id/metrics/trend-forecast', getTrendForecast);
 
 module.exports = router;

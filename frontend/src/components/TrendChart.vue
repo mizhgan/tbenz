@@ -4,17 +4,27 @@ import Chart from 'chart.js/auto';
 
 const props = defineProps({
   buckets: { type: Array, default: () => [] },
+  forecastBuckets: { type: Array, default: () => [] },
 });
 
 const canvasRef = ref(null);
 let chart = null;
 
 function renderChart() {
-  const labels = props.buckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU'));
+  const histLen = props.buckets.length;
+  const forecastLen = props.forecastBuckets.length;
+
+  const labels = [
+    ...props.buckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU')),
+    ...props.forecastBuckets.map((b) => `${new Date(b.bucketStart).toLocaleString('ru-RU')} (прогноз)`),
+  ];
+
+  const pad = (values) => [...values, ...new Array(forecastLen).fill(null)];
+
   const datasets = [
     {
       label: 'Доступно',
-      data: props.buckets.map((b) => b.availablePct),
+      data: pad(props.buckets.map((b) => b.availablePct)),
       borderColor: '#16a34a',
       backgroundColor: 'rgba(22, 163, 74, 0.35)',
       fill: true,
@@ -24,7 +34,7 @@ function renderChart() {
     },
     {
       label: 'Возможно доступно',
-      data: props.buckets.map((b) => b.maybeAvailablePct),
+      data: pad(props.buckets.map((b) => b.maybeAvailablePct)),
       borderColor: '#d97706',
       backgroundColor: 'rgba(217, 119, 6, 0.3)',
       fill: true,
@@ -34,7 +44,7 @@ function renderChart() {
     },
     {
       label: 'Недоступно',
-      data: props.buckets.map((b) => b.notAvailablePct),
+      data: pad(props.buckets.map((b) => b.notAvailablePct)),
       borderColor: '#dc2626',
       backgroundColor: 'rgba(220, 38, 38, 0.3)',
       fill: true,
@@ -43,6 +53,24 @@ function renderChart() {
       spanGaps: true,
     },
   ];
+
+  if (forecastLen > 0) {
+    const forecastLine = new Array(histLen).fill(null);
+    if (histLen > 0) forecastLine[histLen - 1] = props.buckets[histLen - 1].availablePct;
+    forecastLine.push(...props.forecastBuckets.map((b) => b.availablePct));
+    datasets.push({
+      label: 'Прогноз доступности',
+      data: forecastLine,
+      borderColor: '#2563eb',
+      backgroundColor: 'transparent',
+      borderDash: [6, 4],
+      fill: false,
+      stack: 'forecast-line',
+      tension: 0.2,
+      spanGaps: true,
+      pointRadius: (ctx) => (ctx.dataIndex >= histLen ? 3 : 0),
+    });
+  }
 
   if (chart) chart.destroy();
   chart = new Chart(canvasRef.value, {
@@ -60,7 +88,7 @@ function renderChart() {
 }
 
 onMounted(renderChart);
-watch(() => props.buckets, renderChart, { deep: true });
+watch(() => [props.buckets, props.forecastBuckets], renderChart, { deep: true });
 onBeforeUnmount(() => {
   if (chart) chart.destroy();
 });

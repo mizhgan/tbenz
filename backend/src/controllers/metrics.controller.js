@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const { HttpError } = require('../middleware/errorHandler');
 const metricsService = require('../services/metricsService');
+const { getRegionTrendForecast } = require('../services/forecastService');
 
 const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -57,4 +58,16 @@ const getHeatmap = asyncHandler(async (req, res) => {
   res.json({ from, to, cells });
 });
 
-module.exports = { getTrend, getStations, getBrands, getHeatmap };
+const getTrendForecast = asyncHandler(async (req, res) => {
+  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const { from, to } = parseRange(req.query);
+  const bucketHours = parseBucketHours(req.query);
+  const tz = req.query.tz || undefined;
+
+  const bucketsAhead = Math.min(Math.max(Number(req.query.bucketsAhead) || 6, 1), 30);
+
+  const result = await getRegionTrendForecast(regionId, { from, to, bucketHours, bucketsAhead, tz });
+  res.json({ from, to, bucketHours, ...result });
+});
+
+module.exports = { getTrend, getStations, getBrands, getHeatmap, getTrendForecast };
