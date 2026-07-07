@@ -18,6 +18,36 @@ export function createGifEncoder({ width, height, quality = 10, workers = 2 }) {
   return new GIF({ workers, quality, width, height, workerScript: gifWorkerUrl });
 }
 
+// video/mp4 recording via MediaRecorder is only broadly supported in Safari;
+// Chrome/Firefox/Edge support video/webm. Pick whatever the browser can
+// actually produce and let the caller name the file accordingly.
+const VIDEO_MIME_CANDIDATES = [
+  'video/webm;codecs=vp9',
+  'video/webm;codecs=vp8',
+  'video/webm',
+  'video/mp4',
+];
+
+export function pickVideoMimeType() {
+  if (typeof MediaRecorder === 'undefined') return null;
+  for (const type of VIDEO_MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return null;
+}
+
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Web Share API can hand a file straight to the OS/browser share sheet
+// (Telegram included, where the OS integration supports it) - the closest
+// thing to "copy and share" that the platform actually offers, since
+// browsers do not support writing video to the clipboard at all.
+export function canShareFile(file) {
+  return typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
+}
+
 const INTERACTION_HANDLERS = [
   'dragging',
   'scrollWheelZoom',
@@ -27,7 +57,7 @@ const INTERACTION_HANDLERS = [
   'keyboard',
 ];
 
-// Freezes map pan/zoom while a GIF is being generated so that
+// Freezes map pan/zoom while an export is being generated so that
 // map.latLngToContainerPoint stays consistent with the frozen base image
 // captured at the start. Returns a function that restores the prior state.
 export function lockMapInteraction(map) {

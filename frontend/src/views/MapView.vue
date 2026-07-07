@@ -4,12 +4,19 @@ import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
 import StationHistoryChart from '../components/StationHistoryChart.vue';
-import GifExportPanel from '../components/GifExportPanel.vue';
+import ExportPanel from '../components/ExportPanel.vue';
 import { statusMeta } from '../utils/fuelStatus';
-import { captureMapBase, createGifEncoder, lockMapInteraction } from '../utils/gifExport';
+import {
+  canShareFile,
+  captureMapBase,
+  createGifEncoder,
+  lockMapInteraction,
+  pickVideoMimeType,
+  sleep,
+} from '../utils/mapExport';
 
-// leaflet-image (used for GIF export below) expects a global `L`, as most
-// pre-ES-module Leaflet plugins do.
+// leaflet-image (used for the export panel below) expects a global `L`, as
+// most pre-ES-module Leaflet plugins do.
 window.L = L;
 
 const route = useRoute();
@@ -34,12 +41,16 @@ const statusFilters = reactive({
   no_data: false,
 });
 
-const showGifPanel = ref(false);
-const gifGenerating = ref(false);
-const gifFetchProgress = ref(0);
-const gifEncodeProgress = ref(0);
-const gifResultUrl = ref(null);
-const gifError = ref('');
+const showExportPanel = ref(false);
+const exportGenerating = ref(false);
+const exportFetchProgress = ref(0);
+const exportEncodeProgress = ref(0);
+const exportResultUrl = ref(null);
+const exportResultMimeType = ref('');
+const exportError = ref('');
+const exportCanShare = ref(false);
+const videoExportSupported = ref(!!pickVideoMimeType());
+let exportResultFile = null;
 
 const mapContainer = ref(null);
 let map = null;
@@ -153,32 +164,49 @@ async function jumpToNow() {
   await loadSnapshot();
 }
 
-function openGifPanel() {
+function openExportPanel() {
   if (!hasRange.value) return;
-  gifError.value = '';
-  showGifPanel.value = true;
+  exportError.value = '';
+  showExportPanel.value = true;
 }
 
-function resetGifResult() {
-  if (gifResultUrl.value) {
-    URL.revokeObjectURL(gifResultUrl.value);
-    gifResultUrl.value = null;
+function resetExportResult() {
+  if (exportResultUrl.value) {
+    URL.revokeObjectURL(exportResultUrl.value);
+    exportResultUrl.value = null;
   }
-  gifError.value = '';
+  exportResultMimeType.value = '';
+  exportResultFile = null;
+  exportCanShare.value = false;
+  exportError.value = '';
 }
 
-function closeGifPanel() {
-  showGifPanel.value = false;
-  resetGifResult();
+function closeExportPanel() {
+  showExportPanel.value = false;
+  resetExportResult();
 }
 
-async function handleGenerateGif({ fromMs, toMs, frameCount, frameDelayMs }) {
+async function handleShareExport() {
+  if (!exportResultFile) return;
+  try {
+    await navigator.share({
+      files: [exportResultFile],
+      title: 'Статусы доступности топлива',
+    });
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      exportError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+    }
+  }
+}
+
+async function handleGenerateExport({ fromMs, toMs, frameCount, frameDelayMs, format }) {
   if (!map || !selectedRegionId.value) return;
 
-  resetGifResult();
-  gifGenerating.value = true;
-  gifFetchProgress.value = 0;
-  gifEncodeProgress.value = 0;
+  resetExportResult();
+  exportGenerating.value = true;
+  exportFetchProgress.value = 0;
+  exportEncodeProgress.value = 0;
 
   const unlock = lockMapInteraction(map);
   try {
@@ -197,11 +225,6 @@ async function handleGenerateGif({ fromMs, toMs, frameCount, frameDelayMs }) {
     frameCanvas.height = size.y;
     const ctx = frameCanvas.getContext('2d');
 
-    const encoder = createGifEncoder({ width: size.x, height: size.y });
-    encoder.on('progress', (ratio) => {
-      gifEncodeProgress.value = Math.round(ratio * 100);
-    });
-
     const timestamps =
       frameCount > 1
         ? Array.from(
@@ -210,8 +233,9 @@ async function handleGenerateGif({ fromMs, toMs, frameCount, frameDelayMs }) {
           )
         : [toMs];
 
-    for (let i = 0; i < timestamps.length; i++) {
-      const ts = timestamps[i];
+    // Fetches one moment's station snapshot and paints it (dots + timestamp
+    // label) over the frozen base map image already on `ctx`.
+    async function drawFrame(ts) {
       const data = await regionsApi.snapshotAt(selectedRegionId.value, new Date(ts).toISOString());
       const frameStations = data.stations.filter((s) => statusFilters[s.status] !== false);
 
@@ -234,21 +258,67 @@ async function handleGenerateGif({ fromMs, toMs, frameCount, frameDelayMs }) {
       ctx.fillRect(8, 8, textWidth + 16, 24);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(label, 16, 25);
-
-      encoder.addFrame(ctx, { copy: true, delay: frameDelayMs });
-      gifFetchProgress.value = Math.round(((i + 1) / timestamps.length) * 100);
     }
 
-    const blob = await new Promise((resolve, reject) => {
-      encoder.on('finished', resolve);
-      encoder.on('abort', () => reject(new Error('Генерация прервана')));
-      encoder.render();
-    });
-    gifResultUrl.value = URL.createObjectURL(blob);
+    let blob;
+    let mimeType;
+
+    if (format === 'video') {
+      mimeType = pickVideoMimeType();
+      if (!mimeType) throw new Error('Браузер не поддерживает запись видео');
+
+      const stream = frameCanvas.captureStream(0);
+      const track = stream.getVideoTracks()[0];
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      const stopped = new Promise((resolve) => {
+        recorder.onstop = resolve;
+      });
+
+      recorder.start();
+      for (let i = 0; i < timestamps.length; i++) {
+        await drawFrame(timestamps[i]);
+        track.requestFrame();
+        const progress = Math.round(((i + 1) / timestamps.length) * 100);
+        exportFetchProgress.value = progress;
+        exportEncodeProgress.value = progress;
+        await sleep(frameDelayMs);
+      }
+      recorder.stop();
+      await stopped;
+      blob = new Blob(chunks, { type: mimeType });
+    } else {
+      mimeType = 'image/gif';
+      const encoder = createGifEncoder({ width: size.x, height: size.y });
+      encoder.on('progress', (ratio) => {
+        exportEncodeProgress.value = Math.round(ratio * 100);
+      });
+
+      for (let i = 0; i < timestamps.length; i++) {
+        await drawFrame(timestamps[i]);
+        encoder.addFrame(ctx, { copy: true, delay: frameDelayMs });
+        exportFetchProgress.value = Math.round(((i + 1) / timestamps.length) * 100);
+      }
+
+      blob = await new Promise((resolve, reject) => {
+        encoder.on('finished', resolve);
+        encoder.on('abort', () => reject(new Error('Генерация прервана')));
+        encoder.render();
+      });
+    }
+
+    exportResultUrl.value = URL.createObjectURL(blob);
+    exportResultMimeType.value = mimeType;
+    const extension = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('webm') ? 'webm' : 'gif';
+    exportResultFile = new File([blob], `fuel-status.${extension}`, { type: mimeType });
+    exportCanShare.value = canShareFile(exportResultFile);
   } catch (err) {
-    gifError.value = `Не удалось создать GIF: ${err.message || 'неизвестная ошибка'}`;
+    exportError.value = `Не удалось создать экспорт: ${err.message || 'неизвестная ошибка'}`;
   } finally {
-    gifGenerating.value = false;
+    exportGenerating.value = false;
     unlock();
   }
 }
@@ -278,7 +348,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearInterval(liveTimer);
   clearTimeout(sliderDebounceTimer);
-  if (gifResultUrl.value) URL.revokeObjectURL(gifResultUrl.value);
+  if (exportResultUrl.value) URL.revokeObjectURL(exportResultUrl.value);
   if (map) map.remove();
 });
 </script>
@@ -313,7 +383,7 @@ onBeforeUnmount(() => {
         <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
           {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
         </button>
-        <button class="btn secondary" @click="openGifPanel">🎞 Создать GIF</button>
+        <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
       </template>
       <p v-else class="hint">
         Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
@@ -364,19 +434,23 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <GifExportPanel
-      v-if="showGifPanel"
-      :visible="showGifPanel"
+    <ExportPanel
+      v-if="showExportPanel"
+      :visible="showExportPanel"
       :range-from-ms="range.from"
       :range-to-ms="range.to"
-      :generating="gifGenerating"
-      :fetch-progress="gifFetchProgress"
-      :encode-progress="gifEncodeProgress"
-      :result-url="gifResultUrl"
-      :error-message="gifError"
-      @close="closeGifPanel"
-      @generate="handleGenerateGif"
-      @reset="resetGifResult"
+      :generating="exportGenerating"
+      :fetch-progress="exportFetchProgress"
+      :encode-progress="exportEncodeProgress"
+      :result-url="exportResultUrl"
+      :result-mime-type="exportResultMimeType"
+      :video-supported="videoExportSupported"
+      :can-share="exportCanShare"
+      :error-message="exportError"
+      @close="closeExportPanel"
+      @generate="handleGenerateExport"
+      @reset="resetExportResult"
+      @share="handleShareExport"
     />
   </div>
 </template>
