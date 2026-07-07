@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
@@ -7,6 +7,8 @@ import StationHistoryChart from '../components/StationHistoryChart.vue';
 import { statusMeta } from '../utils/fuelStatus';
 
 const route = useRoute();
+
+const STATUS_KEYS = ['available', 'maybe_available', 'not_available', 'no_data'];
 
 const regions = ref([]);
 const selectedRegionId = ref(route.query.region || '');
@@ -18,14 +20,26 @@ const loadingStations = ref(false);
 const errorMessage = ref('');
 const liveMode = ref(true);
 const hasFitted = ref(false);
+// Hide "no data" stations by default - by far the most common noise on the map.
+const statusFilters = reactive({
+  available: true,
+  maybe_available: true,
+  not_available: true,
+  no_data: false,
+});
 
 const mapContainer = ref(null);
 let map = null;
 let markersLayer = null;
 let liveTimer = null;
+let sliderDebounceTimer = null;
+let snapshotRequestId = 0;
 
 const hasRange = computed(() => range.value.from !== null && range.value.to !== null);
 const atLabel = computed(() => formatDateTime(atMs.value));
+const filteredStations = computed(() =>
+  stations.value.filter((s) => statusFilters[s.status] !== false)
+);
 
 function formatDateTime(ms) {
   if (!ms) return '—';
@@ -55,24 +69,27 @@ async function loadRange() {
 
 async function loadSnapshot() {
   if (!selectedRegionId.value || !hasRange.value) return;
+  const requestId = ++snapshotRequestId;
   loadingStations.value = true;
   errorMessage.value = '';
   try {
     const at = new Date(atMs.value).toISOString();
     const data = await regionsApi.snapshotAt(selectedRegionId.value, at);
+    if (requestId !== snapshotRequestId) return; // a newer request has since started
     stations.value = data.stations;
     renderMarkers();
   } catch (err) {
+    if (requestId !== snapshotRequestId) return;
     errorMessage.value = 'Не удалось загрузить данные станций';
   } finally {
-    loadingStations.value = false;
+    if (requestId === snapshotRequestId) loadingStations.value = false;
   }
 }
 
 function renderMarkers() {
   if (!map) return;
   markersLayer.clearLayers();
-  for (const s of stations.value) {
+  for (const s of filteredStations.value) {
     const meta = statusMeta(s.status);
     const marker = L.circleMarker([s.lat, s.lon], {
       radius: 7,
@@ -94,6 +111,10 @@ function renderMarkers() {
   }
 }
 
+function handleFilterChange() {
+  renderMarkers();
+}
+
 async function handleRegionChange() {
   selectedStation.value = null;
   hasFitted.value = false;
@@ -101,7 +122,14 @@ async function handleRegionChange() {
   await loadSnapshot();
 }
 
+function handleSliderInput() {
+  liveMode.value = atMs.value >= range.value.to;
+  clearTimeout(sliderDebounceTimer);
+  sliderDebounceTimer = setTimeout(loadSnapshot, 120);
+}
+
 async function handleSliderChange() {
+  clearTimeout(sliderDebounceTimer);
   liveMode.value = atMs.value >= range.value.to;
   await loadSnapshot();
 }
@@ -135,6 +163,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearInterval(liveTimer);
+  clearTimeout(sliderDebounceTimer);
   if (map) map.remove();
 });
 </script>
@@ -158,6 +187,7 @@ onBeforeUnmount(() => {
             :max="range.to"
             step="60000"
             v-model.number="atMs"
+            @input="handleSliderInput"
             @change="handleSliderChange"
           />
           <div class="slider-labels">
@@ -172,6 +202,15 @@ onBeforeUnmount(() => {
       <p v-else class="hint">
         Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
       </p>
+
+      <div v-if="hasRange" class="filter-block">
+        <span class="filter-label">Показывать:</span>
+        <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
+          <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
+          <span class="dot" :style="{ background: statusMeta(key).color }"></span>
+          {{ statusMeta(key).label }}
+        </label>
+      </div>
     </div>
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
@@ -182,13 +221,7 @@ onBeforeUnmount(() => {
       <div class="sidebar card">
         <div v-if="!selectedStation">
           <p class="hint">Кликните по станции на карте, чтобы увидеть детали и историю.</p>
-          <p class="hint">Всего станций на выбранный момент: {{ stations.length }}</p>
-          <div class="legend">
-            <div v-for="key in ['available', 'maybe_available', 'not_available', 'no_data']" :key="key" class="legend-row">
-              <span class="dot" :style="{ background: statusMeta(key).color }"></span>
-              {{ statusMeta(key).label }}
-            </div>
-          </div>
+          <p class="hint">Показано станций: {{ filteredStations.length }} из {{ stations.length }}</p>
         </div>
         <div v-else>
           <h3>{{ selectedStation.name || 'АЗС' }}</h3>
@@ -294,19 +327,28 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.legend {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.legend-row {
+.filter-block {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding-top: 4px;
+  border-top: 1px solid #eee;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: #667;
+}
+
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   color: #445;
+  cursor: pointer;
 }
 
 .dot,
