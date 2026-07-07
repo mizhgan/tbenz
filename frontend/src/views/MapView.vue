@@ -10,6 +10,7 @@ import {
   canShareFile,
   captureMapBase,
   createGifEncoder,
+  downsampleEvenly,
   lockMapInteraction,
   pickVideoMimeType,
   sleep,
@@ -49,6 +50,7 @@ const exportResultUrl = ref(null);
 const exportResultMimeType = ref('');
 const exportError = ref('');
 const exportCanShare = ref(false);
+const exportFrameInfo = ref('');
 const videoExportSupported = ref(!!pickVideoMimeType());
 let exportResultFile = null;
 
@@ -178,6 +180,7 @@ function resetExportResult() {
   exportResultMimeType.value = '';
   exportResultFile = null;
   exportCanShare.value = false;
+  exportFrameInfo.value = '';
   exportError.value = '';
 }
 
@@ -200,7 +203,7 @@ async function handleShareExport() {
   }
 }
 
-async function handleGenerateExport({ fromMs, toMs, frameCount, frameDelayMs, format }) {
+async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, format }) {
   if (!map || !selectedRegionId.value) return;
 
   resetExportResult();
@@ -210,6 +213,20 @@ async function handleGenerateExport({ fromMs, toMs, frameCount, frameDelayMs, fo
 
   const unlock = lockMapInteraction(map);
   try {
+    const { times } = await regionsApi.snapshotTimes(selectedRegionId.value, {
+      from: new Date(fromMs).toISOString(),
+      to: new Date(toMs).toISOString(),
+    });
+    if (!times.length) {
+      throw new Error('В выбранном диапазоне нет сохранённых снимков');
+    }
+    const allTimestamps = times.map((t) => new Date(t).getTime()).sort((a, b) => a - b);
+    const timestamps = downsampleEvenly(allTimestamps, maxFrames);
+    exportFrameInfo.value =
+      timestamps.length < allTimestamps.length
+        ? `Найдено снимков: ${allTimestamps.length}, использовано (равномерно прорежено): ${timestamps.length}`
+        : `Использовано снимков: ${timestamps.length}`;
+
     const size = map.getSize();
 
     markersLayer.remove();
@@ -224,14 +241,6 @@ async function handleGenerateExport({ fromMs, toMs, frameCount, frameDelayMs, fo
     frameCanvas.width = size.x;
     frameCanvas.height = size.y;
     const ctx = frameCanvas.getContext('2d');
-
-    const timestamps =
-      frameCount > 1
-        ? Array.from(
-            { length: frameCount },
-            (_, i) => fromMs + (i * (toMs - fromMs)) / (frameCount - 1)
-          )
-        : [toMs];
 
     // Fetches one moment's station snapshot and paints it (dots + timestamp
     // label) over the frozen base map image already on `ctx`.
@@ -446,6 +455,7 @@ onBeforeUnmount(() => {
       :result-mime-type="exportResultMimeType"
       :video-supported="videoExportSupported"
       :can-share="exportCanShare"
+      :frame-info="exportFrameInfo"
       :error-message="exportError"
       @close="closeExportPanel"
       @generate="handleGenerateExport"

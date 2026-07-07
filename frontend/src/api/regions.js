@@ -8,6 +8,8 @@ export const regionsApi = {
   remove: (id) => http.delete(`/regions/${id}`),
   pollNow: (id) => http.post(`/regions/${id}/poll`).then((r) => r.data),
   historyRange: (id) => http.get(`/regions/${id}/history-range`).then((r) => r.data),
+  snapshotTimes: (id, { from, to } = {}) =>
+    http.get(`/regions/${id}/snapshot-times`, { params: { from, to } }).then((r) => r.data),
   snapshotAt: (id, at) =>
     http.get(`/regions/${id}/snapshot`, { params: at ? { at } : {} }).then((r) => r.data),
 };

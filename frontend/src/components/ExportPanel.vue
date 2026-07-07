@@ -12,6 +12,7 @@ const props = defineProps({
   resultMimeType: { type: String, default: '' },
   videoSupported: { type: Boolean, default: false },
   canShare: { type: Boolean, default: false },
+  frameInfo: { type: String, default: '' },
   errorMessage: { type: String, default: '' },
 });
 const emit = defineEmits(['close', 'generate', 'reset', 'share']);
@@ -19,7 +20,7 @@ const emit = defineEmits(['close', 'generate', 'reset', 'share']);
 const form = reactive({
   from: '',
   to: '',
-  frameCount: 20,
+  maxFrames: 40,
   frameDelayMs: 600,
   format: 'gif',
 });
@@ -63,9 +64,9 @@ function handleGenerate() {
     validationError.value = 'Дата начала должна быть раньше даты конца';
     return;
   }
-  const frameCount = Number(form.frameCount);
-  if (!Number.isInteger(frameCount) || frameCount < 2 || frameCount > 60) {
-    validationError.value = 'Число кадров должно быть от 2 до 60';
+  const maxFrames = Number(form.maxFrames);
+  if (!Number.isInteger(maxFrames) || maxFrames < 2 || maxFrames > 120) {
+    validationError.value = 'Максимальное число кадров должно быть от 2 до 120';
     return;
   }
   const frameDelayMs = Number(form.frameDelayMs);
@@ -73,7 +74,7 @@ function handleGenerate() {
     validationError.value = 'Задержка кадра должна быть не меньше 100 мс';
     return;
   }
-  emit('generate', { fromMs, toMs, frameCount, frameDelayMs, format: form.format });
+  emit('generate', { fromMs, toMs, maxFrames, frameDelayMs, format: form.format });
 }
 </script>
 
@@ -83,8 +84,9 @@ function handleGenerate() {
       <div class="card modal-card">
         <h2>Экспорт анимации</h2>
         <p class="hint">
-          Покажет изменение статуса доступности топлива по станциям (с учётом текущих фильтров
-          карты) за выбранный промежуток времени.
+          Один кадр — один реально сохранённый опрос района за выбранный период (с учётом текущих
+          фильтров карты). Если снимков в базе больше лимита ниже — они будут равномерно
+          прорежены, промежуточные моменты не придумываются.
         </p>
 
         <template v-if="!resultUrl">
@@ -120,12 +122,12 @@ function handleGenerate() {
               <input type="datetime-local" v-model="form.to" :disabled="generating" />
             </div>
             <div class="form-row">
-              <label>Число кадров</label>
+              <label>Макс. число кадров</label>
               <input
                 type="number"
                 min="2"
-                max="60"
-                v-model.number="form.frameCount"
+                max="120"
+                v-model.number="form.maxFrames"
                 :disabled="generating"
               />
             </div>
@@ -145,6 +147,7 @@ function handleGenerate() {
           <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
           <div v-if="generating" class="progress-block">
+            <p v-if="frameInfo" class="hint small">{{ frameInfo }}</p>
             <div class="progress-row">
               <span>Загрузка данных</span>
               <progress :value="fetchProgress" max="100"></progress>
@@ -156,8 +159,8 @@ function handleGenerate() {
               <span>{{ encodeProgress }}%</span>
             </div>
             <p v-if="form.format === 'video'" class="hint small">
-              Запись видео идёт в реальном времени, это может занять
-              {{ Math.round((form.frameCount * form.frameDelayMs) / 1000) }} сек. и дольше.
+              Запись видео идёт в реальном времени и может занять до
+              {{ Math.round((form.maxFrames * form.frameDelayMs) / 1000) }} сек.
             </p>
           </div>
 
@@ -183,6 +186,7 @@ function handleGenerate() {
           ></video>
           <img v-else :src="resultUrl" alt="Анимация статусов доступности топлива" class="result-preview" />
 
+          <p v-if="frameInfo" class="hint small">{{ frameInfo }}</p>
           <p v-if="isVideoResult" class="hint small">
             Скопировать видео напрямую в буфер обмена браузеры не позволяют — используйте
             «Поделиться» (если доступно) или скачайте файл и прикрепите его в Telegram.

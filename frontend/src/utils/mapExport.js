@@ -40,6 +40,24 @@ export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Picks at most maxCount items from a sorted array, spread evenly across its
+// indices, preserving original order. Used to cap the number of animation
+// frames while still only ever using timestamps that are real data points
+// (never interpolating between them).
+export function downsampleEvenly(items, maxCount) {
+  if (items.length <= maxCount) return items;
+  const result = [];
+  const seen = new Set();
+  for (let i = 0; i < maxCount; i++) {
+    const idx = Math.round((i * (items.length - 1)) / (maxCount - 1));
+    if (!seen.has(idx)) {
+      seen.add(idx);
+      result.push(items[idx]);
+    }
+  }
+  return result;
+}
+
 // Web Share API can hand a file straight to the OS/browser share sheet
 // (Telegram included, where the OS integration supports it) - the closest
 // thing to "copy and share" that the platform actually offers, since

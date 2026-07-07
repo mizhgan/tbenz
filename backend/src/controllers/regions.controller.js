@@ -126,6 +126,24 @@ const getHistoryRange = asyncHandler(async (req, res) => {
   res.json({ from: range?.min ?? null, to: range?.max ?? null });
 });
 
+// Distinct poll moments actually stored for this region within a range - a
+// single ingestRegion() run stamps every station's snapshot with the same
+// polledAt, so this is exactly the set of "frames" that really exist,
+// useful for building an animation from real data instead of interpolating
+// at arbitrary evenly-spaced timestamps.
+const getSnapshotTimes = asyncHandler(async (req, res) => {
+  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const match = { region: regionId };
+  if (req.query.from || req.query.to) {
+    match.polledAt = {};
+    if (req.query.from) match.polledAt.$gte = new Date(req.query.from);
+    if (req.query.to) match.polledAt.$lte = new Date(req.query.to);
+  }
+  const times = await StationSnapshot.distinct('polledAt', match);
+  times.sort((a, b) => a - b);
+  res.json({ times });
+});
+
 const getRegionSnapshot = asyncHandler(async (req, res) => {
   const regionId = new mongoose.Types.ObjectId(req.params.id);
   const at = req.query.at ? new Date(req.query.at) : new Date();
@@ -175,5 +193,6 @@ module.exports = {
   deleteRegion,
   pollRegionNow,
   getHistoryRange,
+  getSnapshotTimes,
   getRegionSnapshot,
 };
