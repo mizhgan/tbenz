@@ -6,6 +6,7 @@ import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
+import { formatPct } from '../utils/colorScale';
 import {
   canShareFile,
   captureMapBase,
@@ -66,6 +67,23 @@ function effectiveStatus(station) {
   const entry = (station.fuelStatuses || []).find((f) => f.fuelType === selectedFuelType.value);
   return entry ? entry.status : 'no_data';
 }
+
+// Current-state summary for the selected region - always over every loaded
+// station, not just the ones visible under the status/brand checkboxes
+// (those are for decluttering markers, not for changing what "the region's
+// current state" actually is). Uses the same effectiveStatus() the markers
+// are colored by, so this never disagrees with what's drawn on the map,
+// including when a specific fuel type is selected instead of overall status.
+const currentSummary = computed(() => {
+  const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
+  for (const s of stations.value) {
+    const st = effectiveStatus(s);
+    counts[st] = (counts[st] || 0) + 1;
+  }
+  const known = counts.available + counts.maybe_available + counts.not_available;
+  const availablePct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
+  return { counts, availablePct, total: stations.value.length };
+});
 
 // Keyed by brand name -> visible. Populated lazily as brands show up in
 // loaded snapshots (see ensureBrandFilterKeys) rather than rebuilt from
@@ -578,6 +596,37 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <div v-if="currentSummary.total" class="card current-state">
+      <div class="current-state-header">
+        <h2>Текущее состояние{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}</h2>
+        <span class="hint small">на {{ atLabel }}</span>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="kpi-value" :style="{ color: statusMeta('available').color }">
+            {{ formatPct(currentSummary.availablePct) }}
+          </div>
+          <div class="kpi-label">доступность сейчас</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-value">{{ currentSummary.counts.available }}</div>
+          <div class="kpi-label">доступно</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-value">{{ currentSummary.counts.maybe_available }}</div>
+          <div class="kpi-label">частично</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-value">{{ currentSummary.counts.not_available }}</div>
+          <div class="kpi-label">нет</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-value">{{ currentSummary.counts.no_data }}</div>
+          <div class="kpi-label">нет данных</div>
+        </div>
+      </div>
+    </div>
+
     <Teleport to="body">
       <div v-if="brandPanelOpen" class="brand-filter-overlay" @click.self="closeBrandPanel">
         <div
@@ -695,6 +744,20 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   border: 1px solid #ccd2d9;
   min-width: 220px;
+}
+
+.current-state-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.current-state-header h2 {
+  font-size: 15px;
+  margin: 0;
 }
 
 .slider-block {

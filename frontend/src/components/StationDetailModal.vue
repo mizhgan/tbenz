@@ -383,17 +383,6 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.card-preview {
-  max-width: 100%;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  margin-top: 8px;
-}
-
-.card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
+/* .card-preview/.card-actions moved to main.css - shared with the reports
+   page's shareable report card. */
 </style>

@@ -4,6 +4,9 @@ import { useRoute } from 'vue-router';
 import { regionsApi, stationsApi } from '../api/regions';
 import { metricsApi } from '../api/metrics';
 import { formatMinutes, formatPct } from '../utils/colorScale';
+import { renderRegionReportCard } from '../utils/regionReportCard';
+import { canCopyImageToClipboard } from '../utils/stationCard';
+import { canShareFile } from '../utils/mapExport';
 import TrendChart from '../components/TrendChart.vue';
 import BrandsChart from '../components/BrandsChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
@@ -159,6 +162,81 @@ const highlightedStations = computed(() => {
     .slice(0, 5);
 });
 
+const selectedRegion = computed(() => regions.value.find((r) => r._id === selectedRegionId.value) || null);
+
+// Shareable report card - client-side canvas, same approach and UI pattern
+// (generate -> preview -> copy/download/share) as the station card in
+// StationDetailModal.vue.
+const cardGenerating = ref(false);
+const cardUrl = ref(null);
+const cardError = ref('');
+const copyFeedback = ref('');
+const clipboardSupported = canCopyImageToClipboard();
+let cardBlob = null;
+let cardFile = null;
+const canShareCard = computed(() => !!cardFile && canShareFile(cardFile));
+
+function resetReportCard() {
+  if (cardUrl.value) {
+    URL.revokeObjectURL(cardUrl.value);
+    cardUrl.value = null;
+  }
+  cardBlob = null;
+  cardFile = null;
+  cardError.value = '';
+  copyFeedback.value = '';
+}
+
+async function generateReportCard() {
+  cardError.value = '';
+  copyFeedback.value = '';
+  cardGenerating.value = true;
+  try {
+    const blob = await renderRegionReportCard({
+      region: selectedRegion.value || { name: 'Район' },
+      from: fromMs.value,
+      to: toMs.value,
+      summary: summary.value,
+      trendBuckets: trendBuckets.value,
+      direction: forecastDirection.value,
+      topStations: highlightedStations.value.slice(0, 3),
+      stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
+    });
+    if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
+    cardBlob = blob;
+    cardUrl.value = URL.createObjectURL(blob);
+    const safeName = (selectedRegion.value?.name || 'region').replace(/[^\p{L}\p{N}]+/gu, '-');
+    cardFile = new File([blob], `${safeName}-report.png`, { type: 'image/png' });
+  } catch (err) {
+    cardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
+  } finally {
+    cardGenerating.value = false;
+  }
+}
+
+async function copyReportCardToClipboard() {
+  if (!cardBlob) return;
+  copyFeedback.value = '';
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]);
+    copyFeedback.value = 'ok';
+  } catch (err) {
+    copyFeedback.value = 'error';
+    cardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
+  }
+}
+
+async function shareReportCard() {
+  if (!cardFile) return;
+  try {
+    await navigator.share({ files: [cardFile], title: `Отчёт: ${selectedRegion.value?.name || 'Район'}` });
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      cardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+    }
+  }
+}
+
 async function loadRegions() {
   try {
     regions.value = await regionsApi.list();
@@ -183,6 +261,9 @@ async function loadMetrics() {
   if (!selectedRegionId.value) return;
   loading.value = true;
   errorMessage.value = '';
+  // A stale preview from a previous region/period would be misleading once
+  // the underlying data has moved on.
+  resetReportCard();
 
   const regionId = selectedRegionId.value;
   const from = new Date(fromMs.value).toISOString();
@@ -310,6 +391,43 @@ onMounted(async () => {
     </div>
 
     <div class="card section">
+      <h2>Картинка отчёта для шаринга</h2>
+      <p class="hint">
+        Собирает KPI, график динамики и топ-3 станции текущей вкладки (лучшие/худшие) в одну
+        картинку — удобно переслать в чат вместо ссылки на отчёт.
+      </p>
+
+      <template v-if="!cardUrl">
+        <button type="button" class="btn secondary" :disabled="cardGenerating" @click="generateReportCard">
+          {{ cardGenerating ? 'Генерация...' : '🖼 Сгенерировать картинку' }}
+        </button>
+      </template>
+      <template v-else>
+        <img :src="cardUrl" alt="Картинка отчёта" class="card-preview" />
+        <div class="card-actions">
+          <button type="button" class="btn secondary" @click="resetReportCard">Сгенерировать заново</button>
+          <button
+            v-if="clipboardSupported"
+            type="button"
+            class="btn secondary"
+            @click="copyReportCardToClipboard"
+          >
+            {{ copyFeedback === 'ok' ? 'Скопировано ✓' : 'Скопировать в буфер' }}
+          </button>
+          <button v-if="canShareCard" type="button" class="btn secondary" @click="shareReportCard">
+            Поделиться
+          </button>
+          <a :href="cardUrl" download="report-card.png" class="btn">Скачать</a>
+        </div>
+        <p v-if="!clipboardSupported" class="hint small">
+          Этот браузер не поддерживает копирование картинки в буфер обмена — скачайте файл или
+          воспользуйтесь «Поделиться».
+        </p>
+      </template>
+      <p v-if="cardError" class="error-text">{{ cardError }}</p>
+    </div>
+
+    <div class="card section">
       <div class="section-header">
         <h2>Динамика доступности</h2>
         <span class="direction-badge" :style="{ color: DIRECTION_META[forecastDirection].color }">
@@ -418,26 +536,8 @@ onMounted(async () => {
   gap: 6px;
 }
 
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-}
-
-.kpi {
-  text-align: center;
-}
-
-.kpi-value {
-  font-size: 28px;
-  font-weight: 700;
-}
-
-.kpi-label {
-  font-size: 13px;
-  color: #667;
-  margin-top: 4px;
-}
+/* .kpi-grid/.kpi/.kpi-value/.kpi-label moved to main.css - shared with the
+   map page's current-state summary. */
 
 .section h2 {
   font-size: 16px;
