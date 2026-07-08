@@ -139,7 +139,7 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
       ${statChip(PAD + 320, 200, COLOR_MUTED, counts.no_data, 'нет данных')}
 
       ${sparkline}
-      <text x="${WIDTH - PAD}" y="${HEIGHT - 10}" font-family="${FONT}" font-size="11" fill="${COLOR_MUTED}" text-anchor="end">Топливо · toplivo.tbank.ru</text>
+      <text x="${WIDTH - PAD}" y="${HEIGHT - 10}" font-family="${FONT}" font-size="11" fill="${COLOR_MUTED}" text-anchor="end">tbenz.in</text>
     </svg>
   `;
 

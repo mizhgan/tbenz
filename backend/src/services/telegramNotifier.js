@@ -154,35 +154,46 @@ function formatPeriodLabel(period, from, to) {
   return `${title} · ${range}`;
 }
 
-function formatDuration(ms) {
-  const totalMinutes = Math.max(1, Math.round(ms / 60000));
-  if (totalMinutes < 60) return `${totalMinutes} мин`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes > 0 ? `${hours} ч ${minutes} мин` : `${hours} ч`;
-}
-
 // The image already carries the headline number (current %), status
 // breakdown and trend - this text complements it with what doesn't fit
-// cleanly into a compact card: exact outage count and which stations are
-// the actual problem right now.
+// cleanly into a compact card: exact outage count and the most reliable
+// stations in the period (with address), rather than dwelling on what's
+// currently broken.
 function formatRegionDigestText(data) {
   const lines = [`<b>${escapeHtml(data.region.name)}</b>`, `Отключений за период: ${data.totalOutages}`];
-  if (data.problemStations.length) {
-    lines.push('Проблемные станции:');
-    data.problemStations.forEach(({ station, downSinceMs }, i) => {
-      lines.push(`${i + 1}. ${escapeHtml(station.name || 'АЗС')} — недоступна ${formatDuration(downSinceMs)}`);
+  if (data.topAvailableStations.length) {
+    lines.push('Самые доступные станции:');
+    data.topAvailableStations.forEach(({ name, address, availablePct }, i) => {
+      const addressPart = address ? `, ${escapeHtml(address)}` : '';
+      lines.push(`${i + 1}. ${escapeHtml(name || 'АЗС')}${addressPart} — ${availablePct.toFixed(0)}%`);
     });
   }
   return lines.join('\n');
 }
 
+// Telegram photo/media-group captions are capped at 1024 chars (much
+// shorter than a plain message's 4096) - built by appending whole region
+// sections only, never mid-section, so a chat following many regions just
+// loses the tail end of sections rather than risking a truncation that
+// cuts an HTML tag in half (which would make Telegram reject the send).
+const MAX_CAPTION_LEN = 1024;
+function buildCaption(title, sections) {
+  let caption = title;
+  for (const section of sections) {
+    const candidate = `${caption}\n\n${section}`;
+    if (candidate.length > MAX_CAPTION_LEN) break;
+    caption = candidate;
+  }
+  return caption;
+}
+
 /**
- * Builds and sends one digest "package" per chat: an image card per
- * followed region (sent together as one album, or a single photo if the
- * chat only follows one region - Telegram albums require at least 2 items),
- * followed by one text message with the per-region details that don't fit
- * on the card (exact outage count, named problem stations).
+ * Builds and sends one digest post per chat: an image card per followed
+ * region (as an album, or a single photo if the chat only follows one
+ * region - Telegram albums require at least 2 items) with the per-region
+ * text (exact outage count, most reliable stations) as the caption on the
+ * first photo, so the whole thing lands as one post rather than an image
+ * followed by a separate message.
  */
 async function sendDigest(period) {
   if (!telegramBot.isEnabled()) return;
@@ -218,11 +229,11 @@ async function sendDigest(period) {
       const images = await Promise.all(
         regionDigests.map((data) => telegramDigestImage.renderRegionDigestCard(data, { periodLabel, comparisonLabel }))
       );
-      await telegramBot.sendPhotoAlbum(chat, images.map((buffer) => ({ buffer })));
-
       const title = period === 'daily' ? '🗓 Дневная сводка' : '🕐 Часовая сводка';
-      const text = [title, ...regionDigests.map(formatRegionDigestText)].join('\n\n');
-      await telegramBot.sendMessage(chat, text);
+      const caption = buildCaption(title, regionDigests.map(formatRegionDigestText));
+
+      const items = images.map((buffer, i) => (i === 0 ? { buffer, caption } : { buffer }));
+      await telegramBot.sendPhotoAlbum(chat, items);
 
       chat[lastFieldKey] = to;
       await chat.save();
