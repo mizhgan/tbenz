@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import L from 'leaflet';
 import { metricsApi } from '../api/metrics';
+import { stationsApi } from '../api/regions';
 import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
@@ -71,7 +72,23 @@ async function generateCard() {
   copyFeedback.value = '';
   cardGenerating.value = true;
   try {
-    const blob = await renderStationCard({ station: props.station, reliability: reliability.value });
+    // Forecast/history are "nice to have" on the card, not essential - a
+    // failure on either just means that section is omitted, not that the
+    // whole card generation fails (same reasoning as the reports page's
+    // per-section error handling).
+    const [forecastResult, historyResult] = await Promise.allSettled([
+      stationsApi.forecast(props.station.stationId, { hoursAhead: 12 }),
+      stationsApi.history(props.station.stationId, { limit: 200 }),
+    ]);
+    const forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
+    const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
+
+    const blob = await renderStationCard({
+      station: props.station,
+      reliability: reliability.value,
+      forecast,
+      history,
+    });
     if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
     cardBlob = blob;
     cardUrl.value = URL.createObjectURL(blob);
