@@ -108,11 +108,16 @@ const brandPanelRef = ref(null);
 const brandPanelOpen = ref(false);
 const brandPanelPos = reactive({ top: 0, left: 0 });
 
+const BRAND_PANEL_WIDTH = 260;
+
 function updateBrandPanelPos() {
   if (!brandButtonRef.value) return;
   const rect = brandButtonRef.value.getBoundingClientRect();
   brandPanelPos.top = rect.bottom + 6;
-  brandPanelPos.left = rect.left;
+  // Clamp so the panel stays fully on-screen even when the toggle button
+  // sits near the right edge of a narrow (phone-width) viewport.
+  const maxLeft = window.innerWidth - BRAND_PANEL_WIDTH - 16;
+  brandPanelPos.left = Math.max(16, Math.min(rect.left, maxLeft));
 }
 
 function toggleBrandPanel() {
@@ -724,6 +729,7 @@ onBeforeUnmount(() => {
 
 .leaflet-map {
   flex: 1;
+  min-width: 0;
   min-height: 560px;
   border-radius: 10px;
   overflow: hidden;
@@ -732,6 +738,26 @@ onBeforeUnmount(() => {
 .sidebar {
   width: 340px;
   flex-shrink: 0;
+}
+
+/* Below this, a fixed 340px sidebar plus the map's own flex-shrink minimum
+   no longer both fit side by side - the map (flex: 1, allowed to shrink)
+   loses that fight against the sidebar (flex-shrink: 0, never shrinks) and
+   collapses to 0 width instead of just looking cramped. Stack them instead:
+   full-width map on top, full-width sidebar below. */
+@media (max-width: 860px) {
+  .map-body {
+    flex-direction: column;
+  }
+
+  .leaflet-map {
+    width: 100%;
+    min-height: 400px;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
 }
 
 .fuel-list {
@@ -820,6 +846,7 @@ onBeforeUnmount(() => {
 .brand-filter-panel {
   position: fixed;
   width: 260px;
+  max-width: calc(100vw - 32px);
   padding: 10px;
 }
 

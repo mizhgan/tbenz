@@ -426,6 +426,17 @@ onMounted(async () => {
   gap: 16px;
 }
 
+/* Grid items default to min-width: auto, which refuses to shrink narrower
+   than their content's intrinsic size - a station table with several
+   columns wants to be wider than a phone screen, and without this the
+   whole card (not just the table) balloons out to fit it, dragging the
+   entire page into horizontal scroll. min-width: 0 lets the grid item
+   shrink to its track's actual width, so the table's own overflow-x: auto
+   (see StationsTable.vue's .table-wrap) is what scrolls, not the page. */
+.two-col > * {
+  min-width: 0;
+}
+
 @media (max-width: 900px) {
   .two-col {
     grid-template-columns: 1fr;

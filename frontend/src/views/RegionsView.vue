@@ -101,55 +101,57 @@ onBeforeUnmount(() => {
     <div class="card">
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="!regions.length">Пока нет ни одного района. Добавьте первый.</p>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>Название</th>
-            <th>Границы (bbox)</th>
-            <th>Интервал</th>
-            <th>Статус</th>
-            <th>Последний опрос</th>
-            <th>Станций</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="region in regions" :key="region._id">
-            <td>{{ region.name }}</td>
-            <td class="mono">
-              {{ region.minLat.toFixed(4) }}, {{ region.minLon.toFixed(4) }} →
-              {{ region.maxLat.toFixed(4) }}, {{ region.maxLon.toFixed(4) }}
-            </td>
-            <td>{{ region.pollIntervalMinutes }} мин</td>
-            <td>
-              <span class="badge" :class="region.active ? 'ok' : 'never'">
-                {{ region.active ? 'активен' : 'выключен' }}
-              </span>
-              <span
-                v-if="region.lastPollStatus !== 'never'"
-                class="badge"
-                :class="region.lastPollStatus"
-              >
-                {{ region.lastPollStatus === 'ok' ? 'ok' : 'ошибка' }}
-              </span>
-            </td>
-            <td>{{ formatDate(region.lastPolledAt) }}</td>
-            <td>{{ region.lastPollStationCount }}</td>
-            <td class="actions">
-              <button class="btn secondary" @click="viewOnMap(region)">Карта</button>
-              <button
-                class="btn secondary"
-                :disabled="pollingIds.has(region._id)"
-                @click="handlePollNow(region)"
-              >
-                {{ pollingIds.has(region._id) ? 'Опрос...' : 'Опросить сейчас' }}
-              </button>
-              <button class="btn secondary" @click="openEditForm(region)">Изменить</button>
-              <button class="btn danger" @click="handleDelete(region)">Удалить</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Границы (bbox)</th>
+              <th>Интервал</th>
+              <th>Статус</th>
+              <th>Последний опрос</th>
+              <th>Станций</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="region in regions" :key="region._id">
+              <td>{{ region.name }}</td>
+              <td class="mono">
+                {{ region.minLat.toFixed(4) }}, {{ region.minLon.toFixed(4) }} →
+                {{ region.maxLat.toFixed(4) }}, {{ region.maxLon.toFixed(4) }}
+              </td>
+              <td>{{ region.pollIntervalMinutes }} мин</td>
+              <td>
+                <span class="badge" :class="region.active ? 'ok' : 'never'">
+                  {{ region.active ? 'активен' : 'выключен' }}
+                </span>
+                <span
+                  v-if="region.lastPollStatus !== 'never'"
+                  class="badge"
+                  :class="region.lastPollStatus"
+                >
+                  {{ region.lastPollStatus === 'ok' ? 'ok' : 'ошибка' }}
+                </span>
+              </td>
+              <td>{{ formatDate(region.lastPolledAt) }}</td>
+              <td>{{ region.lastPollStationCount }}</td>
+              <td class="actions">
+                <button class="btn secondary" @click="viewOnMap(region)">Карта</button>
+                <button
+                  class="btn secondary"
+                  :disabled="pollingIds.has(region._id)"
+                  @click="handlePollNow(region)"
+                >
+                  {{ pollingIds.has(region._id) ? 'Опрос...' : 'Опросить сейчас' }}
+                </button>
+                <button class="btn secondary" @click="openEditForm(region)">Изменить</button>
+                <button class="btn danger" @click="handleDelete(region)">Удалить</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <RegionForm
@@ -172,6 +174,10 @@ onBeforeUnmount(() => {
 .page-header h1 {
   font-size: 20px;
   margin: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 .mono {

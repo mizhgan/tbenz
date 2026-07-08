@@ -38,6 +38,41 @@ body {
   display: flex;
   gap: 16px;
   flex: 1;
+  /* Flex items default to min-width: auto, which refuses to shrink below
+     the content's natural size - with 6 links that's wider than most phone
+     screens, and since nothing here wraps, the excess doesn't drop to a new
+     line, it pushes the whole page wider (horizontal scroll on the entire
+     app, not just the nav). min-width: 0 lets the nav actually shrink to
+     the space the topbar has, and overflow-x: auto turns the excess into a
+     horizontally scrollable strip contained within the nav itself instead. */
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Below this width, brand + nav + user no longer fit on one line even with
+   the nav itself scrolling internally - brand and user alone can eat up
+   most of the available space, squeezing nav down to 0px (invisible, not
+   just cramped). Give nav its own full-width row below brand/user instead,
+   where it has real room to be a usable horizontally-scrollable strip. */
+@media (max-width: 700px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .brand {
+    order: 1;
+  }
+
+  .user {
+    order: 2;
+  }
+
+  .nav {
+    order: 3;
+    flex-basis: 100%;
+  }
 }
 
 .nav a {
@@ -45,6 +80,8 @@ body {
   text-decoration: none;
   padding: 6px 10px;
   border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav a.router-link-active {

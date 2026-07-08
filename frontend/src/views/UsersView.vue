@@ -80,38 +80,40 @@ onMounted(loadUsers);
     <div class="card">
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="!users.length">Пока нет ни одного пользователя.</p>
-      <table v-else>
-        <thead>
-          <tr>
-            <th>Логин</th>
-            <th>Роль</th>
-            <th>Создан</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="u in users" :key="u.id">
-            <td>{{ u.username }}</td>
-            <td>
-              <span class="badge" :class="u.role === 'admin' ? 'ok' : 'never'">
-                {{ u.role === 'admin' ? 'администратор' : 'наблюдатель' }}
-              </span>
-            </td>
-            <td>{{ formatDate(u.createdAt) }}</td>
-            <td class="actions">
-              <button class="btn secondary" @click="openEditForm(u)">Изменить</button>
-              <button
-                class="btn danger"
-                :disabled="u.id === auth.userId"
-                :title="u.id === auth.userId ? 'Нельзя удалить свою учётную запись' : ''"
-                @click="handleDelete(u)"
-              >
-                Удалить
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Логин</th>
+              <th>Роль</th>
+              <th>Создан</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in users" :key="u.id">
+              <td>{{ u.username }}</td>
+              <td>
+                <span class="badge" :class="u.role === 'admin' ? 'ok' : 'never'">
+                  {{ u.role === 'admin' ? 'администратор' : 'наблюдатель' }}
+                </span>
+              </td>
+              <td>{{ formatDate(u.createdAt) }}</td>
+              <td class="actions">
+                <button class="btn secondary" @click="openEditForm(u)">Изменить</button>
+                <button
+                  class="btn danger"
+                  :disabled="u.id === auth.userId"
+                  :title="u.id === auth.userId ? 'Нельзя удалить свою учётную запись' : ''"
+                  @click="handleDelete(u)"
+                >
+                  Удалить
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <UserForm
@@ -134,6 +136,10 @@ onMounted(loadUsers);
 .page-header h1 {
   font-size: 20px;
   margin: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 .actions {
