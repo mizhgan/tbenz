@@ -96,6 +96,7 @@ function eventsSummary(chat) {
   if (chat.events.stationAvailable || chat.events.stationUnavailable) labels.push('топливо');
   if (chat.events.hourlyDigest) labels.push('часовая сводка');
   if (chat.events.dailyDigest) labels.push('дневная сводка');
+  if (chat.events.predictiveDropAlert || chat.events.predictiveRecoveryAlert) labels.push('прогноз');
   return labels.length ? labels.join(', ') : '—';
 }
 

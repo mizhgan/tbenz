@@ -19,6 +19,8 @@ const EVENT_OPTIONS = [
   { key: 'stationUnavailable', label: 'Топливо пропало на станции' },
   { key: 'hourlyDigest', label: 'Часовая сводка по районам' },
   { key: 'dailyDigest', label: 'Дневная сводка по районам' },
+  { key: 'predictiveDropAlert', label: 'Прогноз: скоро может пропасть' },
+  { key: 'predictiveRecoveryAlert', label: 'Прогноз: скоро может появиться' },
 ];
 
 const status = ref(props.initial.status);

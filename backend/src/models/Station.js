@@ -29,6 +29,11 @@ const stationSchema = new Schema(
     // Full raw payload for this station as last received from the source API,
     // kept so nothing is lost if our field-mapping assumptions above change.
     lastRaw: { type: Schema.Types.Mixed, default: null },
+    // Cooldown markers for Telegram predictive alerts - prevents re-alerting
+    // on every scan while a station's predicted risk/recovery is still
+    // ongoing (see telegramPredictiveAlerts.js).
+    lastPredictiveDropAlertAt: { type: Date, default: null },
+    lastPredictiveRecoveryAlertAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

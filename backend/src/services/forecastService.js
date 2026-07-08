@@ -24,19 +24,21 @@ function isoWeekdayAndHour(date, tz) {
 
 /**
  * Historical share of "available" readings (of known-status readings) for
- * each (weekday, hour) slot the station has ever been polled in, over the
- * lookback window. This is the same idea as the region heatmap, scoped to
- * one station and read back out per-slot for forecasting.
+ * each (weekday, hour) slot, per station, over the lookback window - for
+ * every station in `stationIds` in a single aggregation (grouped by
+ * station+weekday+hour) rather than one query per station. Used both by
+ * the bulk predictive-alert scan (many stations at once) and by
+ * getStationHourlyProfile (a single-element array).
  */
-async function getStationHourlyProfile(stationId, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
+async function getBulkHourlyProfiles(stationIds, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
   const from = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
   const rows = await StationSnapshot.aggregate([
-    { $match: { station: stationId, polledAt: { $gte: from } } },
+    { $match: { station: { $in: stationIds }, polledAt: { $gte: from } } },
     { $addFields: { parts: { $dateToParts: { date: '$polledAt', timezone: tz, iso8601: true } } } },
     {
       $group: {
-        _id: { weekday: '$parts.isoDayOfWeek', hour: '$parts.hour' },
+        _id: { station: '$station', weekday: '$parts.isoDayOfWeek', hour: '$parts.hour' },
         total: { $sum: 1 },
         available: { $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] } },
         noData: { $sum: { $cond: [{ $eq: ['$status', 'no_data'] }, 1, 0] } },
@@ -44,24 +46,55 @@ async function getStationHourlyProfile(stationId, { lookbackDays = 28, tz = DEFA
     },
   ]);
 
-  const profile = new Map();
-  let overallKnown = 0;
-  let overallAvailable = 0;
+  const byStation = new Map();
   for (const row of rows) {
+    const key = String(row._id.station);
+    if (!byStation.has(key)) {
+      byStation.set(key, { profile: new Map(), overallKnown: 0, overallAvailable: 0 });
+    }
+    const entry = byStation.get(key);
     const known = row.total - row.noData;
     if (known > 0) {
-      profile.set(`${row._id.weekday}-${row._id.hour}`, {
+      entry.profile.set(`${row._id.weekday}-${row._id.hour}`, {
         availablePct: (row.available / known) * 100,
         samples: known,
       });
-      overallKnown += known;
-      overallAvailable += row.available;
+      entry.overallKnown += known;
+      entry.overallAvailable += row.available;
     }
   }
 
+  const result = new Map();
+  for (const [key, entry] of byStation) {
+    result.set(key, {
+      profile: entry.profile,
+      overallAvailablePct: entry.overallKnown > 0 ? (entry.overallAvailable / entry.overallKnown) * 100 : null,
+    });
+  }
+  return result;
+}
+
+async function getStationHourlyProfile(stationId, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
+  const bulk = await getBulkHourlyProfiles([stationId], { lookbackDays, tz });
+  return bulk.get(String(stationId)) || { profile: new Map(), overallAvailablePct: null };
+}
+
+/**
+ * Estimated availability for a single hour, read off a station's (weekday,
+ * hour) profile - falls back to the station's overall average when that
+ * slot has no history yet. Extracted so the bulk predictive-alert scan can
+ * reuse the exact same per-hour logic as the single-station forecast below.
+ */
+function forecastHour(profile, overallAvailablePct, at, tz) {
+  const { weekday, hour } = isoWeekdayAndHour(at, tz);
+  const cell = profile.get(`${weekday}-${hour}`);
   return {
-    profile,
-    overallAvailablePct: overallKnown > 0 ? (overallAvailable / overallKnown) * 100 : null,
+    at,
+    weekday,
+    hour,
+    availablePct: cell ? cell.availablePct : overallAvailablePct,
+    samples: cell ? cell.samples : 0,
+    basis: cell ? 'history' : overallAvailablePct !== null ? 'overall-average' : 'no-data',
   };
 }
 
@@ -118,16 +151,7 @@ async function getStationForecast(stationId, { hoursAhead = 24, lookbackDays = 2
   const hours = [];
   for (let i = 1; i <= hoursAhead; i++) {
     const at = new Date(now + i * 60 * 60 * 1000);
-    const { weekday, hour } = isoWeekdayAndHour(at, tz);
-    const cell = profile.get(`${weekday}-${hour}`);
-    hours.push({
-      at,
-      weekday,
-      hour,
-      availablePct: cell ? cell.availablePct : overallAvailablePct,
-      samples: cell ? cell.samples : 0,
-      basis: cell ? 'history' : overallAvailablePct !== null ? 'overall-average' : 'no-data',
-    });
+    hours.push(forecastHour(profile, overallAvailablePct, at, tz));
   }
 
   let estimatedRecoveryAt = null;
@@ -211,6 +235,11 @@ async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bu
 module.exports = {
   getStationForecast,
   getRegionTrendForecast,
+  getBulkHourlyProfiles,
+  getStationHourlyProfile,
+  getCurrentStatusStreak,
+  getStationRecoveryStats,
+  forecastHour,
   linearRegression,
   isoWeekdayAndHour,
 };

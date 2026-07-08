@@ -11,6 +11,7 @@ const { ensureSeedAdmin } = require('./services/authService');
 const scheduler = require('./services/scheduler');
 const telegramBot = require('./services/telegramBot');
 const telegramDigestScheduler = require('./services/telegramDigestScheduler');
+const telegramPredictiveScheduler = require('./services/telegramPredictiveScheduler');
 const logger = require('./utils/logger');
 
 async function main() {
@@ -19,6 +20,7 @@ async function main() {
   await scheduler.start();
   await telegramBot.start();
   telegramDigestScheduler.start();
+  telegramPredictiveScheduler.start();
 
   const app = express();
   app.use(helmet());
@@ -44,6 +46,7 @@ main().catch((err) => {
 process.on('SIGTERM', () => {
   scheduler.stopAll();
   telegramDigestScheduler.stop();
+  telegramPredictiveScheduler.stop();
   telegramBot.stop();
   process.exit(0);
 });

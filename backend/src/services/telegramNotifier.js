@@ -2,6 +2,7 @@ const TelegramChat = require('../models/TelegramChat');
 const telegramBot = require('./telegramBot');
 const telegramDigestData = require('./telegramDigestData');
 const telegramDigestImage = require('./telegramDigestImage');
+const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
 const logger = require('../utils/logger');
 
 const AVAILABLE_LIKE = new Set(['available', 'maybe_available']);
@@ -34,6 +35,17 @@ function chatMatchesFilters(chat, station, fuelType) {
   const isWatchlisted = chat.watchlist.some((id) => String(id) === String(station._id));
   if (isWatchlisted) return true;
   if (chat.fuelTypes.length && !chat.fuelTypes.includes(fuelType)) return false;
+  if (chat.brands.length && !chat.brands.includes(station.name)) return false;
+  return true;
+}
+
+// Same idea as chatMatchesFilters, minus the fuel-type check - a predictive
+// alert is about a station as a whole, not a specific fuel type, so a
+// chat's fuelTypes filter (which only makes sense for a per-fuel-type
+// transition) doesn't apply here.
+function chatMatchesStation(chat, station) {
+  const isWatchlisted = chat.watchlist.some((id) => String(id) === String(station._id));
+  if (isWatchlisted) return true;
   if (chat.brands.length && !chat.brands.includes(station.name)) return false;
   return true;
 }
@@ -244,4 +256,75 @@ async function sendDigest(period) {
   }
 }
 
-module.exports = { computeTransitions, notifyRegionChanges, sendDigest, escapeHtml };
+const timeOnlyFmt = new Intl.DateTimeFormat('ru-RU', { timeZone: RU_DATE_TZ, hour: '2-digit', minute: '2-digit' });
+
+function formatDropAlertBlock({ station, predictedAt, availablePct }) {
+  return [
+    `⚠️ <b>${escapeHtml(station.name || 'АЗС')}</b>`,
+    station.address ? escapeHtml(station.address) : null,
+    `Вероятность наличия топлива к ${timeOnlyFmt.format(predictedAt)} падает до ~${availablePct.toFixed(0)}% (по истории для этого времени)`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function formatRecoveryAlertBlock({ station, estimatedRecoveryAt }) {
+  return [
+    `🔄 <b>${escapeHtml(station.name || 'АЗС')}</b>`,
+    station.address ? escapeHtml(station.address) : null,
+    `Возможно, топливо появится к ${timeOnlyFmt.format(estimatedRecoveryAt)} (оценка по среднему времени восстановления)`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/**
+ * Scans a region for forecast-based heads-up alerts (see
+ * telegramPredictiveAlerts.scanRegion) and sends them to every chat that
+ * opted into the relevant event type and follows the region (or has the
+ * station on its watchlist). Grouped into as few messages as possible per
+ * chat, same as notifyRegionChanges. Best-effort - a scan failure must
+ * never affect ingestion, callers should still wrap this in try/catch.
+ */
+async function notifyPredictiveAlerts(region) {
+  if (!telegramBot.isEnabled()) return;
+
+  const { dropAlerts, recoveryAlerts } = await telegramPredictiveAlerts.scanRegion(region);
+  if (!dropAlerts.length && !recoveryAlerts.length) return;
+
+  const candidateStationIds = [...dropAlerts, ...recoveryAlerts].map((a) => a.station._id);
+  const chats = await TelegramChat.find({
+    status: 'active',
+    $and: [
+      { $or: [{ 'events.predictiveDropAlert': true }, { 'events.predictiveRecoveryAlert': true }] },
+      { $or: [{ regions: region._id }, { watchlist: { $in: candidateStationIds } }] },
+    ],
+  });
+  if (!chats.length) return;
+
+  await telegramBot.sendToChats(chats, (chat) => {
+    const blocks = [];
+    if (chat.events.predictiveDropAlert) {
+      for (const alert of dropAlerts) {
+        if (chatMatchesStation(chat, alert.station)) blocks.push(formatDropAlertBlock(alert));
+      }
+    }
+    if (chat.events.predictiveRecoveryAlert) {
+      for (const alert of recoveryAlerts) {
+        if (chatMatchesStation(chat, alert.station)) blocks.push(formatRecoveryAlertBlock(alert));
+      }
+    }
+    if (!blocks.length) return [];
+
+    const header = `Прогноз — ${escapeHtml(region.name)}`;
+    return chunkMessages(header, blocks);
+  });
+}
+
+module.exports = {
+  computeTransitions,
+  notifyRegionChanges,
+  sendDigest,
+  notifyPredictiveAlerts,
+  escapeHtml,
+};

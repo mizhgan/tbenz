@@ -24,6 +24,13 @@ const telegramChatSchema = new Schema(
       stationUnavailable: { type: Boolean, default: true },
       hourlyDigest: { type: Boolean, default: false },
       dailyDigest: { type: Boolean, default: false },
+      // Opt-in forecast-based heads-up, not tied to an actual status change
+      // yet: "this station's history suggests it'll likely run out soon" /
+      // "...likely come back soon". Off by default since it's a prediction,
+      // not an observed fact, and the base transition events already cover
+      // the confirmed case.
+      predictiveDropAlert: { type: Boolean, default: false },
+      predictiveRecoveryAlert: { type: Boolean, default: false },
     },
     // Empty array means "no filter" (matches everything) for both.
     fuelTypes: [{ type: String }],
