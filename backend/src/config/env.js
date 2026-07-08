@@ -21,4 +21,7 @@ module.exports = {
   proxyFailureThreshold: Number(process.env.PROXY_FAILURE_THRESHOLD || 3),
   proxyRequestTimeoutMs: Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 20000),
   proxyCheckUrl: process.env.PROXY_CHECK_URL || 'https://toplivo.tbank.ru/api/v1/stations',
+  // Telegram bot is entirely optional - if unset, the feature is inert (no
+  // bot process starts, admin panel just shows it as "not configured").
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || null,
 };

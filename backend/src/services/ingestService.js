@@ -2,9 +2,18 @@ const { fetchStations } = require('./tbankClient');
 const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
+const telegramNotifier = require('./telegramNotifier');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
+  // Needed before the update to detect available/unavailable transitions per
+  // fuel type - findOneAndUpdate with new:true only gives us the post-update
+  // document, which would make every poll look like a "first time seen".
+  const previous = await Station.findOne(
+    { externalId: parsed.externalId },
+    { lastFuelStatuses: 1 }
+  ).lean();
+
   const station = await Station.findOneAndUpdate(
     { externalId: parsed.externalId },
     {
@@ -37,6 +46,18 @@ async function storeStation(parsed, region, polledAt) {
     lastTransactionAt: parsed.lastTransactionAt,
     raw: parsed.raw,
   });
+
+  // Best-effort: a Telegram hiccup must never break ingestion.
+  try {
+    await telegramNotifier.handleStationUpdate({
+      station,
+      region,
+      previousFuelStatuses: previous?.lastFuelStatuses || [],
+      newFuelStatuses: parsed.fuelStatuses,
+    });
+  } catch (err) {
+    logger.error(`Telegram notify failed for station ${station._id}:`, err.message);
+  }
 }
 
 /**

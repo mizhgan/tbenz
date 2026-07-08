@@ -4,6 +4,27 @@ const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
 const { getStationForecast } = require('../services/forecastService');
 
+// Lightweight search used by the admin UI's station-watchlist picker (e.g.
+// picking specific stations for a Telegram chat's subscription) - not meant
+// for bulk listing, just narrowing down a name/address search within an
+// optional region.
+const listStations = asyncHandler(async (req, res) => {
+  const query = {};
+  if (req.query.region) query.regions = req.query.region;
+  const q = (req.query.q || '').trim();
+  if (q) {
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, 'i');
+    query.$or = [{ name: pattern }, { address: pattern }];
+  }
+
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+  const stations = await Station.find(query, { name: 1, address: 1, regions: 1 })
+    .limit(limit)
+    .lean();
+  res.json(stations);
+});
+
 const getStation = asyncHandler(async (req, res) => {
   const station = await Station.findById(req.params.id);
   if (!station) throw new HttpError(404, 'Station not found');
@@ -42,4 +63,4 @@ const getForecast = asyncHandler(async (req, res) => {
   res.json(forecast);
 });
 
-module.exports = { getStation, getStationHistory, getForecast };
+module.exports = { listStations, getStation, getStationHistory, getForecast };

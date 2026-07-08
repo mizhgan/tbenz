@@ -15,6 +15,7 @@ export const regionsApi = {
 };
 
 export const stationsApi = {
+  list: (params) => http.get('/stations', { params }).then((r) => r.data),
   get: (id) => http.get(`/stations/${id}`).then((r) => r.data),
   history: (id, params) => http.get(`/stations/${id}/history`, { params }).then((r) => r.data),
   forecast: (id, params) => http.get(`/stations/${id}/forecast`, { params }).then((r) => r.data),

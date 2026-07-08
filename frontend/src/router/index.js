@@ -38,6 +38,12 @@ const routes = [
     meta: { adminOnly: true },
   },
   {
+    path: '/telegram',
+    name: 'telegram',
+    component: () => import('../views/TelegramView.vue'),
+    meta: { adminOnly: true },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),

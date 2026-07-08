@@ -4,6 +4,7 @@ const regionsRoutes = require('./regions.routes');
 const stationsRoutes = require('./stations.routes');
 const usersRoutes = require('./users.routes');
 const proxiesRoutes = require('./proxies.routes');
+const telegramRoutes = require('./telegram.routes');
 
 const router = Router();
 
@@ -13,5 +14,6 @@ router.use('/regions', regionsRoutes);
 router.use('/stations', stationsRoutes);
 router.use('/users', usersRoutes);
 router.use('/proxies', proxiesRoutes);
+router.use('/telegram', telegramRoutes);
 
 module.exports = router;

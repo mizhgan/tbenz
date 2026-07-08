@@ -9,12 +9,16 @@ const routes = require('./routes');
 const { errorHandler } = require('./middleware/errorHandler');
 const { ensureSeedAdmin } = require('./services/authService');
 const scheduler = require('./services/scheduler');
+const telegramBot = require('./services/telegramBot');
+const telegramDigestScheduler = require('./services/telegramDigestScheduler');
 const logger = require('./utils/logger');
 
 async function main() {
   await connectDb();
   await ensureSeedAdmin();
   await scheduler.start();
+  await telegramBot.start();
+  telegramDigestScheduler.start();
 
   const app = express();
   app.use(helmet());
@@ -39,5 +43,7 @@ main().catch((err) => {
 
 process.on('SIGTERM', () => {
   scheduler.stopAll();
+  telegramDigestScheduler.stop();
+  telegramBot.stop();
   process.exit(0);
 });

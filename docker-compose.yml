@@ -26,6 +26,7 @@ services:
       TBANK_API_BASE_URL: ${TBANK_API_BASE_URL:-https://toplivo.tbank.ru/api/v1/stations}
       MIN_POLL_INTERVAL_MINUTES: ${MIN_POLL_INTERVAL_MINUTES:-1}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     ports:
       - "4000:4000"
 
