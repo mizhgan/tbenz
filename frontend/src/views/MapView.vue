@@ -48,6 +48,38 @@ function brandOf(station) {
   return station.name || UNKNOWN_BRAND;
 }
 
+// '' means "any fuel type" - filter/color markers by the station's overall
+// status. Otherwise, both the checkboxes above and marker colors switch to
+// that specific fuel type's status instead of the aggregate one.
+const selectedFuelType = ref('');
+
+const availableFuelTypes = computed(() => {
+  const set = new Set();
+  for (const s of stations.value) {
+    for (const f of s.fuelStatuses || []) set.add(f.fuelType);
+  }
+  return Array.from(set).sort((a, b) => {
+    const na = Number(a);
+    const nb = Number(b);
+    const aIsNum = !Number.isNaN(na);
+    const bIsNum = !Number.isNaN(nb);
+    if (aIsNum && bIsNum) return na - nb;
+    if (aIsNum) return -1;
+    if (bIsNum) return 1;
+    return a.localeCompare(b, 'ru');
+  });
+});
+
+function fuelTypeLabel(type) {
+  return /^\d+$/.test(type) ? `АИ-${type}` : type;
+}
+
+function effectiveStatus(station) {
+  if (!selectedFuelType.value) return station.status;
+  const entry = (station.fuelStatuses || []).find((f) => f.fuelType === selectedFuelType.value);
+  return entry ? entry.status : 'no_data';
+}
+
 // Keyed by brand name -> visible. Populated lazily as brands show up in
 // loaded snapshots (see ensureBrandFilterKeys) rather than rebuilt from
 // scratch each time, so a user's unchecked brands stay unchecked as the
@@ -140,7 +172,9 @@ let resizeObserver = null;
 const hasRange = computed(() => range.value.from !== null && range.value.to !== null);
 const atLabel = computed(() => formatDateTime(atMs.value));
 const filteredStations = computed(() =>
-  stations.value.filter((s) => statusFilters[s.status] !== false && brandFilters[brandOf(s)] !== false)
+  stations.value.filter(
+    (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
+  )
 );
 
 function formatDateTime(ms) {
@@ -193,7 +227,7 @@ function renderMarkers() {
   if (!map) return;
   markersLayer.clearLayers();
   for (const s of filteredStations.value) {
-    const meta = statusMeta(s.status);
+    const meta = statusMeta(effectiveStatus(s));
     const marker = L.circleMarker([s.lat, s.lon], {
       radius: 7,
       color: meta.color,
@@ -204,7 +238,8 @@ function renderMarkers() {
     marker.on('click', () => {
       selectedStation.value = s;
     });
-    marker.bindTooltip(`${s.name || 'АЗС'} — ${meta.label}`);
+    const fuelSuffix = selectedFuelType.value ? ` (${fuelTypeLabel(selectedFuelType.value)})` : '';
+    marker.bindTooltip(`${s.name || 'АЗС'} — ${meta.label}${fuelSuffix}`);
     markersLayer.addLayer(marker);
   }
   if (stations.value.length && !hasFitted.value) {
@@ -226,6 +261,7 @@ async function handleRegionChange() {
   // unrelated, stale selection.
   for (const key of Object.keys(brandFilters)) delete brandFilters[key];
   brandSearch.value = '';
+  selectedFuelType.value = '';
   await loadRange();
   await loadSnapshot();
 }
@@ -329,7 +365,7 @@ async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, for
     async function drawFrame(ts) {
       const data = await regionsApi.snapshotAt(selectedRegionId.value, new Date(ts).toISOString());
       const frameStations = data.stations.filter(
-        (s) => statusFilters[s.status] !== false && brandFilters[brandOf(s)] !== false
+        (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
       );
 
       ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
@@ -337,7 +373,7 @@ async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, for
         const pt = map.latLngToContainerPoint([s.lat, s.lon]);
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
-        ctx.fillStyle = statusMeta(s.status).color;
+        ctx.fillStyle = statusMeta(effectiveStatus(s)).color;
         ctx.fill();
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = '#ffffff';
@@ -502,6 +538,16 @@ onBeforeUnmount(() => {
       </p>
 
       <div v-if="hasRange" class="filter-block">
+        <select
+          v-if="availableFuelTypes.length"
+          v-model="selectedFuelType"
+          class="fuel-type-select"
+          @change="handleFilterChange"
+        >
+          <option value="">Общий статус (все виды топлива)</option>
+          <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
+        </select>
+
         <span class="filter-label">Показывать:</span>
         <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
           <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
@@ -571,8 +617,12 @@ onBeforeUnmount(() => {
             {{ statusMeta(selectedStation.status).label }}
           </p>
           <ul class="fuel-list">
-            <li v-for="f in selectedStation.fuelStatuses" :key="f.fuelType">
-              <strong>АИ-{{ f.fuelType }}</strong>
+            <li
+              v-for="f in selectedStation.fuelStatuses"
+              :key="f.fuelType"
+              :class="{ 'fuel-list-active': f.fuelType === selectedFuelType }"
+            >
+              <strong>{{ fuelTypeLabel(f.fuelType) }}</strong>
               <span class="badge-dot" :style="{ background: statusMeta(f.status).color }"></span>
               {{ statusMeta(f.status).label }}
             </li>
@@ -689,6 +739,14 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.fuel-list-active {
+  background: #eff6ff;
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+}
+
 .filter-block {
   display: flex;
   align-items: center;
@@ -702,6 +760,14 @@ onBeforeUnmount(() => {
 .filter-label {
   font-size: 13px;
   color: #667;
+}
+
+.fuel-type-select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #ccd2d9;
+  font-size: 13px;
+  color: #445;
 }
 
 .filter-checkbox {
