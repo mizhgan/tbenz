@@ -62,12 +62,32 @@ async function start() {
 
   // Groups rarely get an explicit /start (e.g. the bot is just silently
   // added) - register on any first message we see from an unknown chat too.
+  // Note: with Telegram's default group privacy mode, this only fires for
+  // commands, @mentions of the bot, or replies to it - NOT for ordinary
+  // messages, so this alone is not enough to catch "added but nobody spoke".
   bot.on('message', async (ctx) => {
     const chatId = String(ctx.chat.id);
     const exists = await TelegramChat.exists({ chatId });
     if (!exists) {
       const chatDoc = await upsertChatFromCtx(ctx);
       await ctx.reply(`Чат зарегистрирован (ID: ${chatDoc.chatId}). Дождитесь настройки в админ-панели «Топливо».`);
+    }
+  });
+
+  // Being added to (or removed from) a group/supergroup/channel is reported
+  // as a my_chat_member update, not a message - it fires regardless of group
+  // privacy mode, so this is what actually catches "owner added the bot and
+  // nobody has said anything since". Only register on transitions into the
+  // chat (member/administrator); ignore left/kicked - nothing to set up.
+  bot.on('my_chat_member', async (ctx) => {
+    const newStatus = ctx.myChatMember.new_chat_member.status;
+    if (newStatus === 'left' || newStatus === 'kicked') return;
+    const exists = await TelegramChat.exists({ chatId: String(ctx.chat.id) });
+    if (!exists) {
+      const chatDoc = await upsertChatFromCtx(ctx);
+      await bot.telegram
+        .sendMessage(chatDoc.chatId, `Чат зарегистрирован (ID: ${chatDoc.chatId}). Дождитесь настройки в админ-панели «Топливо».`)
+        .catch((err) => logger.warn(`Telegram: failed to greet new chat ${chatDoc.chatId}: ${err.message}`));
     }
   });
 
