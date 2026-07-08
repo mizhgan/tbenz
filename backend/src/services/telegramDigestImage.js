@@ -2,11 +2,11 @@ const sharp = require('sharp');
 
 const WIDTH = 640;
 const HEIGHT = 320;
-const PAD = 28;
+const PAD = 32;
 const FONT = 'DejaVu Sans, Arial, sans-serif';
 
 const COLOR_BG = '#0f172a';
-const COLOR_CARD_BORDER = '#1e293b';
+const COLOR_BORDER = '#1e293b';
 const COLOR_GOOD = '#16a34a';
 const COLOR_WARN = '#d97706';
 const COLOR_BAD = '#dc2626';
@@ -45,11 +45,19 @@ const TREND_META = {
   unknown: { arrow: '', color: COLOR_SUBTEXT },
 };
 
+// deltaText/suffixText are always kept as two separate, independently short
+// strings (never a single string spliced apart later) - a previous version
+// built one combined string and tried to split it back into two lines by
+// searching for " к " in it, which broke the moment the "no comparison
+// data yet" message (which doesn't contain that substring at all) hit the
+// same code path, overflowing the badge past the card's edge.
 function trendLabel(trend, deltaPct, periodLabel) {
+  if (trend === 'unknown' || deltaPct === null) {
+    return { arrow: '', deltaText: '', suffixText: 'нет данных', color: COLOR_SUBTEXT };
+  }
   const meta = TREND_META[trend] || TREND_META.unknown;
-  if (trend === 'unknown' || deltaPct === null) return { arrow: '', text: 'нет данных для сравнения', color: COLOR_SUBTEXT };
   const sign = deltaPct > 0 ? '+' : '';
-  return { arrow: meta.arrow, text: `${sign}${deltaPct.toFixed(0)}% к ${periodLabel}`, color: meta.color };
+  return { arrow: meta.arrow, deltaText: `${sign}${deltaPct.toFixed(0)}%`, suffixText: `к ${periodLabel}`, color: meta.color };
 }
 
 // Combined "available-like" pct per sparkline bucket (available + maybe),
@@ -83,16 +91,24 @@ function sparklineSvg(series, x, y, width, height, color) {
   }
   if (current.length) segments.push(current);
 
-  const baseline = `<line x1="${x}" y1="${y + height}" x2="${x + width}" y2="${y + height}" stroke="${COLOR_CARD_BORDER}" stroke-width="1"/>`;
-  const polylines = segments
+  const baseline = `<line x1="${x}" y1="${y + height}" x2="${x + width}" y2="${y + height}" stroke="${COLOR_BORDER}" stroke-width="1"/>`;
+  const shapes = segments
     .filter((seg) => seg.length > 1)
     .map((seg) => {
-      const d = seg.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-      return `<polyline points="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      const linePoints = seg.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+      const first = seg[0];
+      const last = seg[seg.length - 1];
+      // A soft fill under the line gives the sparkline visual weight at
+      // small sizes, instead of a thin stroke that's easy to miss.
+      const areaPoints = `${first.x.toFixed(1)},${(y + height).toFixed(1)} ${linePoints} ${last.x.toFixed(1)},${(y + height).toFixed(1)}`;
+      return (
+        `<polygon points="${areaPoints}" fill="${color}" fill-opacity="0.12"/>` +
+        `<polyline points="${linePoints}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>`
+      );
     })
     .join('');
 
-  return baseline + polylines;
+  return baseline + shapes;
 }
 
 // A plain colored dot, not an emoji glyph - color-emoji fonts (needed for
@@ -100,10 +116,42 @@ function sparklineSvg(series, x, y, width, height, color) {
 // in a headless rendering environment, so this is drawn directly instead.
 function statChip(x, y, dotColor, count, label) {
   return `
-    <circle cx="${x + 6}" cy="${y - 6}" r="6" fill="${dotColor}"/>
-    <text x="${x + 22}" y="${y}" font-family="${FONT}" font-size="18" font-weight="bold" fill="${COLOR_TEXT}">${count}</text>
-    <text x="${x + 22}" y="${y + 16}" font-family="${FONT}" font-size="11" fill="${COLOR_SUBTEXT}">${label}</text>
+    <circle cx="${x + 7}" cy="${y - 7}" r="7" fill="${dotColor}"/>
+    <text x="${x + 24}" y="${y}" font-family="${FONT}" font-size="22" font-weight="bold" fill="${COLOR_TEXT}">${count}</text>
+    <text x="${x}" y="${y + 20}" font-family="${FONT}" font-size="12" fill="${COLOR_SUBTEXT}">${label}</text>
   `;
+}
+
+const TREND_BADGE_WIDTH = 168;
+const TREND_BADGE_HEIGHT = 44;
+
+// Compact pill badge for the trend, anchored to its own top-right box
+// instead of floating loose in whatever space happened to be left over.
+// deltaText and suffixText are rendered independently (never split out of
+// one combined string), so this works the same whether there's a delta to
+// show or not.
+function trendBadge(trendInfo, x, y) {
+  const hasDelta = Boolean(trendInfo.deltaText);
+  const suffixY = hasDelta ? y + 36 : y + 26;
+  return `
+    <rect x="${x}" y="${y}" width="${TREND_BADGE_WIDTH}" height="${TREND_BADGE_HEIGHT}" rx="10" fill="${trendInfo.color}" fill-opacity="0.14"/>
+    ${trendInfo.arrow ? `<text x="${x + 16}" y="${y + 20}" font-family="${FONT}" font-size="16" fill="${trendInfo.color}">${trendInfo.arrow}</text>` : ''}
+    ${hasDelta ? `<text x="${x + (trendInfo.arrow ? 38 : 16)}" y="${y + 21}" font-family="${FONT}" font-size="13" font-weight="bold" fill="${trendInfo.color}">${escapeXml(trendInfo.deltaText)}</text>` : ''}
+    <text x="${x + 16}" y="${suffixY}" font-family="${FONT}" font-size="11" fill="${trendInfo.color}" fill-opacity="0.85">${escapeXml(trendInfo.suffixText)}</text>
+  `;
+}
+
+// No real text-metrics available in server-side SVG, so this is a
+// conservative fixed-width-per-character estimate for bold DejaVu Sans at
+// font-size 23 - calibrated by actually rendering sample Cyrillic strings
+// through sharp and measuring the trimmed output width (~14.5-19.7px/char
+// depending on how many wide capital letters a string has); 18px/char
+// covers that range with a small safety margin, at the cost of sometimes
+// truncating a bit earlier than strictly necessary.
+function truncateToWidth(text, maxWidth, avgCharWidth) {
+  const maxChars = Math.max(1, Math.floor(maxWidth / avgCharWidth));
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
 /**
@@ -118,28 +166,40 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
   const pctText = currentPct === null ? '—' : `${currentPct.toFixed(0)}%`;
   const trendInfo = trendLabel(trend, trendDeltaPct, comparisonLabel);
 
-  const sparkline = sparklineSvg(series, PAD, 240, WIDTH - PAD * 2, 46, color);
+  const sparkline = sparklineSvg(series, PAD, 236, WIDTH - PAD * 2, 44, color);
+
+  // Four equal-width columns rather than fixed pixel offsets - stays
+  // readable even when a busy region pushes a count into 2-3 digits.
+  const colWidth = (WIDTH - PAD * 2) / 4;
+  const statRow = [
+    [COLOR_GOOD, counts.available, 'доступно'],
+    [COLOR_WARN, counts.maybe_available, 'частично'],
+    [COLOR_BAD, counts.not_available, 'нет'],
+    [COLOR_MUTED, counts.no_data, 'нет данных'],
+  ]
+    .map(([dotColor, count, label], i) => statChip(PAD + i * colWidth, 196, dotColor, count, label))
+    .join('');
+
+  const badgeX = WIDTH - PAD - TREND_BADGE_WIDTH;
+  const titleMaxWidth = badgeX - PAD - 16;
+  const titleText = truncateToWidth(region.name, titleMaxWidth, 18);
 
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">
-      <rect width="${WIDTH}" height="${HEIGHT}" rx="16" fill="${COLOR_BG}"/>
-      <rect x="1" y="1" width="${WIDTH - 2}" height="${HEIGHT - 2}" rx="15" fill="none" stroke="${COLOR_CARD_BORDER}" stroke-width="2"/>
+      <rect width="${WIDTH}" height="${HEIGHT}" fill="${COLOR_BG}"/>
+      <rect x="0.5" y="0.5" width="${WIDTH - 1}" height="${HEIGHT - 1}" fill="none" stroke="${COLOR_BORDER}" stroke-width="1"/>
 
-      <text x="${PAD}" y="46" font-family="${FONT}" font-size="24" font-weight="bold" fill="${COLOR_TEXT}">${escapeXml(region.name)}</text>
-      <text x="${PAD}" y="68" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">${escapeXml(periodLabel)}</text>
+      <text x="${PAD}" y="44" font-family="${FONT}" font-size="23" font-weight="bold" fill="${COLOR_TEXT}">${escapeXml(titleText)}</text>
+      <text x="${PAD}" y="66" font-family="${FONT}" font-size="13" fill="${COLOR_SUBTEXT}">${escapeXml(periodLabel)}</text>
+      ${trendBadge(trendInfo, badgeX, 24)}
 
-      <text x="${PAD}" y="140" font-family="${FONT}" font-size="64" font-weight="bold" fill="${color}">${pctText}</text>
-      <text x="${PAD}" y="162" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">доступность сейчас</text>
-      <text x="${270}" y="128" font-family="${FONT}" font-size="20" fill="${trendInfo.color}">${trendInfo.arrow}</text>
-      <text x="${270}" y="152" font-family="${FONT}" font-size="13" fill="${trendInfo.color}">${escapeXml(trendInfo.text)}</text>
+      <text x="${PAD}" y="152" font-family="${FONT}" font-size="66" font-weight="bold" fill="${color}">${pctText}</text>
+      <text x="${PAD}" y="174" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">доступность сейчас</text>
 
-      ${statChip(PAD, 200, COLOR_GOOD, counts.available, 'доступно')}
-      ${statChip(PAD + 110, 200, COLOR_WARN, counts.maybe_available, 'частично')}
-      ${statChip(PAD + 220, 200, COLOR_BAD, counts.not_available, 'нет')}
-      ${statChip(PAD + 320, 200, COLOR_MUTED, counts.no_data, 'нет данных')}
+      ${statRow}
 
       ${sparkline}
-      <text x="${WIDTH - PAD}" y="${HEIGHT - 10}" font-family="${FONT}" font-size="11" fill="${COLOR_MUTED}" text-anchor="end">tbenz.in</text>
+      <text x="${WIDTH - PAD}" y="${HEIGHT - 12}" font-family="${FONT}" font-size="11" fill="${COLOR_MUTED}" text-anchor="end">tbenz.in</text>
     </svg>
   `;
 
