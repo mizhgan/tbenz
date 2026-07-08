@@ -198,6 +198,7 @@ async function generateReportCard() {
       to: toMs.value,
       summary: summary.value,
       trendBuckets: trendBuckets.value,
+      forecastBuckets: forecastBuckets.value,
       direction: forecastDirection.value,
       topStations: highlightedStations.value.slice(0, 3),
       stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',

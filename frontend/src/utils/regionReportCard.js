@@ -12,16 +12,22 @@ const DIRECTION_META = {
   unknown: { label: 'Недостаточно данных', icon: '', color: '#6b7280' },
 };
 
+// Based on actual calendar-day boundaries, not a span-length threshold - a
+// span-based heuristic (e.g. "show only time if under 36h") breaks for an
+// exactly-24h period: from/to land on the same time-of-day on different
+// dates, so a time-only label like "18:15–18:15" looks identical even
+// though the dates differ by a full day. Checking real dates instead of
+// guessing from duration fixes that regardless of how long the period is.
 function formatDateRange(from, to) {
   const fromD = new Date(from);
   const toD = new Date(to);
-  const spanMs = toD.getTime() - fromD.getTime();
   const dateFmt = (d) => d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
   const timeFmt = (d) => d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  if (spanMs > 36 * 3600 * 1000) {
-    return `${dateFmt(fromD)}–${dateFmt(toD)}`;
+  const sameDay = fromD.toDateString() === toD.toDateString();
+  if (sameDay) {
+    return `${dateFmt(fromD)} ${timeFmt(fromD)}–${timeFmt(toD)}`;
   }
-  return `${dateFmt(toD)} ${timeFmt(fromD)}–${timeFmt(toD)}`;
+  return `${dateFmt(fromD)} ${timeFmt(fromD)} – ${dateFmt(toD)} ${timeFmt(toD)}`;
 }
 
 // Change from the first to the last bucket that actually has data - "how
@@ -33,14 +39,49 @@ function computeTrendDelta(buckets) {
   return known[known.length - 1].availablePct - known[0].availablePct;
 }
 
-function drawSparkline(ctx, buckets, x, y, width, height, color, draw) {
-  if (!draw || !buckets.length) return;
-  const step = width / Math.max(1, buckets.length - 1);
-  const points = buckets.map((b, i) => {
-    const pct = b.availablePct;
-    const py = pct === null || pct === undefined ? null : y + height - (Math.max(0, Math.min(100, pct)) / 100) * height;
-    return { x: x + i * step, y: py };
-  });
+// Same status colors as TrendChart.vue (the full chart on the reports
+// page), so the compact card reads as "the same chart, smaller" rather
+// than introducing its own unrelated color language.
+const STATUS_COLORS = {
+  available: '#16a34a',
+  maybe_available: '#d97706',
+  not_available: '#dc2626',
+};
+const FORECAST_COLOR = '#2563eb';
+
+// Carries the nearest known value forward (then back-fills any leading
+// gap) instead of leaving a hole - a simple stand-in for Chart.js's
+// spanGaps:true, which is what TrendChart.vue itself uses for the exact
+// same buckets. Deliberately bridges gaps rather than breaking the line
+// there (unlike the Telegram digest sparkline), to match what the on-page
+// chart already does with this same data.
+function fillGaps(values) {
+  const out = values.slice();
+  for (let i = 1; i < out.length; i++) {
+    if (out[i] === null || out[i] === undefined) out[i] = out[i - 1];
+  }
+  for (let i = out.length - 2; i >= 0; i--) {
+    if (out[i] === null || out[i] === undefined) out[i] = out[i + 1];
+  }
+  return out.map((v) => v ?? 0);
+}
+
+// Stacked-area mini chart (available/maybe/not_available bands, bottom to
+// top) plus a dashed forecast continuation - the compact equivalent of
+// TrendChart.vue's full chart, not a single arbitrary-colored trend line:
+// the graph shows *availability*, so it should use the app's own
+// green/amber/red for that, not a color chosen by whether the trend is
+// currently improving or worsening (a different, and previously
+// conflated, piece of information - that's still shown separately as the
+// direction badge and the delta line below the chart).
+function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, height, draw) {
+  if (!draw || trendBuckets.length < 2) return;
+
+  const histLen = trendBuckets.length;
+  const forecastLen = forecastBuckets.length;
+  const totalPoints = histLen + forecastLen;
+  const step = width / Math.max(1, totalPoints - 1);
+  const xAt = (i) => x + i * step;
 
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
@@ -49,42 +90,57 @@ function drawSparkline(ctx, buckets, x, y, width, height, color, draw) {
   ctx.lineTo(x + width, y + height);
   ctx.stroke();
 
-  // Segments break at gaps (buckets with no known data) instead of
-  // interpolating straight through them - a gap means "we don't know", not
-  // "it dropped to 0%" (same reasoning as the Telegram digest card).
-  const segments = [];
-  let current = [];
-  for (const p of points) {
-    if (p.y === null) {
-      if (current.length) segments.push(current);
-      current = [];
-    } else {
-      current.push(p);
-    }
-  }
-  if (current.length) segments.push(current);
+  const avail = fillGaps(trendBuckets.map((b) => b.availablePct));
+  const maybe = fillGaps(trendBuckets.map((b) => b.maybeAvailablePct));
+  const notAvail = fillGaps(trendBuckets.map((b) => b.notAvailablePct));
+  const xs = trendBuckets.map((_, i) => xAt(i));
+  const toY = (pct) => y + height - (Math.max(0, Math.min(100, pct)) / 100) * height;
 
-  for (const seg of segments) {
-    if (seg.length < 2) continue;
+  const baseline = xs.map(() => y + height);
+  const topAvail = avail.map((v) => toY(v));
+  const topMaybe = avail.map((v, i) => toY(v + maybe[i]));
+  const topNotAvail = avail.map((v, i) => toY(v + maybe[i] + notAvail[i]));
 
+  const drawBand = (topLine, bottomLine, color) => {
     ctx.beginPath();
-    ctx.moveTo(seg[0].x, y + height);
-    for (const p of seg) ctx.lineTo(p.x, p.y);
-    ctx.lineTo(seg[seg.length - 1].x, y + height);
+    ctx.moveTo(xs[0], bottomLine[0]);
+    for (let i = 0; i < xs.length; i++) ctx.lineTo(xs[i], bottomLine[i]);
+    for (let i = xs.length - 1; i >= 0; i--) ctx.lineTo(xs[i], topLine[i]);
     ctx.closePath();
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.12;
+    ctx.globalAlpha = 0.3;
     ctx.fill();
     ctx.globalAlpha = 1;
 
     ctx.beginPath();
-    ctx.moveTo(seg[0].x, seg[0].y);
-    for (const p of seg.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.moveTo(xs[0], topLine[0]);
+    for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], topLine[i]);
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
+    ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.stroke();
+  };
+
+  drawBand(topAvail, baseline, STATUS_COLORS.available);
+  drawBand(topMaybe, topAvail, STATUS_COLORS.maybe_available);
+  drawBand(topNotAvail, topMaybe, STATUS_COLORS.not_available);
+
+  // Forecast continuation - only projects availability itself (not the
+  // full breakdown), so it's drawn as a dashed line picking up from where
+  // the green band's own top edge left off, not another stacked area.
+  if (forecastLen > 0) {
+    const forecastAvail = fillGaps(forecastBuckets.map((b) => b.availablePct));
+    ctx.save();
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = FORECAST_COLOR;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(xs[xs.length - 1], topAvail[topAvail.length - 1]);
+    for (let i = 0; i < forecastLen; i++) {
+      ctx.lineTo(xAt(histLen + i), toY(forecastAvail[i]));
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -94,7 +150,7 @@ function drawSparkline(ctx, buckets, x, y, width, height, color, draw) {
 // same two-pass approach as stationCard.js, for the same reason (a report
 // with 0 top stations or no trend data shouldn't ship a card that's mostly
 // empty space below a fixed height).
-function layoutCard(ctx, { region, from, to, summary, trendBuckets, direction, topStations, stationsLabel }, draw) {
+function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuckets, direction, topStations, stationsLabel }, draw) {
   const contentWidth = WIDTH - PADDING * 2;
   let y = PADDING + 20;
 
@@ -181,11 +237,11 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, direction, t
   }
   y += 28;
 
-  if (trendBuckets.length) {
+  if (trendBuckets.length > 1) {
     const sparkHeight = 90;
     const delta = computeTrendDelta(trendBuckets);
     const sparkColor = delta === null ? '#6b7280' : delta > 1 ? '#16a34a' : delta < -1 ? '#dc2626' : '#6b7280';
-    drawSparkline(ctx, trendBuckets, PADDING, y, contentWidth, sparkHeight, sparkColor, draw);
+    drawStackedTrend(ctx, trendBuckets, forecastBuckets || [], PADDING, y, contentWidth, sparkHeight, draw);
     y += sparkHeight + 28;
 
     if (draw && delta !== null) {
@@ -274,13 +330,14 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, direction, t
  * its actual content instead of shipping a fixed size with empty space when
  * there's no trend data or no top stations yet.
  */
-export function renderRegionReportCard({ region, from, to, summary, trendBuckets, direction, topStations, stationsLabel }) {
+export function renderRegionReportCard({ region, from, to, summary, trendBuckets, forecastBuckets, direction, topStations, stationsLabel }) {
   const payload = {
     region,
     from,
     to,
     summary,
     trendBuckets: trendBuckets || [],
+    forecastBuckets: forecastBuckets || [],
     direction,
     topStations: topStations || [],
     stationsLabel,
