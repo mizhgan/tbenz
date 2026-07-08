@@ -1,7 +1,7 @@
 const sharp = require('sharp');
 
 const WIDTH = 640;
-const HEIGHT = 320;
+const HEIGHT = 340;
 const PAD = 32;
 const FONT = 'DejaVu Sans, Arial, sans-serif';
 
@@ -122,22 +122,22 @@ function statChip(x, y, dotColor, count, label) {
   `;
 }
 
-const TREND_BADGE_WIDTH = 168;
-const TREND_BADGE_HEIGHT = 44;
+const TREND_BADGE_WIDTH = 250;
+const TREND_BADGE_HEIGHT = 66;
 
-// Compact pill badge for the trend, anchored to its own top-right box
-// instead of floating loose in whatever space happened to be left over.
-// deltaText and suffixText are rendered independently (never split out of
-// one combined string), so this works the same whether there's a delta to
-// show or not.
+// Badge for the trend, sized and placed to sit in the large empty area
+// beside the big percentage rather than as a small top-corner label
+// competing with the title for space. deltaText and suffixText are
+// rendered independently (never split out of one combined string), so
+// this works the same whether there's a delta to show or not.
 function trendBadge(trendInfo, x, y) {
   const hasDelta = Boolean(trendInfo.deltaText);
-  const suffixY = hasDelta ? y + 36 : y + 26;
+  const suffixY = hasDelta ? y + 46 : y + (TREND_BADGE_HEIGHT / 2 + 6);
   return `
-    <rect x="${x}" y="${y}" width="${TREND_BADGE_WIDTH}" height="${TREND_BADGE_HEIGHT}" rx="10" fill="${trendInfo.color}" fill-opacity="0.14"/>
-    ${trendInfo.arrow ? `<text x="${x + 16}" y="${y + 20}" font-family="${FONT}" font-size="16" fill="${trendInfo.color}">${trendInfo.arrow}</text>` : ''}
-    ${hasDelta ? `<text x="${x + (trendInfo.arrow ? 38 : 16)}" y="${y + 21}" font-family="${FONT}" font-size="13" font-weight="bold" fill="${trendInfo.color}">${escapeXml(trendInfo.deltaText)}</text>` : ''}
-    <text x="${x + 16}" y="${suffixY}" font-family="${FONT}" font-size="11" fill="${trendInfo.color}" fill-opacity="0.85">${escapeXml(trendInfo.suffixText)}</text>
+    <rect x="${x}" y="${y}" width="${TREND_BADGE_WIDTH}" height="${TREND_BADGE_HEIGHT}" rx="12" fill="${trendInfo.color}" fill-opacity="0.14"/>
+    ${trendInfo.arrow ? `<text x="${x + 22}" y="${y + 34}" font-family="${FONT}" font-size="26" fill="${trendInfo.color}">${trendInfo.arrow}</text>` : ''}
+    ${hasDelta ? `<text x="${x + (trendInfo.arrow ? 56 : 22)}" y="${y + 35}" font-family="${FONT}" font-size="24" font-weight="bold" fill="${trendInfo.color}">${escapeXml(trendInfo.deltaText)}</text>` : ''}
+    <text x="${x + 22}" y="${suffixY}" font-family="${FONT}" font-size="14" fill="${trendInfo.color}" fill-opacity="0.85">${escapeXml(trendInfo.suffixText)}</text>
   `;
 }
 
@@ -166,7 +166,7 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
   const pctText = currentPct === null ? '—' : `${currentPct.toFixed(0)}%`;
   const trendInfo = trendLabel(trend, trendDeltaPct, comparisonLabel);
 
-  const sparkline = sparklineSvg(series, PAD, 236, WIDTH - PAD * 2, 44, color);
+  const sparkline = sparklineSvg(series, PAD, 256, WIDTH - PAD * 2, 44, color);
 
   // Four equal-width columns rather than fixed pixel offsets - stays
   // readable even when a busy region pushes a count into 2-3 digits.
@@ -177,12 +177,19 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
     [COLOR_BAD, counts.not_available, 'нет'],
     [COLOR_MUTED, counts.no_data, 'нет данных'],
   ]
-    .map(([dotColor, count, label], i) => statChip(PAD + i * colWidth, 196, dotColor, count, label))
+    .map(([dotColor, count, label], i) => statChip(PAD + i * colWidth, 216, dotColor, count, label))
     .join('');
 
-  const badgeX = WIDTH - PAD - TREND_BADGE_WIDTH;
-  const titleMaxWidth = badgeX - PAD - 16;
-  const titleText = truncateToWidth(region.name, titleMaxWidth, 18);
+  // The title no longer shares its row with the trend badge (which now
+  // sits beside the percentage instead), so it gets the full card width -
+  // just a safety truncation for an unrealistically long region name.
+  const titleText = truncateToWidth(region.name, WIDTH - PAD * 2, 18);
+
+  // "100%" is the widest the percentage text can realistically get -
+  // measured (not guessed) at ~195px, so the badge is anchored well clear
+  // of it regardless of how many digits the current figure has.
+  const badgeX = PAD + 210;
+  const badgeY = 96;
 
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}">
@@ -191,10 +198,10 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
 
       <text x="${PAD}" y="44" font-family="${FONT}" font-size="23" font-weight="bold" fill="${COLOR_TEXT}">${escapeXml(titleText)}</text>
       <text x="${PAD}" y="66" font-family="${FONT}" font-size="13" fill="${COLOR_SUBTEXT}">${escapeXml(periodLabel)}</text>
-      ${trendBadge(trendInfo, badgeX, 24)}
 
       <text x="${PAD}" y="152" font-family="${FONT}" font-size="66" font-weight="bold" fill="${color}">${pctText}</text>
       <text x="${PAD}" y="174" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">доступность сейчас</text>
+      ${trendBadge(trendInfo, badgeX, badgeY)}
 
       ${statRow}
 
