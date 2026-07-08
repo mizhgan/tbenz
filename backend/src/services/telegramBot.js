@@ -41,6 +41,8 @@ async function upsertChatFromCtx(ctx) {
   return created;
 }
 
+let launchError = null;
+
 async function start() {
   if (!isEnabled()) {
     logger.info('Telegram bot disabled (TELEGRAM_BOT_TOKEN not set)');
@@ -73,8 +75,19 @@ async function start() {
     logger.error('Telegram bot error:', err.message);
   });
 
-  await bot.launch();
-  logger.info('Telegram bot started (long polling)');
+  // bot.launch() does not resolve until the bot stops - for long polling it
+  // internally runs the receive loop for the entire lifetime of the process.
+  // It must never be awaited here: doing so would block the rest of startup
+  // (including app.listen()) forever, taking the whole backend down with it.
+  launchError = null;
+  bot
+    .launch()
+    .catch((err) => {
+      logger.error('Telegram bot failed to launch:', err.message);
+      launchError = err.message;
+      bot = null;
+    });
+  logger.info('Telegram bot launching (long polling)...');
 }
 
 function stop() {
@@ -83,13 +96,9 @@ function stop() {
 
 async function getStatus() {
   if (!isEnabled()) return { enabled: false, running: false, username: null };
-  if (!bot) return { enabled: true, running: false, username: null };
-  try {
-    const me = await bot.telegram.getMe();
-    return { enabled: true, running: true, username: me.username };
-  } catch (err) {
-    return { enabled: true, running: false, username: null, error: err.message };
-  }
+  if (!bot) return { enabled: true, running: false, username: null, error: launchError };
+  if (!bot.botInfo) return { enabled: true, running: false, username: null };
+  return { enabled: true, running: true, username: bot.botInfo.username };
 }
 
 // Swallows per-chat errors so one bad chat (blocked/kicked the bot) never
