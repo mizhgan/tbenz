@@ -6,7 +6,7 @@ import { regionsApi } from '../api/regions';
 import StationHistoryChart from '../components/StationHistoryChart.vue';
 import StationForecast from '../components/StationForecast.vue';
 import ExportPanel from '../components/ExportPanel.vue';
-import { statusMeta } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
 import {
   canShareFile,
   captureMapBase,
@@ -58,21 +58,8 @@ const availableFuelTypes = computed(() => {
   for (const s of stations.value) {
     for (const f of s.fuelStatuses || []) set.add(f.fuelType);
   }
-  return Array.from(set).sort((a, b) => {
-    const na = Number(a);
-    const nb = Number(b);
-    const aIsNum = !Number.isNaN(na);
-    const bIsNum = !Number.isNaN(nb);
-    if (aIsNum && bIsNum) return na - nb;
-    if (aIsNum) return -1;
-    if (bIsNum) return 1;
-    return a.localeCompare(b, 'ru');
-  });
+  return sortFuelTypes(Array.from(set));
 });
-
-function fuelTypeLabel(type) {
-  return /^\d+$/.test(type) ? `АИ-${type}` : type;
-}
 
 function effectiveStatus(station) {
   if (!selectedFuelType.value) return station.status;

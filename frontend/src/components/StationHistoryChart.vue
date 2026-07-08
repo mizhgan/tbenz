@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
 import { stationsApi } from '../api/regions';
 import { STATUS_ORDER, statusMeta, statusOrdinal } from '../utils/fuelStatus';
+import { useFuelColorsStore } from '../store/fuelColors';
 
 const props = defineProps({
   stationId: { type: String, required: true },
@@ -12,20 +13,19 @@ const canvasRef = ref(null);
 const loading = ref(true);
 const errorMessage = ref('');
 let chart = null;
-
-const SERIES_COLORS = ['#2563eb', '#7c3aed', '#0891b2', '#be185d', '#059669', '#ca8a04'];
+const fuelColors = useFuelColorsStore();
 
 function renderChart(snapshots) {
   const fuelTypes = [...new Set(snapshots.flatMap((s) => s.fuelStatuses.map((f) => f.fuelType)))];
   const labels = snapshots.map((s) => new Date(s.polledAt).toLocaleString('ru-RU'));
-  const datasets = fuelTypes.map((fuelType, idx) => ({
+  const datasets = fuelTypes.map((fuelType) => ({
     label: `АИ-${fuelType}`,
     data: snapshots.map((s) => {
       const entry = s.fuelStatuses.find((f) => f.fuelType === fuelType);
       return entry ? statusOrdinal(entry.status) : null;
     }),
-    borderColor: SERIES_COLORS[idx % SERIES_COLORS.length],
-    backgroundColor: SERIES_COLORS[idx % SERIES_COLORS.length],
+    borderColor: fuelColors.colorFor(fuelType),
+    backgroundColor: fuelColors.colorFor(fuelType),
     spanGaps: true,
     stepped: true,
   }));
