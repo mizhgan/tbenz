@@ -112,11 +112,11 @@ function handleSubmit() {
           <label>Районы, за которыми следит чат</label>
           <div class="region-list">
             <p v-if="!regions.length" class="muted">Районы ещё не созданы.</p>
-            <label v-for="r in regions" :key="r.id" class="filter-checkbox">
+            <label v-for="r in regions" :key="r._id" class="filter-checkbox">
               <input
                 type="checkbox"
-                :checked="selectedRegionIds.has(String(r.id))"
-                @change="toggleRegion(r.id)"
+                :checked="selectedRegionIds.has(String(r._id))"
+                @change="toggleRegion(r._id)"
               />
               {{ r.name }}
             </label>
