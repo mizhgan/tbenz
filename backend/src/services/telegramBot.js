@@ -121,9 +121,16 @@ async function getStatus() {
   return { enabled: true, running: true, username: bot.botInfo.username };
 }
 
-// Swallows per-chat errors so one bad chat (blocked/kicked the bot) never
-// stops the rest of a batch; disables the chat on a definitive 403 so we
-// stop retrying it forever.
+// A definitive 403 means the chat blocked/kicked the bot - disable it so we
+// stop retrying forever instead of erroring on every future send.
+async function disableOn403(chatDoc, err) {
+  if (err.response?.error_code === 403) {
+    chatDoc.status = 'disabled';
+    await chatDoc.save();
+  }
+}
+
+// Swallows per-chat errors so one bad chat never stops the rest of a batch.
 async function sendMessage(chatDoc, text) {
   if (!bot) return false;
   try {
@@ -131,10 +138,47 @@ async function sendMessage(chatDoc, text) {
     return true;
   } catch (err) {
     logger.warn(`Telegram: failed to send to chat ${chatDoc.chatId}: ${err.message}`);
-    if (err.response?.error_code === 403) {
-      chatDoc.status = 'disabled';
-      await chatDoc.save();
-    }
+    await disableOn403(chatDoc, err);
+    return false;
+  }
+}
+
+async function sendPhoto(chatDoc, buffer, caption) {
+  if (!bot) return false;
+  try {
+    await bot.telegram.sendPhoto(
+      chatDoc.chatId,
+      { source: buffer },
+      caption ? { caption, parse_mode: 'HTML' } : undefined
+    );
+    return true;
+  } catch (err) {
+    logger.warn(`Telegram: failed to send photo to chat ${chatDoc.chatId}: ${err.message}`);
+    await disableOn403(chatDoc, err);
+    return false;
+  }
+}
+
+// Telegram albums (media groups) require at least 2 items - a single-item
+// "album" is sent as a plain photo instead. Also caps at 10 items, the
+// platform's own per-album limit (extra items beyond that are dropped
+// rather than causing the whole send to fail; a chat following more than
+// 10 regions is not an expected configuration).
+async function sendPhotoAlbum(chatDoc, items) {
+  if (!bot || !items.length) return false;
+  if (items.length === 1) return sendPhoto(chatDoc, items[0].buffer, items[0].caption);
+
+  try {
+    const media = items.slice(0, 10).map((item) => ({
+      type: 'photo',
+      media: { source: item.buffer },
+      ...(item.caption ? { caption: item.caption, parse_mode: 'HTML' } : {}),
+    }));
+    await bot.telegram.sendMediaGroup(chatDoc.chatId, media);
+    return true;
+  } catch (err) {
+    logger.warn(`Telegram: failed to send album to chat ${chatDoc.chatId}: ${err.message}`);
+    await disableOn403(chatDoc, err);
     return false;
   }
 }
@@ -157,4 +201,4 @@ async function sendToChats(chatDocs, textFn) {
   }
 }
 
-module.exports = { start, stop, isEnabled, getStatus, sendMessage, sendToChats };
+module.exports = { start, stop, isEnabled, getStatus, sendMessage, sendPhoto, sendPhotoAlbum, sendToChats };

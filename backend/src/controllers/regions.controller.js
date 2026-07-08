@@ -4,6 +4,7 @@ const { HttpError } = require('../middleware/errorHandler');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
+const metricsService = require('../services/metricsService');
 const scheduler = require('../services/scheduler');
 const { ingestRegion } = require('../services/ingestService');
 const { minPollIntervalMinutes } = require('../config/env');
@@ -151,37 +152,7 @@ const getRegionSnapshot = asyncHandler(async (req, res) => {
     throw new HttpError(400, 'Invalid "at" timestamp');
   }
 
-  const stations = await StationSnapshot.aggregate([
-    { $match: { region: regionId, polledAt: { $lte: at } } },
-    { $sort: { station: 1, polledAt: -1 } },
-    { $group: { _id: '$station', doc: { $first: '$$ROOT' } } },
-    { $replaceRoot: { newRoot: '$doc' } },
-    {
-      $lookup: {
-        from: 'stations',
-        localField: 'station',
-        foreignField: '_id',
-        as: 'stationInfo',
-      },
-    },
-    { $unwind: '$stationInfo' },
-    {
-      $project: {
-        _id: 0,
-        stationId: '$station',
-        polledAt: 1,
-        lat: 1,
-        lon: 1,
-        status: 1,
-        fuelStatuses: 1,
-        lastTransactionAt: 1,
-        name: '$stationInfo.name',
-        address: '$stationInfo.address',
-        yandexOrgId: '$stationInfo.yandexOrgId',
-      },
-    },
-  ]);
-
+  const stations = await metricsService.getCurrentSnapshot(regionId, at);
   res.json({ at, stations });
 });
 

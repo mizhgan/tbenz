@@ -37,6 +37,45 @@ const STATUS_COUNTS_GROUP = {
 };
 
 /**
+ * The most recent snapshot at or before `at`, per station in the region -
+ * "what does the region look like right now" rather than an aggregate over
+ * a period. Shared by the region-snapshot endpoint (map's live/at-time view)
+ * and the Telegram digest (current status breakdown).
+ */
+async function getCurrentSnapshot(regionId, at) {
+  return StationSnapshot.aggregate([
+    { $match: { region: regionId, polledAt: { $lte: at } } },
+    { $sort: { station: 1, polledAt: -1 } },
+    { $group: { _id: '$station', doc: { $first: '$$ROOT' } } },
+    { $replaceRoot: { newRoot: '$doc' } },
+    {
+      $lookup: {
+        from: 'stations',
+        localField: 'station',
+        foreignField: '_id',
+        as: 'stationInfo',
+      },
+    },
+    { $unwind: '$stationInfo' },
+    {
+      $project: {
+        _id: 0,
+        stationId: '$station',
+        polledAt: 1,
+        lat: 1,
+        lon: 1,
+        status: 1,
+        fuelStatuses: 1,
+        lastTransactionAt: 1,
+        name: '$stationInfo.name',
+        address: '$stationInfo.address',
+        yandexOrgId: '$stationInfo.yandexOrgId',
+      },
+    },
+  ]);
+}
+
+/**
  * Region-wide availability trend, bucketed into fixed-size time windows.
  */
 async function getAvailabilityTrend(regionId, { from, to, bucketHours = 24, tz = DEFAULT_TZ }) {
@@ -66,6 +105,51 @@ async function getAvailabilityTrend(regionId, { from, to, bucketHours = 24, tz =
     noData: row.noData,
     ...withKnownPct(row),
   }));
+}
+
+/**
+ * Availability series bucketed into roughly `bucketCount` evenly-spaced
+ * minute-granularity windows - used for the Telegram digest sparkline,
+ * which needs finer/more flexible buckets than getAvailabilityTrend's
+ * hour/day-only granularity (e.g. an hourly digest's 1-hour window has to
+ * be sliced into a handful of few-minute buckets, not whole hours).
+ *
+ * Unlike getAvailabilityTrend, this fills every expected bucket boundary
+ * explicitly (including ones with zero snapshots) so a sparkline drawn from
+ * the result has evenly-spaced points on the time axis instead of silently
+ * skipping gaps - $group only ever returns buckets that had data.
+ */
+async function getAvailabilitySeries(regionId, { from, to, bucketCount = 12 }) {
+  const spanMs = to.getTime() - from.getTime();
+  const binSizeMinutes = Math.max(1, Math.round(spanMs / bucketCount / 60000));
+  const binSizeMs = binSizeMinutes * 60000;
+  const match = buildMatch(regionId, from, to);
+
+  const rows = await StationSnapshot.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: { $dateTrunc: { date: '$polledAt', unit: 'minute', binSize: binSizeMinutes } },
+        ...STATUS_COUNTS_GROUP,
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+  const rowByBucketStartMs = new Map(rows.map((row) => [row._id.getTime(), row]));
+
+  const buckets = [];
+  const firstBucketStartMs = Math.floor(from.getTime() / binSizeMs) * binSizeMs;
+  for (let t = firstBucketStartMs; t < to.getTime(); t += binSizeMs) {
+    const row = rowByBucketStartMs.get(t);
+    buckets.push({
+      bucketStart: new Date(t),
+      total: row?.total ?? 0,
+      ...(row
+        ? withKnownPct(row)
+        : { availablePct: null, maybeAvailablePct: null, notAvailablePct: null, noDataPct: null }),
+    });
+  }
+  return buckets;
 }
 
 const RECOVERY_STATUSES = new Set(['available', 'maybe_available']);
@@ -207,7 +291,9 @@ async function getHeatmap(regionId, { from, to, tz = DEFAULT_TZ }) {
 }
 
 module.exports = {
+  getCurrentSnapshot,
   getAvailabilityTrend,
+  getAvailabilitySeries,
   getStationMetrics,
   getBrandMetrics,
   getHeatmap,

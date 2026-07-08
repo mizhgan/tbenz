@@ -1,6 +1,7 @@
 const TelegramChat = require('../models/TelegramChat');
 const telegramBot = require('./telegramBot');
-const metricsService = require('./metricsService');
+const telegramDigestData = require('./telegramDigestData');
+const telegramDigestImage = require('./telegramDigestImage');
 const logger = require('../utils/logger');
 
 const AVAILABLE_LIKE = new Set(['available', 'maybe_available']);
@@ -143,44 +144,58 @@ async function notifyRegionChanges(region, stationEvents) {
   });
 }
 
-async function buildRegionSummaryText(region, { from, to }) {
-  const stations = await metricsService.getStationMetrics(region._id, { from, to });
-  if (!stations.length) return `«${region.name}»: нет данных за этот период.`;
+const RU_DATE_TZ = 'Europe/Moscow';
+const dateFmt = new Intl.DateTimeFormat('ru-RU', { timeZone: RU_DATE_TZ, day: '2-digit', month: '2-digit' });
+const timeFmt = new Intl.DateTimeFormat('ru-RU', { timeZone: RU_DATE_TZ, hour: '2-digit', minute: '2-digit' });
 
-  let weightedAvailable = 0;
-  let weightForAvailable = 0;
-  let totalOutages = 0;
-  for (const s of stations) {
-    if (s.availablePct !== null) {
-      weightedAvailable += s.availablePct * s.totalPolls;
-      weightForAvailable += s.totalPolls;
-    }
-    totalOutages += s.outageCount;
+function formatPeriodLabel(period, from, to) {
+  const title = period === 'daily' ? 'Дневная сводка' : 'Часовая сводка';
+  const range = period === 'daily' ? `${dateFmt.format(from)}–${dateFmt.format(to)}` : `${dateFmt.format(to)} ${timeFmt.format(from)}–${timeFmt.format(to)}`;
+  return `${title} · ${range}`;
+}
+
+function formatDuration(ms) {
+  const totalMinutes = Math.max(1, Math.round(ms / 60000));
+  if (totalMinutes < 60) return `${totalMinutes} мин`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes > 0 ? `${hours} ч ${minutes} мин` : `${hours} ч`;
+}
+
+// The image already carries the headline number (current %), status
+// breakdown and trend - this text complements it with what doesn't fit
+// cleanly into a compact card: exact outage count and which stations are
+// the actual problem right now.
+function formatRegionDigestText(data) {
+  const lines = [`<b>${escapeHtml(data.region.name)}</b>`, `Отключений за период: ${data.totalOutages}`];
+  if (data.problemStations.length) {
+    lines.push('Проблемные станции:');
+    data.problemStations.forEach(({ station, downSinceMs }, i) => {
+      lines.push(`${i + 1}. ${escapeHtml(station.name || 'АЗС')} — недоступна ${formatDuration(downSinceMs)}`);
+    });
   }
-  const overallPct = weightForAvailable > 0 ? weightedAvailable / weightForAvailable : null;
-  const pctLabel = overallPct === null ? 'нет данных' : `${overallPct.toFixed(0)}%`;
-
-  return [
-    `📊 <b>${escapeHtml(region.name)}</b>`,
-    `Доступность: ${pctLabel}`,
-    `Станций: ${stations.length}`,
-    `Отключений за период: ${totalOutages}`,
-  ].join('\n');
+  return lines.join('\n');
 }
 
 /**
- * Builds and sends one digest message per chat, one section per subscribed
- * region concatenated together (a chat can watch several regions at once).
+ * Builds and sends one digest "package" per chat: an image card per
+ * followed region (sent together as one album, or a single photo if the
+ * chat only follows one region - Telegram albums require at least 2 items),
+ * followed by one text message with the per-region details that don't fit
+ * on the card (exact outage count, named problem stations).
  */
 async function sendDigest(period) {
   if (!telegramBot.isEnabled()) return;
   const eventKey = period === 'daily' ? 'dailyDigest' : 'hourlyDigest';
   const lastFieldKey = period === 'daily' ? 'lastDailyDigestAt' : 'lastHourlyDigestAt';
   const spanMs = period === 'daily' ? 24 * 3600 * 1000 : 3600 * 1000;
+  const sparklineBuckets = period === 'daily' ? 24 : 12;
+  const comparisonLabel = period === 'daily' ? 'прошлым суткам' : 'прошлому часу';
 
   const chats = await TelegramChat.find({ status: 'active', [`events.${eventKey}`]: true }).populate('regions');
   const to = new Date();
   const from = new Date(to.getTime() - spanMs);
+  const periodLabel = formatPeriodLabel(period, from, to);
 
   // Digests are checked on a short interval (see telegramDigestScheduler),
   // not sent every tick - a chat is only actually due once spanMs has
@@ -194,17 +209,21 @@ async function sendDigest(period) {
 
   for (const chat of dueChats) {
     try {
-      // metricsService compares these against the Date-typed polledAt field
-      // directly (no casting) - passing ISO strings here instead of Date
-      // objects made every digest match zero snapshots (Mongo ranks the Date
-      // BSON type above String, so a Date field is never <= a string value),
-      // which is why every digest used to say "no data" no matter what.
-      const sections = await Promise.all(
-        chat.regions.map((region) => buildRegionSummaryText(region, { from, to }))
+      const regionDigests = await Promise.all(
+        chat.regions.map((region) =>
+          telegramDigestData.buildRegionDigestData(region, { from, to, spanMs, sparklineBuckets })
+        )
       );
+
+      const images = await Promise.all(
+        regionDigests.map((data) => telegramDigestImage.renderRegionDigestCard(data, { periodLabel, comparisonLabel }))
+      );
+      await telegramBot.sendPhotoAlbum(chat, images.map((buffer) => ({ buffer })));
+
       const title = period === 'daily' ? '🗓 Дневная сводка' : '🕐 Часовая сводка';
-      const text = [`${title}`, ...sections].join('\n\n');
+      const text = [title, ...regionDigests.map(formatRegionDigestText)].join('\n\n');
       await telegramBot.sendMessage(chat, text);
+
       chat[lastFieldKey] = to;
       await chat.save();
     } catch (err) {
