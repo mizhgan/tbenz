@@ -47,17 +47,11 @@ async function storeStation(parsed, region, polledAt) {
     raw: parsed.raw,
   });
 
-  // Best-effort: a Telegram hiccup must never break ingestion.
-  try {
-    await telegramNotifier.handleStationUpdate({
-      station,
-      region,
-      previousFuelStatuses: previous?.lastFuelStatuses || [],
-      newFuelStatuses: parsed.fuelStatuses,
-    });
-  } catch (err) {
-    logger.error(`Telegram notify failed for station ${station._id}:`, err.message);
-  }
+  const transitions = telegramNotifier.computeTransitions(
+    previous?.lastFuelStatuses || [],
+    parsed.fuelStatuses
+  );
+  return { station, transitions };
 }
 
 /**
@@ -78,6 +72,11 @@ async function ingestRegion(region) {
 
     let stored = 0;
     let skipped = 0;
+    // Collected across the whole poll and sent as one batch per chat below,
+    // instead of notifying the moment each station is stored - the source
+    // reports every station's state at once, so a poll that changes several
+    // stations shouldn't turn into a burst of near-simultaneous messages.
+    const stationEvents = [];
     for (const raw of rawStations) {
       const parsed = parseStation(raw);
       if (!parsed) {
@@ -85,7 +84,8 @@ async function ingestRegion(region) {
         continue;
       }
       try {
-        await storeStation(parsed, region, polledAt);
+        const { station, transitions } = await storeStation(parsed, region, polledAt);
+        if (transitions.length) stationEvents.push({ station, transitions });
         stored += 1;
       } catch (err) {
         logger.error(`Failed to store station for region ${region.name}:`, err.message);
@@ -97,6 +97,13 @@ async function ingestRegion(region) {
     region.lastPollError = null;
     region.lastPollStationCount = stored;
     await region.save();
+
+    // Best-effort: a Telegram hiccup must never break ingestion.
+    try {
+      await telegramNotifier.notifyRegionChanges(region, stationEvents);
+    } catch (err) {
+      logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
+    }
 
     if (skipped > 0) {
       logger.warn(

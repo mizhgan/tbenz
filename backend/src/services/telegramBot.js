@@ -141,11 +141,19 @@ async function sendMessage(chatDoc, text) {
 
 // Sequential dispatch with a small delay between sends - keeps well under
 // Telegram's ~30 msg/sec global rate limit without needing a real queue for
-// what's expected to be, at most, a handful of chats per event.
+// what's expected to be, at most, a handful of chats per event. textFn may
+// return a single string, an array of strings (e.g. a batch split into
+// several messages to stay under Telegram's length limit), or an empty
+// array/falsy value to skip a chat entirely (e.g. nothing relevant to it).
 async function sendToChats(chatDocs, textFn) {
   for (const chatDoc of chatDocs) {
-    await sendMessage(chatDoc, textFn(chatDoc));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const result = textFn(chatDoc);
+    const texts = Array.isArray(result) ? result : [result];
+    for (const text of texts) {
+      if (!text) continue;
+      await sendMessage(chatDoc, text);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
   }
 }
 
