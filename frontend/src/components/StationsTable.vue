@@ -6,7 +6,9 @@ const props = defineProps({
   stations: { type: Array, default: () => [] },
   defaultSortKey: { type: String, default: 'availablePct' },
   defaultSortDir: { type: String, default: 'asc' },
+  loadingStationId: { type: String, default: null },
 });
+const emit = defineEmits(['select']);
 
 const sortKey = ref(props.defaultSortKey);
 const sortDir = ref(props.defaultSortDir);
@@ -68,7 +70,14 @@ const sortedStations = computed(() => {
       <tbody>
         <tr v-for="s in sortedStations" :key="s.stationId">
           <td>
-            <div>{{ s.name || 'АЗС' }}</div>
+            <button
+              type="button"
+              class="station-link"
+              :disabled="loadingStationId === s.stationId"
+              @click="emit('select', s.stationId)"
+            >
+              {{ s.name || 'АЗС' }}{{ loadingStationId === s.stationId ? '…' : '' }}
+            </button>
             <div class="address">{{ s.address }}</div>
           </td>
           <td :style="{ color: availabilityColor(s.availablePct), fontWeight: 600 }">
@@ -98,5 +107,24 @@ const sortedStations = computed(() => {
 .address {
   font-size: 12px;
   color: #667;
+}
+
+.station-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: #2563eb;
+  text-align: left;
+  cursor: pointer;
+}
+
+.station-link:hover {
+  text-decoration: underline;
+}
+
+.station-link:disabled {
+  color: #94a3b8;
+  cursor: default;
 }
 </style>

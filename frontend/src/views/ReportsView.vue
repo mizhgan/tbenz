@@ -1,13 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { regionsApi } from '../api/regions';
+import { regionsApi, stationsApi } from '../api/regions';
 import { metricsApi } from '../api/metrics';
 import { formatMinutes, formatPct } from '../utils/colorScale';
 import TrendChart from '../components/TrendChart.vue';
 import BrandsChart from '../components/BrandsChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationsTable from '../components/StationsTable.vue';
+import StationDetailModal from '../components/StationDetailModal.vue';
 
 const route = useRoute();
 
@@ -15,6 +16,46 @@ const regions = ref([]);
 const selectedRegionId = ref(route.query.region || '');
 const loading = ref(false);
 const errorMessage = ref('');
+
+// Station detail modal, opened from a station name in either table below.
+// The metrics endpoints that feed those tables only carry aggregate stats
+// (no lat/lon/live status/fuel breakdown), so opening the modal means
+// fetching the actual Station document and reshaping it into the same
+// snapshot-like shape MapView already passes in (status/fuelStatuses/
+// polledAt instead of the document's own lastStatus/lastFuelStatuses/
+// lastSeenAt field names).
+const detailStation = ref(null);
+const showDetailModal = ref(false);
+const detailLoadingId = ref(null);
+const detailError = ref('');
+
+async function openStationDetail(stationId) {
+  detailError.value = '';
+  detailLoadingId.value = stationId;
+  try {
+    const doc = await stationsApi.get(stationId);
+    detailStation.value = {
+      stationId: doc._id,
+      name: doc.name,
+      address: doc.address,
+      lat: doc.lat,
+      lon: doc.lon,
+      status: doc.lastStatus,
+      fuelStatuses: doc.lastFuelStatuses || [],
+      lastTransactionAt: doc.lastTransactionAt,
+      polledAt: doc.lastSeenAt,
+    };
+    showDetailModal.value = true;
+  } catch (err) {
+    detailError.value = err.response?.data?.error || 'Не удалось загрузить данные станции';
+  } finally {
+    detailLoadingId.value = null;
+  }
+}
+
+function closeDetailModal() {
+  showDetailModal.value = false;
+}
 
 const now = Date.now();
 const fromMs = ref(now - 7 * 24 * 60 * 60 * 1000);
@@ -247,6 +288,7 @@ onMounted(async () => {
     </div>
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="detailError" class="error-text">{{ detailError }}</p>
 
     <div class="kpi-grid">
       <div class="card kpi">
@@ -309,6 +351,8 @@ onMounted(async () => {
         <StationsTable
           :stations="highlightedStations"
           :default-sort-dir="stationsSort === 'best' ? 'desc' : 'asc'"
+          :loading-station-id="detailLoadingId"
+          @select="openStationDetail"
         />
       </div>
       <div class="card section">
@@ -327,8 +371,19 @@ onMounted(async () => {
     <div class="card section">
       <h2>Все станции</h2>
       <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
-      <StationsTable :stations="stations" />
+      <StationsTable
+        :stations="stations"
+        :loading-station-id="detailLoadingId"
+        @select="openStationDetail"
+      />
     </div>
+
+    <StationDetailModal
+      v-if="showDetailModal && detailStation"
+      :station="detailStation"
+      :region-id="selectedRegionId"
+      @close="closeDetailModal"
+    />
   </div>
 </template>
 
