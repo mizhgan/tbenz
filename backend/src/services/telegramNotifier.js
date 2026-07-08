@@ -194,8 +194,13 @@ async function sendDigest(period) {
 
   for (const chat of dueChats) {
     try {
+      // metricsService compares these against the Date-typed polledAt field
+      // directly (no casting) - passing ISO strings here instead of Date
+      // objects made every digest match zero snapshots (Mongo ranks the Date
+      // BSON type above String, so a Date field is never <= a string value),
+      // which is why every digest used to say "no data" no matter what.
       const sections = await Promise.all(
-        chat.regions.map((region) => buildRegionSummaryText(region, { from: from.toISOString(), to: to.toISOString() }))
+        chat.regions.map((region) => buildRegionSummaryText(region, { from, to }))
       );
       const title = period === 'daily' ? '🗓 Дневная сводка' : '🕐 Часовая сводка';
       const text = [`${title}`, ...sections].join('\n\n');
