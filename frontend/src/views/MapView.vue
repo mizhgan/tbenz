@@ -441,6 +441,11 @@ async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, for
 
 onMounted(async () => {
   map = L.map(mapContainer.value).setView([55.75, 37.62], 6);
+  // Leaflet's own "Leaflet" link in the attribution control is just its
+  // default branding, not a license requirement - drop it. The OpenStreetMap
+  // attribution added by the tile layer below stays: it's required by OSM's
+  // tile usage policy for their free tiles, unlike the Leaflet prefix.
+  map.attributionControl.setPrefix(false);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
