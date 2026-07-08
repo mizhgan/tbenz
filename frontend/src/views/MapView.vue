@@ -3,9 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
-import StationHistoryChart from '../components/StationHistoryChart.vue';
-import StationForecast from '../components/StationForecast.vue';
 import ExportPanel from '../components/ExportPanel.vue';
+import StationDetailModal from '../components/StationDetailModal.vue';
 import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
 import {
   canShareFile,
@@ -31,6 +30,7 @@ const range = ref({ from: null, to: null });
 const atMs = ref(Date.now());
 const stations = ref([]);
 const selectedStation = ref(null);
+const showDetailModal = ref(false);
 const loadingStations = ref(false);
 const errorMessage = ref('');
 const liveMode = ref(true);
@@ -224,6 +224,7 @@ function renderMarkers() {
     });
     marker.on('click', () => {
       selectedStation.value = s;
+      showDetailModal.value = false;
     });
     const fuelSuffix = selectedFuelType.value ? ` (${fuelTypeLabel(selectedFuelType.value)})` : '';
     marker.bindTooltip(`${s.name || 'АЗС'} — ${meta.label}${fuelSuffix}`);
@@ -240,8 +241,17 @@ function handleFilterChange() {
   renderMarkers();
 }
 
+function openDetailModal() {
+  showDetailModal.value = true;
+}
+
+function closeDetailModal() {
+  showDetailModal.value = false;
+}
+
 async function handleRegionChange() {
   selectedStation.value = null;
+  showDetailModal.value = false;
   hasFitted.value = false;
   // Brand names from the previous region don't apply here - drop them so
   // the checklist starts fresh (all visible) instead of carrying over an
@@ -624,13 +634,20 @@ onBeforeUnmount(() => {
             {{ selectedStation.lastTransactionAt ? formatDateTime(new Date(selectedStation.lastTransactionAt).getTime()) : 'нет данных' }}
           </p>
           <p class="hint">Снимок на момент: {{ formatDateTime(new Date(selectedStation.polledAt).getTime()) }}</p>
-          <h4>Прогноз на ближайшие часы</h4>
-          <StationForecast :station-id="selectedStation.stationId" />
-          <h4>История по видам топлива</h4>
-          <StationHistoryChart :station-id="selectedStation.stationId" />
+          <button type="button" class="btn secondary detail-btn" @click="openDetailModal">
+            Подробная информация
+          </button>
         </div>
       </div>
     </div>
+
+    <StationDetailModal
+      v-if="showDetailModal && selectedStation"
+      :station="selectedStation"
+      :region-id="selectedRegionId"
+      :selected-fuel-type="selectedFuelType"
+      @close="closeDetailModal"
+    />
 
     <ExportPanel
       v-if="showExportPanel"
@@ -737,6 +754,11 @@ onBeforeUnmount(() => {
   padding-left: 8px;
   padding-right: 8px;
   border-radius: 4px;
+}
+
+.detail-btn {
+  width: 100%;
+  margin-top: 12px;
 }
 
 .filter-block {
