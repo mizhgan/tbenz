@@ -1,9 +1,11 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import L from 'leaflet';
 import { metricsApi } from '../api/metrics';
 import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
+import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
+import { canShareFile } from '../utils/mapExport';
 import StationForecast from './StationForecast.vue';
 import StationHistoryChart from './StationHistoryChart.vue';
 
@@ -20,6 +22,15 @@ let miniMap = null;
 const reliabilityLoading = ref(true);
 const reliabilityError = ref('');
 const reliability = ref(null);
+
+const cardGenerating = ref(false);
+const cardUrl = ref(null);
+const cardError = ref('');
+const copyFeedback = ref('');
+const clipboardSupported = canCopyImageToClipboard();
+let cardBlob = null;
+let cardFile = null;
+const canShareCard = computed(() => !!cardFile && canShareFile(cardFile));
 
 function formatDateTime(ms) {
   if (!ms) return '—';
@@ -41,6 +52,58 @@ async function loadReliability() {
     reliabilityError.value = 'Не удалось загрузить статистику надёжности';
   } finally {
     reliabilityLoading.value = false;
+  }
+}
+
+function resetCard() {
+  if (cardUrl.value) {
+    URL.revokeObjectURL(cardUrl.value);
+    cardUrl.value = null;
+  }
+  cardBlob = null;
+  cardFile = null;
+  cardError.value = '';
+  copyFeedback.value = '';
+}
+
+async function generateCard() {
+  cardError.value = '';
+  copyFeedback.value = '';
+  cardGenerating.value = true;
+  try {
+    const blob = await renderStationCard({ station: props.station, reliability: reliability.value });
+    if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
+    cardBlob = blob;
+    cardUrl.value = URL.createObjectURL(blob);
+    const safeName = (props.station.name || 'station').replace(/[^\p{L}\p{N}]+/gu, '-');
+    cardFile = new File([blob], `${safeName}-card.png`, { type: 'image/png' });
+  } catch (err) {
+    cardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
+  } finally {
+    cardGenerating.value = false;
+  }
+}
+
+async function copyCardToClipboard() {
+  if (!cardBlob) return;
+  copyFeedback.value = '';
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]);
+    copyFeedback.value = 'ok';
+  } catch (err) {
+    copyFeedback.value = 'error';
+    cardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
+  }
+}
+
+async function shareCard() {
+  if (!cardFile) return;
+  try {
+    await navigator.share({ files: [cardFile], title: `Статус станции: ${props.station.name || 'АЗС'}` });
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      cardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+    }
   }
 }
 
@@ -75,6 +138,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (miniMap) miniMap.remove();
+  if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
 });
 </script>
 
@@ -146,6 +210,41 @@ onBeforeUnmount(() => {
 
         <h4>История по видам топлива</h4>
         <StationHistoryChart :station-id="station.stationId" />
+
+        <h4>Карточка для шаринга</h4>
+        <p class="hint">
+          Собирает статус, виды топлива и статистику надёжности в одну картинку — удобно
+          скопировать и вставить в чат, не прикрепляя файл.
+        </p>
+
+        <template v-if="!cardUrl">
+          <button type="button" class="btn secondary" :disabled="cardGenerating" @click="generateCard">
+            {{ cardGenerating ? 'Генерация...' : '🖼 Сгенерировать картинку' }}
+          </button>
+        </template>
+        <template v-else>
+          <img :src="cardUrl" alt="Карточка станции" class="card-preview" />
+          <div class="card-actions">
+            <button type="button" class="btn secondary" @click="resetCard">Сгенерировать заново</button>
+            <button
+              v-if="clipboardSupported"
+              type="button"
+              class="btn secondary"
+              @click="copyCardToClipboard"
+            >
+              {{ copyFeedback === 'ok' ? 'Скопировано ✓' : 'Скопировать в буфер' }}
+            </button>
+            <button v-if="canShareCard" type="button" class="btn secondary" @click="shareCard">
+              Поделиться
+            </button>
+            <a :href="cardUrl" download="station-card.png" class="btn">Скачать</a>
+          </div>
+          <p v-if="!clipboardSupported" class="hint small">
+            Этот браузер не поддерживает копирование картинки в буфер обмена — скачайте файл или
+            воспользуйтесь «Поделиться».
+          </p>
+        </template>
+        <p v-if="cardError" class="error-text">{{ cardError }}</p>
 
         <div class="modal-actions">
           <button type="button" class="btn secondary" @click="emit('close')">Закрыть</button>
@@ -261,5 +360,23 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
+}
+
+.hint.small {
+  font-size: 11px;
+}
+
+.card-preview {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-top: 8px;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 </style>
