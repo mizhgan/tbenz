@@ -3,6 +3,7 @@ const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
 const telegramNotifier = require('./telegramNotifier');
+const gdebenzIngestService = require('./gdebenzIngestService');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
@@ -103,6 +104,17 @@ async function ingestRegion(region) {
       await telegramNotifier.notifyRegionChanges(region, stationEvents);
     } catch (err) {
       logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
+    }
+
+    // Best-effort, same reasoning as the Telegram notify above: gdebenz
+    // being down/slow/changed-shape must never break the primary tbank
+    // ingestion this function exists for. Runs on the same schedule as the
+    // tbank poll above (same region, same tick) rather than its own
+    // separate timer - see gdebenzIngestService.js.
+    try {
+      await gdebenzIngestService.ingestGdebenzRegion(region);
+    } catch (err) {
+      logger.error(`gdebenz ingest failed for region ${region.name}:`, err.message);
     }
 
     if (skipped > 0) {

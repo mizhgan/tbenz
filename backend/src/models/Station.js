@@ -34,6 +34,15 @@ const stationSchema = new Schema(
     // ongoing (see telegramPredictiveAlerts.js).
     lastPredictiveDropAlertAt: { type: Date, default: null },
     lastPredictiveRecoveryAlertAt: { type: Date, default: null },
+    // Set once an admin confirms this Station is the same physical station
+    // as a GdebenzStation (see stationMatchingController.js). Once set,
+    // gdebenzIngestService.js folds that second source's readings into
+    // lastStatus/lastFuelStatuses below via mergeStatusService.js - so from
+    // every other consumer's point of view (metrics, reports, forecasts,
+    // Telegram) a matched station's status is simply "what's currently in
+    // Station", same as always; they don't need to know it's now blended
+    // from two sources.
+    gdebenzStationId: { type: Schema.Types.ObjectId, ref: 'GdebenzStation', default: null },
   },
   { timestamps: true }
 );

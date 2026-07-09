@@ -24,4 +24,10 @@ module.exports = {
   // Telegram bot is entirely optional - if unset, the feature is inert (no
   // bot process starts, admin panel just shows it as "not configured").
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || null,
+  // gdebenz.ru is a second, independent fuel-availability source, ingested
+  // alongside tbank per region (same bbox). No API key in its URL - it's a
+  // public endpoint - so this is "off" only if explicitly disabled, unlike
+  // the other optional integrations above which are off by default.
+  gdebenzApiBaseUrl: process.env.GDEBENZ_API_BASE_URL || 'https://gdebenz.ru/api/stations',
+  gdebenzEnabled: process.env.GDEBENZ_ENABLED !== 'false',
 };

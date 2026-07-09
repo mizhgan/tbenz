@@ -13,6 +13,15 @@ const regionSchema = new Schema(
     lastPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
     lastPollError: { type: String, default: null },
     lastPollStationCount: { type: Number, default: 0 },
+    // Same shape as the tbank poll-status fields above, but for the second
+    // (gdebenz) source - polled on the same schedule/bbox, see
+    // gdebenzIngestService.js. Kept separate so a gdebenz outage is visible
+    // in the admin panel without being confused with (or masking) a tbank
+    // poll failure.
+    lastGdebenzPolledAt: { type: Date, default: null },
+    lastGdebenzPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
+    lastGdebenzPollError: { type: String, default: null },
+    lastGdebenzPollStationCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
