@@ -41,12 +41,18 @@ async function storeGdebenzStation(parsed, region, polledAt) {
  */
 async function applyMergeToStation(station, gdebenzStation, region, polledAt) {
   const previousFuelStatuses = station.lastFuelStatuses;
+  // Merge against tbank's own dedicated reading (tbankLastStatus/
+  // tbankLastFuelStatuses), NOT lastStatus/lastFuelStatuses - those are the
+  // *output* of this same merge from the previous cycle, so reading them
+  // back in here would blend gdebenz's reading against yesterday's already-
+  // blended result instead of against tbank's actual current reading,
+  // compounding with every poll instead of converging.
   const mergedFuelStatuses = mergeFuelStatuses(
-    station.lastFuelStatuses,
+    station.tbankLastFuelStatuses,
     gdebenzStation.status,
     gdebenzStation.fuelTypes
   );
-  const mergedStatus = mergeOverallStatus(station.lastStatus, gdebenzStation.status);
+  const mergedStatus = mergeOverallStatus(station.tbankLastStatus, gdebenzStation.status);
 
   station.lastStatus = mergedStatus;
   station.lastFuelStatuses = mergedFuelStatuses;
