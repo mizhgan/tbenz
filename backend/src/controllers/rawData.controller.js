@@ -67,4 +67,36 @@ const queryCollection = asyncHandler(async (req, res) => {
   res.json({ count: docs.length, docs });
 });
 
-module.exports = { listCollections, queryCollection };
+// Surfaces exactly the situation that led to the yandexOrgId dedupe fix
+// (see ingestService.storeStation): several Station documents sharing the
+// same yandexOrgId are the same physical station that got split into
+// duplicates before that fix, or - now that new duplicates should no longer
+// form - a sign the yandexOrgId assumption doesn't hold for some station
+// after all. No filter input here (unlike queryCollection above), so
+// there's nothing to sanitize - it always runs the same fixed aggregation.
+const findDuplicateStations = asyncHandler(async (req, res) => {
+  const groups = await Station.aggregate([
+    { $match: { yandexOrgId: { $ne: null } } },
+    {
+      $project: {
+        name: 1,
+        address: 1,
+        lat: 1,
+        lon: 1,
+        externalId: 1,
+        yandexOrgId: 1,
+        firstSeenAt: 1,
+        lastSeenAt: 1,
+        lastStatus: 1,
+        gdebenzStationId: 1,
+      },
+    },
+    { $sort: { firstSeenAt: 1 } },
+    { $group: { _id: '$yandexOrgId', count: { $sum: 1 }, stations: { $push: '$$ROOT' } } },
+    { $match: { count: { $gt: 1 } } },
+    { $sort: { count: -1 } },
+  ]);
+  res.json({ count: groups.length, groups });
+});
+
+module.exports = { listCollections, queryCollection, findDuplicateStations };

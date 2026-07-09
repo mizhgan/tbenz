@@ -12,12 +12,42 @@ const loading = ref(false);
 const errorMessage = ref('');
 const copyFeedback = ref('');
 
+const dupGroups = ref(null);
+const dupLoading = ref(false);
+const dupError = ref('');
+const dupCopyFeedback = ref('');
+
 async function loadCollections() {
   try {
     collections.value = await rawDataApi.listCollections();
     if (collections.value.length) selectedCollection.value = collections.value[0];
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список коллекций';
+  }
+}
+
+async function findDuplicates() {
+  dupError.value = '';
+  dupCopyFeedback.value = '';
+  dupLoading.value = true;
+  try {
+    const { groups } = await rawDataApi.duplicateStations();
+    dupGroups.value = groups;
+  } catch (err) {
+    dupGroups.value = null;
+    dupError.value = err.response?.data?.error || 'Не удалось выполнить поиск дубликатов';
+  } finally {
+    dupLoading.value = false;
+  }
+}
+
+async function copyDuplicates() {
+  if (!dupGroups.value) return;
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(dupGroups.value, null, 2));
+    dupCopyFeedback.value = 'ok';
+  } catch (err) {
+    dupCopyFeedback.value = 'error';
   }
 }
 
@@ -67,6 +97,73 @@ onMounted(loadCollections);
       Фильтр — обычный MongoDB-запрос в виде JSON, например
       <code>{"name": "Irbis"}</code> или <code>{"address": {"$regex": "Воровского"}}</code>.
     </p>
+
+    <div class="card dup-card">
+      <div class="dup-header">
+        <div>
+          <h2>Дубликаты станций</h2>
+          <p class="hint hint-tight">
+            Станции, у которых несколько документов <code>Station</code> делят один и тот же
+            <code>yandexOrgId</code> (с разным <code>externalId</code>) — то есть, скорее всего,
+            одна и та же физическая АЗС, задублированная до фикса дедупликации по
+            <code>yandexOrgId</code>.
+          </p>
+        </div>
+        <button type="button" class="btn" :disabled="dupLoading" @click="findDuplicates">
+          {{ dupLoading ? 'Ищем...' : 'Найти дубликаты' }}
+        </button>
+      </div>
+
+      <p v-if="dupError" class="error-text">{{ dupError }}</p>
+
+      <template v-if="dupGroups !== null">
+        <div class="dup-summary">
+          <span class="hint">Найдено групп: {{ dupGroups.length }}</span>
+          <button
+            v-if="dupGroups.length"
+            type="button"
+            class="btn secondary"
+            @click="copyDuplicates"
+          >
+            {{ dupCopyFeedback === 'ok' ? 'Скопировано ✓' : 'Скопировать всё как JSON' }}
+          </button>
+        </div>
+
+        <p v-if="!dupGroups.length" class="hint">Дубликатов не найдено.</p>
+
+        <div v-for="group in dupGroups" :key="group._id" class="dup-group">
+          <div class="dup-group-title">
+            yandexOrgId: <code>{{ group._id }}</code> — {{ group.count }} записи(-ей)
+          </div>
+          <table class="dup-table">
+            <thead>
+              <tr>
+                <th>name</th>
+                <th>address</th>
+                <th>externalId</th>
+                <th>lat, lon</th>
+                <th>firstSeenAt</th>
+                <th>lastSeenAt</th>
+                <th>lastStatus</th>
+                <th>gdebenzStationId</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in group.stations" :key="s._id">
+                <td>{{ s.name }}</td>
+                <td>{{ s.address }}</td>
+                <td>{{ s.externalId }}</td>
+                <td>{{ s.lat }}, {{ s.lon }}</td>
+                <td>{{ s.firstSeenAt }}</td>
+                <td>{{ s.lastSeenAt }}</td>
+                <td>{{ s.lastStatus }}</td>
+                <td>{{ s.gdebenzStationId || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
 
     <div class="card controls">
       <div class="form-row">
@@ -123,6 +220,71 @@ onMounted(loadCollections);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 12px;
+}
+
+.dup-card {
+  margin-bottom: 16px;
+}
+
+.dup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dup-header h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.hint-tight {
+  margin: 0;
+  max-width: 640px;
+}
+
+.dup-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 4px;
+}
+
+.dup-group {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.dup-group-title {
+  font-size: 13px;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.dup-group-title code {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.dup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.dup-table th,
+.dup-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f1f5f9;
+  white-space: nowrap;
+}
+
+.dup-table th {
+  color: #64748b;
+  font-weight: 600;
 }
 
 .controls {
