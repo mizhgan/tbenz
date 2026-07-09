@@ -233,6 +233,47 @@ async function loadSnapshot() {
   }
 }
 
+// Station name/address/fuel-type strings ultimately come from the scraped
+// upstream source, not from anything this app controls - they're injected
+// into marker tooltips/popups as raw HTML (Leaflet sets tooltip/popup
+// content via innerHTML), so they need escaping like any other untrusted
+// string headed into innerHTML, not just user-typed input.
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[c]));
+}
+
+// Popup content replaces the old always-visible sidebar: a compact summary
+// right on the marker, with a button into the same full StationDetailModal
+// as before. Built as an HTML string (Leaflet's own content model) rather
+// than a Vue component, since Leaflet popups aren't part of Vue's render
+// tree - the "Подробная информация" button below is wired up to Vue state
+// via the popupopen handler in renderMarkers(), not a @click binding.
+function buildPopupHtml(s) {
+  const meta = statusMeta(effectiveStatus(s));
+  const fuelSuffix = selectedFuelType.value ? ` (${escapeHtml(fuelTypeLabel(selectedFuelType.value))})` : '';
+  const fuelRows = (s.fuelStatuses || [])
+    .map((f) => {
+      const fm = statusMeta(f.status);
+      return `<div class="popup-fuel-row"><span class="popup-dot" style="background:${fm.color}"></span>${escapeHtml(fuelTypeLabel(f.fuelType))}: ${fm.label}</div>`;
+    })
+    .join('');
+  return `
+    <div class="station-popup">
+      <div class="popup-title">${escapeHtml(s.name || 'АЗС')}</div>
+      ${s.address ? `<div class="popup-address">${escapeHtml(s.address)}</div>` : ''}
+      <div class="popup-status"><span class="popup-dot" style="background:${meta.color}"></span>${meta.label}${fuelSuffix}</div>
+      ${fuelRows ? `<div class="popup-fuel-list">${fuelRows}</div>` : ''}
+      <button type="button" class="btn secondary popup-detail-btn">Подробная информация</button>
+    </div>
+  `;
+}
+
 function renderMarkers() {
   if (!map) return;
   markersLayer.clearLayers();
@@ -245,12 +286,20 @@ function renderMarkers() {
       fillOpacity: 0.85,
       weight: 2,
     });
-    marker.on('click', () => {
+    const fuelSuffix = selectedFuelType.value ? ` (${escapeHtml(fuelTypeLabel(selectedFuelType.value))})` : '';
+    marker.bindTooltip(`${escapeHtml(s.name || 'АЗС')} — ${meta.label}${fuelSuffix}`);
+    marker.bindPopup(() => buildPopupHtml(s), { maxWidth: 260, minWidth: 220 });
+    // The button inside the popup isn't part of Vue's render tree (it's raw
+    // HTML Leaflet drops into the DOM), so it can't use @click - wire it up
+    // imperatively each time this marker's popup actually opens instead.
+    marker.on('popupopen', (e) => {
       selectedStation.value = s;
-      showDetailModal.value = false;
+      const el = e.popup.getElement();
+      const btn = el ? el.querySelector('.popup-detail-btn') : null;
+      if (btn) {
+        btn.addEventListener('click', openDetailModal);
+      }
     });
-    const fuelSuffix = selectedFuelType.value ? ` (${fuelTypeLabel(selectedFuelType.value)})` : '';
-    marker.bindTooltip(`${s.name || 'АЗС'} — ${meta.label}${fuelSuffix}`);
     markersLayer.addLayer(marker);
   }
   if (stations.value.length && !hasFitted.value) {
@@ -594,36 +643,33 @@ onBeforeUnmount(() => {
           </span>
         </button>
       </div>
-    </div>
 
-    <div v-if="currentSummary.total" class="card current-state">
-      <div class="current-state-header">
-        <h2>Текущее состояние{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}</h2>
-        <span class="hint small">на {{ atLabel }}</span>
-      </div>
-      <div class="kpi-grid">
-        <div class="kpi">
-          <div class="kpi-value" :style="{ color: statusMeta('available').color }">
-            {{ formatPct(currentSummary.availablePct) }}
-          </div>
-          <div class="kpi-label">доступность сейчас</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-value">{{ currentSummary.counts.available }}</div>
-          <div class="kpi-label">доступно</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-value">{{ currentSummary.counts.maybe_available }}</div>
-          <div class="kpi-label">частично</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-value">{{ currentSummary.counts.not_available }}</div>
-          <div class="kpi-label">нет</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-value">{{ currentSummary.counts.no_data }}</div>
-          <div class="kpi-label">нет данных</div>
-        </div>
+      <div v-if="currentSummary.total" class="current-state-inline">
+        <span class="current-state-label">
+          Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
+        </span>
+        <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
+          {{ formatPct(currentSummary.availablePct) }}
+        </strong>
+        <span class="current-state-item">
+          <span class="dot" :style="{ background: statusMeta('available').color }"></span>
+          {{ currentSummary.counts.available }}
+        </span>
+        <span class="current-state-item">
+          <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
+          {{ currentSummary.counts.maybe_available }}
+        </span>
+        <span class="current-state-item">
+          <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
+          {{ currentSummary.counts.not_available }}
+        </span>
+        <span class="current-state-item">
+          <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
+          {{ currentSummary.counts.no_data }}
+        </span>
+        <span class="current-state-shown hint small">
+          показано {{ filteredStations.length }} из {{ stations.length }}
+        </span>
       </div>
     </div>
 
@@ -657,43 +703,7 @@ onBeforeUnmount(() => {
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
-    <div class="map-body">
-      <div ref="mapContainer" class="leaflet-map"></div>
-
-      <div class="sidebar card">
-        <div v-if="!selectedStation">
-          <p class="hint">Кликните по станции на карте, чтобы увидеть детали и историю.</p>
-          <p class="hint">Показано станций: {{ filteredStations.length }} из {{ stations.length }}</p>
-        </div>
-        <div v-else>
-          <h3>{{ selectedStation.name || 'АЗС' }}</h3>
-          <p v-if="selectedStation.address">{{ selectedStation.address }}</p>
-          <p>
-            <span class="badge-dot" :style="{ background: statusMeta(selectedStation.status).color }"></span>
-            {{ statusMeta(selectedStation.status).label }}
-          </p>
-          <ul class="fuel-list">
-            <li
-              v-for="f in selectedStation.fuelStatuses"
-              :key="f.fuelType"
-              :class="{ 'fuel-list-active': f.fuelType === selectedFuelType }"
-            >
-              <strong>{{ fuelTypeLabel(f.fuelType) }}</strong>
-              <span class="badge-dot" :style="{ background: statusMeta(f.status).color }"></span>
-              {{ statusMeta(f.status).label }}
-            </li>
-          </ul>
-          <p class="hint">
-            Последняя транзакция:
-            {{ selectedStation.lastTransactionAt ? formatDateTime(new Date(selectedStation.lastTransactionAt).getTime()) : 'нет данных' }}
-          </p>
-          <p class="hint">Снимок на момент: {{ formatDateTime(new Date(selectedStation.polledAt).getTime()) }}</p>
-          <button type="button" class="btn secondary detail-btn" @click="openDetailModal">
-            Подробная информация
-          </button>
-        </div>
-      </div>
-    </div>
+    <div ref="mapContainer" class="leaflet-map"></div>
 
     <StationDetailModal
       v-if="showDetailModal && selectedStation"
@@ -746,18 +756,38 @@ onBeforeUnmount(() => {
   min-width: 220px;
 }
 
-.current-state-header {
+/* Replaces the old full KPI-grid card: same numbers, but a single line
+   folded into the controls bar instead of a separate card - keeps the
+   current-state summary visible without eating a whole row of vertical
+   space of its own. */
+.current-state-inline {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px 14px;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid #eee;
+  font-size: 13px;
+  color: #445;
 }
 
-.current-state-header h2 {
-  font-size: 15px;
-  margin: 0;
+.current-state-label {
+  color: #667;
+}
+
+.current-state-pct {
+  font-size: 16px;
+}
+
+.current-state-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.current-state-shown {
+  margin-left: auto;
 }
 
 .slider-block {
@@ -784,70 +814,77 @@ onBeforeUnmount(() => {
   color: #1d4ed8;
 }
 
-.map-body {
-  display: flex;
-  gap: 16px;
-  align-items: stretch;
-}
-
+/* No sidebar competing for width any more - the map gets the full page
+   width, and a taller default height since it's no longer stretched to
+   match a sidebar's content height (the old flex row's align-items:
+   stretch is gone along with the sidebar itself). */
 .leaflet-map {
-  flex: 1;
-  min-width: 0;
-  min-height: 560px;
+  width: 100%;
+  min-height: 680px;
   border-radius: 10px;
   overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
-.sidebar {
-  width: 340px;
-  flex-shrink: 0;
-}
-
-/* Below this, a fixed 340px sidebar plus the map's own flex-shrink minimum
-   no longer both fit side by side - the map (flex: 1, allowed to shrink)
-   loses that fight against the sidebar (flex-shrink: 0, never shrinks) and
-   collapses to 0 width instead of just looking cramped. Stack them instead:
-   full-width map on top, full-width sidebar below. */
 @media (max-width: 860px) {
-  .map-body {
-    flex-direction: column;
-  }
-
   .leaflet-map {
-    width: 100%;
-    min-height: 400px;
-  }
-
-  .sidebar {
-    width: 100%;
+    min-height: 480px;
   }
 }
 
-.fuel-list {
-  list-style: none;
-  padding: 0;
-  margin: 8px 0;
+/* Station quick-info popup on marker click, replacing the old always-on
+   sidebar - :deep() because Leaflet injects this as raw HTML outside Vue's
+   render tree (see buildPopupHtml in the script), so it never gets the
+   scoped data-v- attribute these selectors would otherwise need. */
+:deep(.station-popup) {
+  font-size: 13px;
+  min-width: 180px;
 }
 
-.fuel-list li {
-  padding: 4px 0;
-  border-bottom: 1px solid #eee;
+:deep(.popup-title) {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+:deep(.popup-address) {
+  color: #667;
+  margin-bottom: 6px;
+}
+
+:deep(.popup-status) {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-weight: 600;
+  margin-bottom: 6px;
 }
 
-.fuel-list-active {
-  background: #eff6ff;
-  margin: 0 -8px;
-  padding-left: 8px;
-  padding-right: 8px;
-  border-radius: 4px;
+:deep(.popup-fuel-list) {
+  max-height: 140px;
+  overflow-y: auto;
+  border-top: 1px solid #eee;
+  padding-top: 6px;
+  margin-bottom: 8px;
 }
 
-.detail-btn {
+:deep(.popup-fuel-row) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+:deep(.popup-dot) {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+:deep(.popup-detail-btn) {
   width: 100%;
-  margin-top: 12px;
 }
 
 .filter-block {
@@ -882,8 +919,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.dot,
-.badge-dot {
+.dot {
   display: inline-block;
   width: 10px;
   height: 10px;
