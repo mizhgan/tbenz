@@ -6,6 +6,20 @@ const Region = require('../models/Region');
 const stationMatchingService = require('../services/stationMatchingService');
 const gdebenzIngestService = require('../services/gdebenzIngestService');
 
+// Dual-write helpers for Station.sourceLinks (see the field's doc comment on
+// the model) - kept in sync with gdebenzStationId here until every reader
+// has migrated over to the generalized field. Uses the same $pull-then-
+// $addToSet two-call pattern as scripts/mergeDuplicateStations.js, since
+// Mongo rejects $pull and $addToSet on the same array path in one update.
+function setSourceLink(station, sourceKey, refId) {
+  station.sourceLinks = (station.sourceLinks || []).filter((l) => l.sourceKey !== sourceKey);
+  station.sourceLinks.push({ sourceKey, refId });
+}
+
+async function clearSourceLink(stationId, sourceKey) {
+  await Station.updateOne({ _id: stationId }, { $pull: { sourceLinks: { sourceKey } } });
+}
+
 function serializeGdebenz(g) {
   return {
     id: g._id,
@@ -83,6 +97,7 @@ const confirmMatch = asyncHandler(async (req, res) => {
   gdebenzStation.ignored = false;
   await gdebenzStation.save();
   station.gdebenzStationId = gdebenzStation._id;
+  setSourceLink(station, 'gdebenz', gdebenzStation._id);
   await station.save();
 
   // Apply immediately rather than waiting for the next poll tick, so the
@@ -114,6 +129,7 @@ const unmatch = asyncHandler(async (req, res) => {
 
   if (gdebenzStation.matchedStationId) {
     await Station.updateOne({ _id: gdebenzStation.matchedStationId }, { $set: { gdebenzStationId: null } });
+    await clearSourceLink(gdebenzStation.matchedStationId, 'gdebenz');
   }
   gdebenzStation.matchedStationId = null;
   await gdebenzStation.save();

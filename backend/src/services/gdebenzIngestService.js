@@ -8,6 +8,21 @@ const { mergeFuelStatuses, mergeOverallStatus } = require('./mergeStatusService'
 const telegramNotifier = require('./telegramNotifier');
 const logger = require('../utils/logger');
 
+// Dual-write helper for Region.sourcePollStatus (see the field's doc comment
+// on the model) - upserts this source's entry in place rather than pushing a
+// duplicate every poll tick.
+function setSourcePollStatus(region, sourceKey, { lastPolledAt, status, error, stationCount }) {
+  const entry = region.sourcePollStatus.find((s) => s.sourceKey === sourceKey);
+  if (entry) {
+    entry.lastPolledAt = lastPolledAt;
+    entry.status = status;
+    entry.error = error;
+    entry.stationCount = stationCount;
+  } else {
+    region.sourcePollStatus.push({ sourceKey, lastPolledAt, status, error, stationCount });
+  }
+}
+
 async function storeGdebenzStation(parsed, region, polledAt) {
   return GdebenzStation.findOneAndUpdate(
     { externalId: parsed.externalId },
@@ -126,6 +141,7 @@ async function ingestGdebenzRegion(region) {
     region.lastGdebenzPollStatus = 'ok';
     region.lastGdebenzPollError = null;
     region.lastGdebenzPollStationCount = stored;
+    setSourcePollStatus(region, 'gdebenz', { lastPolledAt: polledAt, status: 'ok', error: null, stationCount: stored });
     await region.save();
 
     try {
@@ -143,6 +159,7 @@ async function ingestGdebenzRegion(region) {
     region.lastGdebenzPolledAt = polledAt;
     region.lastGdebenzPollStatus = 'error';
     region.lastGdebenzPollError = err.message;
+    setSourcePollStatus(region, 'gdebenz', { lastPolledAt: polledAt, status: 'error', error: err.message, stationCount: 0 });
     await region.save();
     logger.error(`Region "${region.name}": gdebenz poll failed:`, err.message);
     throw err;

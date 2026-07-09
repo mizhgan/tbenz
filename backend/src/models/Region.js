@@ -22,6 +22,21 @@ const regionSchema = new Schema(
     lastGdebenzPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
     lastGdebenzPollError: { type: String, default: null },
     lastGdebenzPollStationCount: { type: Number, default: 0 },
+    // Generalized replacement for the four lastGdebenz* fields above, one
+    // entry per registered secondary source (see services/sourceRegistry.js)
+    // instead of a new set of named fields per source. Written alongside the
+    // gdebenz-specific fields for now (dual-write, see gdebenzIngestService.js)
+    // until every reader has migrated over.
+    sourcePollStatus: [
+      {
+        _id: false,
+        sourceKey: { type: String, required: true },
+        lastPolledAt: { type: Date, default: null },
+        status: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
+        error: { type: String, default: null },
+        stationCount: { type: Number, default: 0 },
+      },
+    ],
   },
   { timestamps: true }
 );

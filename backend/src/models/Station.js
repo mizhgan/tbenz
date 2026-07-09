@@ -79,10 +79,24 @@ const stationSchema = new Schema(
     // Station", same as always; they don't need to know it's now blended
     // from two sources.
     gdebenzStationId: { type: Schema.Types.ObjectId, ref: 'GdebenzStation', default: null },
+    // Generalized replacement for gdebenzStationId above, supporting any
+    // number of matched secondary sources (see services/sourceRegistry.js)
+    // instead of exactly one named field per source. Written alongside
+    // gdebenzStationId for now (dual-write, see stationMatching.controller.js)
+    // until every reader has migrated over - see backend/scripts/
+    // backfillSourceLinks.js for the one-off migration of pre-existing matches.
+    sourceLinks: [
+      {
+        _id: false,
+        sourceKey: { type: String, required: true },
+        refId: { type: Schema.Types.ObjectId, required: true },
+      },
+    ],
   },
   { timestamps: true }
 );
 
 stationSchema.index({ lat: 1, lon: 1 });
+stationSchema.index({ 'sourceLinks.sourceKey': 1, 'sourceLinks.refId': 1 });
 
 module.exports = model('Station', stationSchema);
