@@ -5,7 +5,7 @@
 // trust weight, rather than trusting the rewrite "by inspection".
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { combineTwo, mergeFuelStatuses, mergeOverallStatus } = require('../src/services/mergeStatusService');
+const { combineTwo, mergeFuelStatuses, mergeOverallStatus, resolveVotes } = require('../src/services/mergeStatusService');
 
 test('combineTwo: no_data/undefined defers entirely to the other side', () => {
   assert.equal(combineTwo('no_data', 'available'), 'available');
@@ -79,6 +79,39 @@ test('mergeFuelStatuses: gdebenz no_data/undefined leaves tbank untouched', () =
   ];
   assert.deepEqual(mergeFuelStatuses(tbank, 'no_data', []), tbank);
   assert.deepEqual(mergeFuelStatuses(tbank, undefined, undefined), tbank);
+});
+
+test('resolveVotes: a source with no reading simply does not vote (absent, not a 0 vote)', () => {
+  assert.equal(resolveVotes([]).status, 'no_data');
+  assert.equal(resolveVotes([{ status: 'available', weight: 1 }]).status, 'available');
+});
+
+test('resolveVotes: a 2-1 split among equally-weighted sources is not confident enough to confirm', () => {
+  // score = (1 + 1 - 1) / 3 = 0.33, below the +/-0.5 confirm threshold - a
+  // slim majority among equal-trust sources is deliberately still reported
+  // as maybe_available (genuine disagreement), not resolved by headcount.
+  // Whether a "majority wins" rule should exist once 3+ sources are common
+  // is a real, separate decision for whenever a third source is actually
+  // added (see the plan's deferred Stage 5) - not decided here.
+  const split = resolveVotes([
+    { status: 'available', weight: 1 },
+    { status: 'available', weight: 1 },
+    { status: 'not_available', weight: 1 },
+  ]);
+  assert.equal(split.status, 'maybe_available');
+  assert.ok(split.confidence > 0 && split.confidence < 0.5);
+});
+
+test('resolveVotes: a high enough trust weight can outweigh multiple lower-weight dissenters', () => {
+  // score = (9 - 1 - 1) / 11 = 0.636 >= 0.5 - demonstrates the weight field
+  // (see sourceRegistry.js) actually has teeth once it's set away from the
+  // equal-trust default, without needing a 3rd real source to prove it.
+  const trusted = resolveVotes([
+    { status: 'available', weight: 9 },
+    { status: 'not_available', weight: 1 },
+    { status: 'not_available', weight: 1 },
+  ]);
+  assert.equal(trusted.status, 'available');
 });
 
 test('mergeFuelStatuses: a fuel type gdebenz mentions that tbank never reported still surfaces', () => {

@@ -1,9 +1,51 @@
+// available/not_available are opposite poles, maybe_available sits at the
+// midpoint (weak evidence in either direction) - a weighted average of these
+// scores, thresholded at +/-0.5, is what resolveVotes below runs on N
+// readings at once instead of exactly two.
+const STATUS_SCORE = { available: 1, maybe_available: 0, not_available: -1 };
+const CONFIRM_THRESHOLD = 0.5;
+
+/**
+ * N-way weighted-vote resolver: takes any number of `{status, weight}`
+ * readings (a source with nothing to say simply isn't in the list - see
+ * combineTwo below for how no_data/undefined get filtered out before this
+ * point) and produces one merged status plus a confidence score (the
+ * absolute weighted score, 0 = a genuine tie/conflict, 1 = every voting
+ * source fully agrees).
+ *
+ * At equal weight (1.0) for every reading, this exactly reproduces the
+ * original two-source combineTwo() truth table (verified in
+ * backend/test/mergeStatusService.test.js): agreement passes through,
+ * maybe_available is weak evidence outvoted by a confirmed reading, and two
+ * confirmed-but-disagreeing readings land at score 0 - "genuine conflict",
+ * same as before. A *different* weight per source is what actually changes
+ * behavior (a low-trust source's "not_available" no longer fully cancels
+ * out a high-trust source's "available") - that's a deliberate, separate
+ * policy change (see sourceRegistry.js's weight field), not something this
+ * function decides on its own.
+ */
+function resolveVotes(readings) {
+  const votes = (readings || []).filter((r) => r && Object.prototype.hasOwnProperty.call(STATUS_SCORE, r.status));
+  const totalWeight = votes.reduce((sum, r) => sum + r.weight, 0);
+  if (!votes.length || totalWeight <= 0) return { status: 'no_data', confidence: 0 };
+
+  const score = votes.reduce((sum, r) => sum + STATUS_SCORE[r.status] * r.weight, 0) / totalWeight;
+  let status;
+  if (score >= CONFIRM_THRESHOLD) status = 'available';
+  else if (score <= -CONFIRM_THRESHOLD) status = 'not_available';
+  else status = 'maybe_available';
+
+  return { status, confidence: Math.abs(score) };
+}
+
 /**
  * Combines a status from tbank with a status from gdebenz for a single
  * fuel type into one "effective" status. Pure and synchronous - no model
  * access here, so it's cheap to unit-test every combination directly (see
- * the standalone test run during verification) and cheap to call once per
- * fuel type per poll.
+ * backend/test/mergeStatusService.test.js) and cheap to call once per fuel
+ * type per poll. A thin two-source, equal-weight wrapper over resolveVotes
+ * above - kept so existing callers (mergeFuelStatuses/mergeOverallStatus,
+ * and transitively gdebenzIngestService.js) don't need to change.
  *
  * Rule: agreement is confirmed as-is; a real contradiction (one source says
  * available, the other not_available) becomes maybe_available rather than
@@ -14,14 +56,10 @@
  * diluting that confirmed reading down to uncertain.
  */
 function combineTwo(a, b) {
-  if (a === 'no_data' || a === undefined) return b ?? 'no_data';
-  if (b === 'no_data' || b === undefined) return a ?? 'no_data';
-  if (a === b) return a;
-  if (a === 'maybe_available') return b;
-  if (b === 'maybe_available') return a;
-  // Both confirmed (available/not_available) but disagree - a genuine
-  // conflict between the two sources.
-  return 'maybe_available';
+  return resolveVotes([
+    { status: a, weight: 1 },
+    { status: b, weight: 1 },
+  ]).status;
 }
 
 /**
@@ -69,4 +107,4 @@ function mergeOverallStatus(tbankStatus, gdebenzStatus) {
   return combineTwo(tbankStatus, gdebenzStatus);
 }
 
-module.exports = { combineTwo, mergeFuelStatuses, mergeOverallStatus };
+module.exports = { combineTwo, mergeFuelStatuses, mergeOverallStatus, resolveVotes };
