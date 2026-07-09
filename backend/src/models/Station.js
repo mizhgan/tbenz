@@ -1,15 +1,30 @@
 const { Schema, model } = require('mongoose');
 
-// A station is a physical gas station, deduplicated by externalId across regions
-// (bounding boxes of different tracked regions may overlap).
+// A station is a physical gas station. Originally deduplicated purely by
+// externalId (tbank's own `id` field) across regions (bounding boxes of
+// different tracked regions may overlap) - turned out NOT to be a stable
+// per-physical-station key in practice: real production data showed the
+// same address/coordinates/yandexOrgId getting a second Station document
+// with a brand new externalId days after the first one already existed,
+// both continuing to update in the same poll cycle afterward (see
+// ingestService.storeStation's dedupe filter, which now prefers
+// yandexOrgId - a third-party identifier for the physical business
+// location - over externalId whenever tbank reports one). No longer
+// `unique` for that reason: with externalId demoted to "best available
+// fallback key, not a stable identity", nothing guarantees a value tbank
+// hands out won't reappear against a different physical station later.
 const stationSchema = new Schema(
   {
-    externalId: { type: String, required: true, unique: true, index: true },
+    externalId: { type: String, required: true, index: true },
     name: { type: String, default: null },
     address: { type: String, default: null },
     lat: { type: Number, required: true },
     lon: { type: Number, required: true },
-    yandexOrgId: { type: String, default: null },
+    // Preferred dedupe key when present (see ingestService.storeStation) -
+    // not enforced unique here on purpose: prefer risking an occasional
+    // missed merge over a hard upsert failure if this assumption ever
+    // turns out imperfect for some edge case.
+    yandexOrgId: { type: String, default: null, index: true },
     regions: [{ type: Schema.Types.ObjectId, ref: 'Region' }],
     firstSeenAt: { type: Date, default: Date.now },
     lastSeenAt: { type: Date, default: Date.now },

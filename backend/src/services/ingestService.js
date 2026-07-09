@@ -7,18 +7,27 @@ const gdebenzIngestService = require('./gdebenzIngestService');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
+  // yandexOrgId identifies the physical business location and is stable
+  // across tbank's own externalId churn (see the doc comment on the Station
+  // model) - prefer it whenever tbank reports one, and only fall back to
+  // externalId for the rare station where it's missing.
+  const dedupeFilter = parsed.yandexOrgId
+    ? { yandexOrgId: parsed.yandexOrgId }
+    : { externalId: parsed.externalId };
+
   // Needed before the update to detect available/unavailable transitions per
   // fuel type - findOneAndUpdate with new:true only gives us the post-update
   // document, which would make every poll look like a "first time seen".
   const previous = await Station.findOne(
-    { externalId: parsed.externalId },
+    dedupeFilter,
     { lastFuelStatuses: 1 }
   ).lean();
 
   const station = await Station.findOneAndUpdate(
-    { externalId: parsed.externalId },
+    dedupeFilter,
     {
       $set: {
+        externalId: parsed.externalId,
         name: parsed.name,
         address: parsed.address,
         lat: parsed.lat,
