@@ -24,6 +24,8 @@
  * transaction across all fuel types at the station.
  */
 
+const { normalizeFuelType } = require('../utils/fuelTypeNormalizer');
+
 function firstDefined(...values) {
   for (const value of values) {
     if (value !== undefined && value !== null) return value;
@@ -57,7 +59,7 @@ function parseFuelStatuses(raw) {
   const map = raw.statusByFuelType;
   if (!map || typeof map !== 'object') return [];
   return Object.entries(map).map(([fuelType, status]) => ({
-    fuelType,
+    fuelType: normalizeFuelType(fuelType),
     status: String(status),
   }));
 }

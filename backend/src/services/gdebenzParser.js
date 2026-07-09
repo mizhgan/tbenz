@@ -19,6 +19,8 @@
  *     GdebenzStation for admins reviewing a match, not folded into `status`.
  */
 
+const { normalizeFuelType } = require('../utils/fuelTypeNormalizer');
+
 // "queue" (there's a line at the pump) means the fuel is physically there,
 // just busy - counts as available for "is there fuel" purposes, same as a
 // confirmed "yes".
@@ -36,12 +38,14 @@ function mapStatus(rawStatus) {
 
 // "92,95,ДТ" -> ["92", "95", "ДТ"]. Empty/missing means gdebenz isn't
 // claiming any specific fuel type is available right now (typically when
-// status is "no").
+// status is "no"). Each token is run through the shared fuel type
+// normalizer (see utils/fuelTypeNormalizer.js) so gdebenz's own "ДТ"
+// spelling lines up with however other sources name the same fuel.
 function parseFuelsNow(value) {
   if (!value || typeof value !== 'string') return [];
   return value
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => normalizeFuelType(s.trim()))
     .filter(Boolean);
 }
 

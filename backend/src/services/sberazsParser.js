@@ -37,6 +37,8 @@
  *     preserved as-is in `raw` so nothing is lost once it starts populating.
  */
 
+const { normalizeFuelType } = require('../utils/fuelTypeNormalizer');
+
 const STATUS_MAP = {
   available: 'available',
   stale: 'maybe_available',
@@ -50,8 +52,11 @@ function mapStatus(rawStatus) {
 
 // sberazs names octane ratings "aiNN"; the app's own vocabulary (see
 // stationParser.js/fuelTypeLabel) is the bare number ("92", "95", ...) -
-// non-octane types (diesel/propane/methane) pass through unchanged, already
-// displayed as-is by the frontend's generic fuelTypeLabel fallback.
+// propane/methane pass through unchanged, already displayed as-is by the
+// frontend's generic fuelTypeLabel fallback. "diesel" additionally goes
+// through the shared fuel type normalizer (see utils/fuelTypeNormalizer.js)
+// since gdebenz names the exact same fuel "ДТ" - left as two different
+// strings, the merge/display layer would treat them as unrelated types.
 const FUEL_TYPE_MAP = {
   ai92: '92',
   ai95: '95',
@@ -60,7 +65,7 @@ const FUEL_TYPE_MAP = {
 };
 
 function mapFuelType(rawType) {
-  return FUEL_TYPE_MAP[rawType] || rawType;
+  return normalizeFuelType(FUEL_TYPE_MAP[rawType] || rawType);
 }
 
 function parseFuels(fuels) {
