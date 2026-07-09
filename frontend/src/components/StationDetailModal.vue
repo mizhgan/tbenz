@@ -7,6 +7,7 @@ import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
+import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 import StationForecast from './StationForecast.vue';
 import StationHistoryChart from './StationHistoryChart.vue';
 
@@ -23,6 +24,32 @@ let miniMap = null;
 const reliabilityLoading = ref(true);
 const reliabilityError = ref('');
 const reliability = ref(null);
+
+// Per-source breakdown (tbank vs gdebenz vs the merged result this whole
+// modal otherwise shows) - fetched separately from the same GET /stations/:id
+// the admin station-sources view uses, since the snapshot this modal's
+// `station` prop is built from (MapView/ReportsView) only ever carries the
+// already-merged status.
+const sourcesLoading = ref(true);
+const sourcesError = ref('');
+const sourceDoc = ref(null);
+
+// Union of every fuel type any source (tbank/each matched secondary
+// source/merged) mentions, each row showing what each source itself said -
+// shared with StationSourcesModal.vue via composables/useSourceFuelRows.js.
+const sourceFuelRows = useSourceFuelRows(sourceDoc);
+
+async function loadSources() {
+  sourcesLoading.value = true;
+  sourcesError.value = '';
+  try {
+    sourceDoc.value = await stationsApi.get(props.station.stationId);
+  } catch (err) {
+    sourcesError.value = 'Не удалось загрузить сведения об источниках';
+  } finally {
+    sourcesLoading.value = false;
+  }
+}
 
 const cardGenerating = ref(false);
 const cardUrl = ref(null);
@@ -126,6 +153,7 @@ async function shareCard() {
 
 onMounted(async () => {
   loadReliability();
+  loadSources();
 
   await nextTick();
   miniMap = L.map(miniMapContainer.value, {
@@ -196,6 +224,84 @@ onBeforeUnmount(() => {
           {{ station.lastTransactionAt ? formatDateTime(new Date(station.lastTransactionAt).getTime()) : 'нет данных' }}
         </p>
         <p class="hint">Снимок на момент: {{ formatDateTime(new Date(station.polledAt).getTime()) }}</p>
+
+        <h4>Источники данных</h4>
+        <p v-if="sourcesLoading" class="hint">Загрузка...</p>
+        <p v-else-if="sourcesError" class="error-text">{{ sourcesError }}</p>
+        <template v-else-if="sourceDoc">
+          <div class="source-summary" :style="{ gridTemplateColumns: `repeat(${2 + sourceDoc.sources.length}, 1fr)` }">
+            <div class="source-tile">
+              <div class="source-label">tbank</div>
+              <div class="source-value">
+                <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
+                {{ statusMeta(sourceDoc.tbankLastStatus).label }}
+              </div>
+              <div class="hint small">Обновлено: {{ formatDateTime(sourceDoc.tbankLastSeenAt) }}</div>
+            </div>
+            <div v-for="s in sourceDoc.sources" :key="s.key" class="source-tile">
+              <div class="source-label">{{ s.label }}</div>
+              <div class="source-value">
+                <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
+                {{ statusMeta(s.status).label }}
+              </div>
+              <div class="hint small">Обновлено: {{ formatDateTime(s.lastSeenAt) }}</div>
+            </div>
+            <div v-if="!sourceDoc.sources.length" class="source-tile">
+              <div class="source-label">Второй источник</div>
+              <div class="hint small">не сопоставлено</div>
+            </div>
+            <div class="source-tile">
+              <div class="source-label">Итог (что видят метрики/бот)</div>
+              <div class="source-value">
+                <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
+                {{ statusMeta(sourceDoc.lastStatus).label }}
+              </div>
+              <div class="hint small">Обновлено: {{ formatDateTime(sourceDoc.lastSeenAt) }}</div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="fuel-table">
+              <thead>
+                <tr>
+                  <th>Вид топлива</th>
+                  <th>tbank</th>
+                  <th v-for="s in sourceDoc.sources" :key="s.key">{{ s.label }}</th>
+                  <th>Итог</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in sourceFuelRows" :key="row.fuelType">
+                  <td>{{ fuelTypeLabel(row.fuelType) }}</td>
+                  <td>
+                    <span v-if="row.tbank" class="badge-dot" :style="{ background: statusMeta(row.tbank).color }"></span>
+                    {{ row.tbank ? statusMeta(row.tbank).label : '—' }}
+                  </td>
+                  <td v-for="s in sourceDoc.sources" :key="s.key">
+                    <span
+                      v-if="row.bySource[s.key]"
+                      class="badge-dot"
+                      :style="{ background: statusMeta(row.bySource[s.key]).color }"
+                    ></span>
+                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key]).label : '—' }}
+                  </td>
+                  <td>
+                    <span v-if="row.merged" class="badge-dot" :style="{ background: statusMeta(row.merged).color }"></span>
+                    {{ row.merged ? statusMeta(row.merged).label : '—' }}
+                  </td>
+                </tr>
+                <tr v-if="!sourceFuelRows.length">
+                  <td :colspan="3 + sourceDoc.sources.length" class="hint small">
+                    Нет данных по видам топлива ни от одного источника.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p v-if="!sourceDoc.sources.length" class="hint small">
+            У этой станции пока нет второго источника (gdebenz) для сверки.
+          </p>
+        </template>
 
         <h4>Надёжность за последние 7 дней</h4>
         <p v-if="reliabilityLoading" class="hint">Загрузка...</p>
@@ -343,6 +449,38 @@ onBeforeUnmount(() => {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+.source-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 8px 0 16px;
+}
+
+.source-tile {
+  padding: 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.source-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.source-value {
+  font-weight: 600;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.fuel-table {
+  margin-bottom: 8px;
 }
 
 .reliability-grid {

@@ -14,7 +14,7 @@ const STATUS_OPTIONS = [
 
 const MATCH_STATE_OPTIONS = [
   { value: '', label: 'Любые' },
-  { value: 'matched', label: 'Сопоставлены с gdebenz' },
+  { value: 'matched', label: 'Есть второй источник' },
   { value: 'unmatched', label: 'Без второго источника' },
 ];
 
@@ -89,8 +89,8 @@ function closeDetail() {
 
 function handleChanged() {
   // A match/unmatch inside the detail modal can change this station's
-  // gdebenzStationId, which the matchState filter here depends on - refresh
-  // so the list stays consistent with what the modal just did.
+  // sourceLinks, which the matchState filter here depends on - refresh so
+  // the list stays consistent with what the modal just did.
   loadStations();
 }
 
@@ -161,7 +161,7 @@ onMounted(async () => {
                 {{ statusMeta(s.lastStatus).label }}
               </td>
               <td>
-                tbank<span v-if="s.gdebenzStationId"> + gdebenz</span>
+                tbank<span v-for="l in s.sourceLinks || []" :key="l.sourceKey"> + {{ l.sourceKey }}</span>
               </td>
               <td class="hint small">{{ formatDate(s.lastSeenAt) }}</td>
             </tr>

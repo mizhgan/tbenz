@@ -3,15 +3,15 @@
 // instead of tbank's own externalId (see the doc comment on the Station
 // model). Groups Station by yandexOrgId, and for every group of exactly two
 // documents that matches the known-safe shape - same lat/lon/address, and
-// the newer document has no gdebenz match of its own - merges the newer one
-// into the older one: StationSnapshot history is repointed (not deleted),
-// Telegram watchlist references are repointed, then the newer Station
-// document is deleted.
+// the newer document has no secondary-source match of its own (see
+// services/sourceRegistry.js) - merges the newer one into the older one:
+// StationSnapshot history is repointed (not deleted), Telegram watchlist
+// references are repointed, then the newer Station document is deleted.
 //
 // Any group that doesn't match that exact shape (more than 2 documents,
 // disagreeing location/address, or the newer document already has its own
-// confirmed gdebenz match) is left untouched and printed as "needs manual
-// review" instead of being merged - this script never guesses.
+// confirmed secondary-source match) is left untouched and printed as "needs
+// manual review" instead of being merged - this script never guesses.
 //
 // Usage:
 //   node scripts/mergeDuplicateStations.js            # dry run, no writes
@@ -20,8 +20,8 @@
 const { connectDb, mongoose } = require('../src/db/mongoose');
 const Station = require('../src/models/Station');
 const StationSnapshot = require('../src/models/StationSnapshot');
-const GdebenzStation = require('../src/models/GdebenzStation');
 const TelegramChat = require('../src/models/TelegramChat');
+const { listSources } = require('../src/services/sourceRegistry');
 
 const APPLY = process.argv.includes('--apply');
 
@@ -90,19 +90,23 @@ async function main() {
       continue;
     }
 
-    if (drop.gdebenzStationId) {
+    if ((drop.sourceLinks || []).length > 0) {
       console.log(
-        `SKIP  ${label}: newer document ${drop._id} already has its own gdebenz match - needs manual review`
+        `SKIP  ${label}: newer document ${drop._id} already has its own secondary-source match - needs manual review`
       );
       skipped += 1;
       continue;
     }
-    const gdebenzPointingAtDrop = await GdebenzStation.findOne(
-      { matchedStationId: drop._id },
-      { _id: 1 }
-    ).lean();
-    if (gdebenzPointingAtDrop) {
-      console.log(`SKIP  ${label}: a GdebenzStation still points at the newer document - needs manual review`);
+    let pointedAtDropBy = null;
+    for (const source of listSources({ onlyEnabled: false })) {
+      const doc = await source.model.findOne({ matchedStationId: drop._id }, { _id: 1 }).lean();
+      if (doc) {
+        pointedAtDropBy = source.key;
+        break;
+      }
+    }
+    if (pointedAtDropBy) {
+      console.log(`SKIP  ${label}: a ${pointedAtDropBy} document still points at the newer document - needs manual review`);
       skipped += 1;
       continue;
     }

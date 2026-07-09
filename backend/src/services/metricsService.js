@@ -1,5 +1,6 @@
 const StationSnapshot = require('../models/StationSnapshot');
 const Station = require('../models/Station');
+const { listSources } = require('./sourceRegistry');
 
 const DEFAULT_TZ = 'Europe/Moscow';
 
@@ -43,7 +44,9 @@ const STATUS_COUNTS_GROUP = {
  * and the Telegram digest (current status breakdown).
  */
 async function getCurrentSnapshot(regionId, at) {
-  return StationSnapshot.aggregate([
+  const sources = listSources();
+
+  const pipeline = [
     { $match: { region: regionId, polledAt: { $lte: at } } },
     { $sort: { station: 1, polledAt: -1 } },
     { $group: { _id: '$station', doc: { $first: '$$ROOT' } } },
@@ -57,22 +60,85 @@ async function getCurrentSnapshot(regionId, at) {
       },
     },
     { $unwind: '$stationInfo' },
-    {
-      $project: {
-        _id: 0,
-        stationId: '$station',
-        polledAt: 1,
-        lat: 1,
-        lon: 1,
-        status: 1,
-        fuelStatuses: 1,
-        lastTransactionAt: 1,
-        name: '$stationInfo.name',
-        address: '$stationInfo.address',
-        yandexOrgId: '$stationInfo.yandexOrgId',
+  ];
+
+  // Only each source's own status - enough for the map popup's one-line
+  // "sources" summary. The full per-source breakdown (fuel types, address,
+  // conflict) is fetched on demand by StationDetailModal via
+  // GET /stations/:id, the same endpoint the admin station-sources view
+  // uses, rather than carried by every station in every snapshot here.
+  // One $lookup per registered secondary source (see sourceRegistry.js),
+  // matched via Station.sourceLinks - generalizes what used to be a single
+  // hardcoded gdebenzstations lookup keyed off Station.gdebenzStationId.
+  const infoFields = [];
+  for (const source of sources) {
+    const infoField = `info_${source.key}`;
+    infoFields.push({ key: source.key, field: infoField });
+    pipeline.push({
+      $lookup: {
+        from: source.model.collection.name,
+        let: {
+          linkId: {
+            $let: {
+              vars: {
+                matches: {
+                  $filter: {
+                    input: { $ifNull: ['$stationInfo.sourceLinks', []] },
+                    cond: { $eq: ['$$this.sourceKey', source.key] },
+                  },
+                },
+              },
+              in: { $arrayElemAt: ['$$matches.refId', 0] },
+            },
+          },
+        },
+        pipeline: [{ $match: { $expr: { $eq: ['$_id', '$$linkId'] } } }],
+        as: infoField,
+      },
+    });
+    pipeline.push({ $unwind: { path: `$${infoField}`, preserveNullAndEmptyArrays: true } });
+  }
+
+  pipeline.push({
+    $project: {
+      _id: 0,
+      stationId: '$station',
+      polledAt: 1,
+      lat: 1,
+      lon: 1,
+      status: 1,
+      fuelStatuses: 1,
+      lastTransactionAt: 1,
+      name: '$stationInfo.name',
+      address: '$stationInfo.address',
+      yandexOrgId: '$stationInfo.yandexOrgId',
+      tbankStatus: {
+        $ifNull: [
+          '$stationInfo.tbankLastStatus',
+          {
+            $cond: [
+              { $gt: [{ $size: { $ifNull: ['$stationInfo.sourceLinks', []] } }, 0] },
+              'no_data',
+              '$status',
+            ],
+          },
+        ],
+      },
+      // Only sources this station is actually matched to (a registered but
+      // unmatched source contributes no entry, not a null-status one).
+      sources: {
+        $filter: {
+          input: infoFields.map(({ key, field }) => ({
+            key,
+            status: { $ifNull: [`$${field}.status`, null] },
+          })),
+          cond: { $ne: ['$$this.status', null] },
+        },
       },
     },
-  ]);
+  });
+
+  return StationSnapshot.aggregate(pipeline);
 }
 
 /**

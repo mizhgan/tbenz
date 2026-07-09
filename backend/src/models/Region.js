@@ -13,18 +13,8 @@ const regionSchema = new Schema(
     lastPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
     lastPollError: { type: String, default: null },
     lastPollStationCount: { type: Number, default: 0 },
-    // Superseded by sourcePollStatus below (generalized to N secondary
-    // sources - see services/sourceRegistry.js/secondarySourceIngestService.js).
-    // No longer written (confirmed nothing in the frontend reads these
-    // either); kept only until Stage 4 of the source-generalization refactor
-    // drops the fields outright.
-    lastGdebenzPolledAt: { type: Date, default: null },
-    lastGdebenzPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
-    lastGdebenzPollError: { type: String, default: null },
-    lastGdebenzPollStationCount: { type: Number, default: 0 },
     // One entry per registered secondary source (see services/
-    // sourceRegistry.js), written by secondarySourceIngestService.js -
-    // replaces the four lastGdebenz* fields above.
+    // sourceRegistry.js), written by secondarySourceIngestService.js.
     sourcePollStatus: [
       {
         _id: false,

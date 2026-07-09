@@ -88,7 +88,7 @@ const findDuplicateStations = asyncHandler(async (req, res) => {
         firstSeenAt: 1,
         lastSeenAt: 1,
         lastStatus: 1,
-        gdebenzStationId: 1,
+        sourceLinks: 1,
       },
     },
     { $sort: { firstSeenAt: 1 } },

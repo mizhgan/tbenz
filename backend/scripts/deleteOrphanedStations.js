@@ -9,8 +9,8 @@
 //
 // This only deletes a Station document when it is safely orphaned:
 //   - regions is empty (no active region claims it)
-//   - it has no confirmed gdebenz match (gdebenzStationId is null), and no
-//     GdebenzStation still points at it via matchedStationId
+//   - it has no confirmed secondary-source match (sourceLinks is empty), and
+//     no secondary-source document still points at it via matchedStationId
 // Anything else is left untouched and printed as "needs manual review".
 //
 // Usage:
@@ -20,8 +20,8 @@
 const { connectDb, mongoose } = require('../src/db/mongoose');
 const Station = require('../src/models/Station');
 const StationSnapshot = require('../src/models/StationSnapshot');
-const GdebenzStation = require('../src/models/GdebenzStation');
 const TelegramChat = require('../src/models/TelegramChat');
+const { listSources } = require('../src/services/sourceRegistry');
 
 const APPLY = process.argv.includes('--apply');
 
@@ -38,18 +38,22 @@ async function main() {
   for (const station of candidates) {
     const label = `${station._id} (${station.name} / ${station.address})`;
 
-    if (station.gdebenzStationId) {
-      console.log(`SKIP  ${label}: has a confirmed gdebenz match - needs manual review`);
+    if ((station.sourceLinks || []).length > 0) {
+      console.log(`SKIP  ${label}: has a confirmed secondary-source match - needs manual review`);
       skipped += 1;
       continue;
     }
 
-    const gdebenzPointingAtIt = await GdebenzStation.findOne(
-      { matchedStationId: station._id },
-      { _id: 1 }
-    ).lean();
-    if (gdebenzPointingAtIt) {
-      console.log(`SKIP  ${label}: a GdebenzStation still points at it - needs manual review`);
+    let pointedAtBy = null;
+    for (const source of listSources({ onlyEnabled: false })) {
+      const doc = await source.model.findOne({ matchedStationId: station._id }, { _id: 1 }).lean();
+      if (doc) {
+        pointedAtBy = source.key;
+        break;
+      }
+    }
+    if (pointedAtBy) {
+      console.log(`SKIP  ${label}: a ${pointedAtBy} document still points at it - needs manual review`);
       skipped += 1;
       continue;
     }

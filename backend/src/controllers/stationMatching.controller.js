@@ -6,12 +6,10 @@ const stationMatchingService = require('../services/stationMatchingService');
 const secondarySourceIngestService = require('../services/secondarySourceIngestService');
 const { getSource, listSources } = require('../services/sourceRegistry');
 
-// Dual-write helpers for Station.sourceLinks (see the field's doc comment on
-// the model) - kept in sync with the legacy gdebenzStationId field (only
-// meaningful for sourceKey 'gdebenz') until every reader has migrated over
-// to the generalized field. Uses the same $pull-then-$addToSet two-call
-// pattern as scripts/mergeDuplicateStations.js, since Mongo rejects $pull
-// and $addToSet on the same array path in one update.
+// Helpers for Station.sourceLinks (see the field's doc comment on the
+// model). Uses the same $pull-then-$addToSet two-call pattern as
+// scripts/mergeDuplicateStations.js, since Mongo rejects $pull and
+// $addToSet on the same array path in one update.
 function setSourceLink(station, sourceKey, refId) {
   station.sourceLinks = (station.sourceLinks || []).filter((l) => l.sourceKey !== sourceKey);
   station.sourceLinks.push({ sourceKey, refId });
@@ -115,7 +113,6 @@ const confirmMatch = asyncHandler(async (req, res) => {
   secondaryDoc.matchedStationId = station._id;
   secondaryDoc.ignored = false;
   await secondaryDoc.save();
-  if (sourceConfig.key === 'gdebenz') station.gdebenzStationId = secondaryDoc._id;
   setSourceLink(station, sourceConfig.key, secondaryDoc._id);
   await station.save();
 
@@ -150,9 +147,6 @@ const unmatch = asyncHandler(async (req, res) => {
   if (!secondaryDoc) throw new HttpError(404, 'Station not found for this source');
 
   if (secondaryDoc.matchedStationId) {
-    if (sourceConfig.key === 'gdebenz') {
-      await Station.updateOne({ _id: secondaryDoc.matchedStationId }, { $set: { gdebenzStationId: null } });
-    }
     await clearSourceLink(secondaryDoc.matchedStationId, sourceConfig.key);
   }
   secondaryDoc.matchedStationId = null;

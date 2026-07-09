@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import L from 'leaflet';
 import { stationsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
-import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
+import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 
 const props = defineProps({
   stationId: { type: String, required: true },
@@ -24,6 +25,15 @@ const miniMapContainer = ref(null);
 let miniMap = null;
 let markersLayer = null;
 
+// Hardcoded to gdebenz for now - this modal's "Управление источниками"
+// section drives exactly one match/unmatch workflow at a time (see the
+// template below); a full N-source match-management UI is a separate
+// follow-up once a real 3rd source exists, not blocking the read side
+// (source-summary tiles/fuel table) below, which is already fully generic.
+const SOURCE_KEY = 'gdebenz';
+
+const matchedSource = computed(() => (station.value?.sources || []).find((s) => s.key === SOURCE_KEY) || null);
+
 // Same haversine used server-side (stationMatchingService.js) - here purely
 // for display ("how far apart are the two sources' coordinates"), not for
 // any matching decision.
@@ -37,37 +47,18 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
 }
 
 const sourceDistanceMeters = computed(() => {
-  if (!station.value?.gdebenz) return null;
+  if (!matchedSource.value) return null;
   return Math.round(
-    haversineMeters(station.value.lat, station.value.lon, station.value.gdebenz.lat, station.value.gdebenz.lon)
+    haversineMeters(station.value.lat, station.value.lon, matchedSource.value.lat, matchedSource.value.lon)
   );
 });
 
-// Union of every fuel type any of the three views (tbank/gdebenz/merged)
-// mentions, each row showing what each source itself said - so a
-// disagreement (or a type only one source tracks) is visible directly,
-// instead of only ever seeing the already-blended result.
-const fuelRows = computed(() => {
-  if (!station.value) return [];
-  const tbankByType = new Map((station.value.tbankLastFuelStatuses || []).map((f) => [f.fuelType, f.status]));
-  const mergedByType = new Map((station.value.lastFuelStatuses || []).map((f) => [f.fuelType, f.status]));
-  const gdebenzTypes = new Set(station.value.gdebenz?.fuelTypes || []);
-  const gdebenzStationStatus = station.value.gdebenz?.status;
-
-  const allTypes = new Set([...tbankByType.keys(), ...mergedByType.keys(), ...gdebenzTypes]);
-  return sortFuelTypes([...allTypes]).map((fuelType) => ({
-    fuelType,
-    tbank: tbankByType.get(fuelType) || null,
-    gdebenz: station.value.gdebenz
-      ? gdebenzTypes.has(fuelType)
-        ? gdebenzStationStatus
-        : gdebenzStationStatus === 'not_available'
-          ? 'not_available'
-          : null
-      : null,
-    merged: mergedByType.get(fuelType) || null,
-  }));
-});
+// Union of every fuel type any source (tbank/each matched secondary
+// source/merged) mentions, each row showing what each source itself said -
+// so a disagreement (or a type only one source tracks) is visible directly,
+// instead of only ever seeing the already-blended result. Shared with
+// StationDetailModal.vue via composables/useSourceFuelRows.js.
+const fuelRows = useSourceFuelRows(station);
 
 async function load() {
   loading.value = true;
@@ -121,17 +112,17 @@ function renderMap() {
     .bindTooltip('tbank')
     .addTo(markersLayer);
 
-  if (station.value.gdebenz) {
-    points.push([station.value.gdebenz.lat, station.value.gdebenz.lon]);
-    L.circleMarker([station.value.gdebenz.lat, station.value.gdebenz.lon], {
+  for (const source of station.value.sources || []) {
+    points.push([source.lat, source.lon]);
+    L.circleMarker([source.lat, source.lon], {
       radius: 9,
-      color: statusMeta(station.value.gdebenz.status).color,
+      color: statusMeta(source.status).color,
       fillColor: '#fff',
       fillOpacity: 0.9,
       weight: 3,
       dashArray: '3,3',
     })
-      .bindTooltip('gdebenz')
+      .bindTooltip(source.label)
       .addTo(markersLayer);
   }
 
@@ -142,13 +133,6 @@ function renderMap() {
   }
   miniMap.invalidateSize();
 }
-
-// Hardcoded to gdebenz for now - this modal's UI itself isn't source-generic
-// yet (it shows exactly one "gdebenz" tile, see the template below); a
-// generic N-source version is a separate follow-up (see StationSourcesModal
-// in the refactor plan), not blocking the backend's routes/service already
-// being sourceKey-parameterized.
-const SOURCE_KEY = 'gdebenz';
 
 async function loadCandidates() {
   candidatesLoading.value = true;
@@ -163,11 +147,11 @@ async function loadCandidates() {
   }
 }
 
-async function handleMatch(gdebenzStationId) {
+async function handleMatch(secondaryId) {
   actionBusy.value = true;
   actionError.value = '';
   try {
-    await stationMatchingApi.match(SOURCE_KEY, gdebenzStationId, props.stationId);
+    await stationMatchingApi.match(SOURCE_KEY, secondaryId, props.stationId);
     await load();
     emit('changed');
   } catch (err) {
@@ -178,12 +162,12 @@ async function handleMatch(gdebenzStationId) {
 }
 
 async function handleUnmatch() {
-  if (!station.value?.gdebenzStationId) return;
+  if (!matchedSource.value) return;
   if (!confirm('Отменить сопоставление? Исторические данные останутся, новые опросы перестанут объединяться.')) return;
   actionBusy.value = true;
   actionError.value = '';
   try {
-    await stationMatchingApi.unmatch(SOURCE_KEY, station.value.gdebenzStationId);
+    await stationMatchingApi.unmatch(SOURCE_KEY, matchedSource.value.id);
     candidatesLoaded.value = false;
     candidates.value = [];
     await load();
@@ -228,7 +212,7 @@ onBeforeUnmount(() => {
           </p>
 
           <h4>Статус по источникам</h4>
-          <div class="source-summary">
+          <div class="source-summary" :style="{ gridTemplateColumns: `repeat(${2 + station.sources.length}, 1fr)` }">
             <div class="source-tile">
               <div class="source-label">tbank</div>
               <div class="source-value">
@@ -237,14 +221,17 @@ onBeforeUnmount(() => {
               </div>
               <div class="hint small">Обновлено: {{ formatDate(station.tbankLastSeenAt) }}</div>
             </div>
-            <div class="source-tile">
-              <div class="source-label">gdebenz</div>
-              <div v-if="station.gdebenz" class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(station.gdebenz.status).color }"></span>
-                {{ statusMeta(station.gdebenz.status).label }}
+            <div v-for="s in station.sources" :key="s.key" class="source-tile">
+              <div class="source-label">{{ s.label }}</div>
+              <div class="source-value">
+                <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
+                {{ statusMeta(s.status).label }}
               </div>
-              <div v-else class="hint small">не сопоставлено</div>
-              <div v-if="station.gdebenz" class="hint small">Обновлено: {{ formatDate(station.gdebenz.lastSeenAt) }}</div>
+              <div class="hint small">Обновлено: {{ formatDate(s.lastSeenAt) }}</div>
+            </div>
+            <div v-if="!station.sources.length" class="source-tile">
+              <div class="source-label">Второй источник</div>
+              <div class="hint small">не сопоставлено</div>
             </div>
             <div class="source-tile">
               <div class="source-label">Итог (что видят метрики/бот)</div>
@@ -263,7 +250,7 @@ onBeforeUnmount(() => {
                 <tr>
                   <th>Вид топлива</th>
                   <th>tbank</th>
-                  <th>gdebenz</th>
+                  <th v-for="s in station.sources" :key="s.key">{{ s.label }}</th>
                   <th>Итог</th>
                 </tr>
               </thead>
@@ -274,9 +261,13 @@ onBeforeUnmount(() => {
                     <span v-if="row.tbank" class="badge-dot" :style="{ background: statusMeta(row.tbank).color }"></span>
                     {{ row.tbank ? statusMeta(row.tbank).label : '—' }}
                   </td>
-                  <td>
-                    <span v-if="row.gdebenz" class="badge-dot" :style="{ background: statusMeta(row.gdebenz).color }"></span>
-                    {{ row.gdebenz ? statusMeta(row.gdebenz).label : '—' }}
+                  <td v-for="s in station.sources" :key="s.key">
+                    <span
+                      v-if="row.bySource[s.key]"
+                      class="badge-dot"
+                      :style="{ background: statusMeta(row.bySource[s.key]).color }"
+                    ></span>
+                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key]).label : '—' }}
                   </td>
                   <td>
                     <span v-if="row.merged" class="badge-dot" :style="{ background: statusMeta(row.merged).color }"></span>
@@ -284,7 +275,9 @@ onBeforeUnmount(() => {
                   </td>
                 </tr>
                 <tr v-if="!fuelRows.length">
-                  <td colspan="4" class="hint small">Нет данных по видам топлива ни от одного источника.</td>
+                  <td :colspan="3 + station.sources.length" class="hint small">
+                    Нет данных по видам топлива ни от одного источника.
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -293,19 +286,19 @@ onBeforeUnmount(() => {
           <h4>Управление источниками</h4>
           <p v-if="actionError" class="error-text">{{ actionError }}</p>
 
-          <template v-if="station.gdebenz">
+          <template v-if="matchedSource">
             <div class="gdebenz-info">
               <p>
-                Сопоставлено с: <strong>{{ station.gdebenz.name || 'без названия' }}</strong>
-                <span v-if="station.gdebenz.brand && station.gdebenz.brand !== station.gdebenz.name">
-                  ({{ station.gdebenz.brand }})</span
+                Сопоставлено с: <strong>{{ matchedSource.name || 'без названия' }}</strong>
+                <span v-if="matchedSource.brand && matchedSource.brand !== matchedSource.name">
+                  ({{ matchedSource.brand }})</span
                 >
               </p>
-              <p class="hint small">{{ station.gdebenz.address || 'адрес неизвестен' }}</p>
-              <p v-if="station.gdebenz.conflict" class="hint small conflict-note">
-                у gdebenz есть внутреннее расхождение отчётов: «{{ station.gdebenz.conflict }}»
+              <p class="hint small">{{ matchedSource.address || 'адрес неизвестен' }}</p>
+              <p v-if="matchedSource.conflict" class="hint small conflict-note">
+                у {{ matchedSource.label }} есть внутреннее расхождение отчётов: «{{ matchedSource.conflict }}»
               </p>
-              <p class="hint small">Обновлено: {{ formatDate(station.gdebenz.lastSeenAt) }}</p>
+              <p class="hint small">Обновлено: {{ formatDate(matchedSource.lastSeenAt) }}</p>
             </div>
             <button type="button" class="btn secondary" :disabled="actionBusy" @click="handleUnmatch">
               Отменить сопоставление

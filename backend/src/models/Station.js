@@ -44,10 +44,11 @@ const stationSchema = new Schema(
     ],
     // tbank's own reading, kept separately from the (possibly merged)
     // lastStatus/lastFuelStatuses above - written only by
-    // ingestService.storeStation, never touched by the gdebenz merge. Exists
-    // purely so the admin station-detail view can show "what did tbank
-    // itself say" side by side with gdebenz's own reading and the merged
-    // result, instead of only ever seeing the already-blended value.
+    // ingestService.storeStation, never touched by the secondary-source
+    // merge. Exists purely so the admin station-detail view can show "what
+    // did tbank itself say" side by side with each matched source's own
+    // reading and the merged result, instead of only ever seeing the
+    // already-blended value.
     tbankLastStatus: { type: String, default: 'no_data' },
     tbankLastFuelStatuses: [
       {
@@ -57,9 +58,10 @@ const stationSchema = new Schema(
       },
     ],
     // When tbank itself last polled this station - unlike lastSeenAt below,
-    // never touched by the gdebenz merge, so the admin station-detail view
-    // can show "when did tbank actually last see this station" instead of
-    // whichever source happened to poll most recently in a merged cycle.
+    // never touched by the secondary-source merge, so the admin
+    // station-detail view can show "when did tbank actually last see this
+    // station" instead of whichever source happened to poll most recently
+    // in a merged cycle.
     tbankLastSeenAt: { type: Date, default: null },
     lastTransactionAt: { type: Date, default: null },
     // Full raw payload for this station as last received from the source API,
@@ -71,20 +73,15 @@ const stationSchema = new Schema(
     lastPredictiveDropAlertAt: { type: Date, default: null },
     lastPredictiveRecoveryAlertAt: { type: Date, default: null },
     // Set once an admin confirms this Station is the same physical station
-    // as a GdebenzStation (see stationMatchingController.js). Once set,
-    // secondarySourceIngestService.js folds that second source's readings into
-    // lastStatus/lastFuelStatuses below via mergeStatusService.js - so from
+    // as a secondary source's own document (see stationMatchingController.js
+    // and services/sourceRegistry.js) - one entry per matched secondary
+    // source, instead of one named ObjectId field per source. Once set,
+    // secondarySourceIngestService.js folds that source's readings into
+    // lastStatus/lastFuelStatuses above via mergeStatusService.js - so from
     // every other consumer's point of view (metrics, reports, forecasts,
     // Telegram) a matched station's status is simply "what's currently in
     // Station", same as always; they don't need to know it's now blended
-    // from two sources.
-    gdebenzStationId: { type: Schema.Types.ObjectId, ref: 'GdebenzStation', default: null },
-    // Generalized replacement for gdebenzStationId above, supporting any
-    // number of matched secondary sources (see services/sourceRegistry.js)
-    // instead of exactly one named field per source. Written alongside
-    // gdebenzStationId for now (dual-write, see stationMatching.controller.js)
-    // until every reader has migrated over - see backend/scripts/
-    // backfillSourceLinks.js for the one-off migration of pre-existing matches.
+    // from multiple sources.
     sourceLinks: [
       {
         _id: false,

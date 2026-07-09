@@ -272,8 +272,42 @@ function buildPopupHtml(s) {
       ${s.address ? `<div class="popup-address">${escapeHtml(s.address)}</div>` : ''}
       <div class="popup-status"><span class="popup-dot" style="background:${meta.color}"></span>${meta.label}${fuelSuffix}</div>
       ${fuelRows ? `<div class="popup-fuel-list">${fuelRows}</div>` : ''}
+      ${sourcesSummaryHtml(s)}
       <div class="popup-hint">Последняя транзакция: ${escapeHtml(lastTransactionLabel)}</div>
       <button type="button" class="btn secondary popup-detail-btn">Подробная информация</button>
+    </div>
+  `;
+}
+
+// One-line "how many sources agree" summary, cheap enough to show on every
+// marker popup since regionsApi.snapshotAt() already carries tbankStatus and
+// a generic sources[] array for each station (see metricsService's
+// getCurrentSnapshot, one entry per registered secondary source this
+// station is actually matched to - see backend/src/services/
+// sourceRegistry.js) - the fuller per-source breakdown (fuel types, address,
+// conflict) only loads once "Подробная информация" is opened, inside
+// StationDetailModal itself.
+function sourcesSummaryHtml(s) {
+  const sources = s.sources || [];
+  if (!sources.length) {
+    return `<div class="popup-sources">Источник: только tbank</div>`;
+  }
+  const tbankMeta = statusMeta(s.tbankStatus);
+  const chips = [
+    `<span class="popup-source-chip"><span class="popup-dot" style="background:${tbankMeta.color}"></span>tbank</span>`,
+  ];
+  let disagree = false;
+  for (const source of sources) {
+    const meta = statusMeta(source.status);
+    chips.push(
+      `<span class="popup-source-chip"><span class="popup-dot" style="background:${meta.color}"></span>${escapeHtml(source.key)}</span>`
+    );
+    if (source.status !== s.tbankStatus) disagree = true;
+  }
+  return `
+    <div class="popup-sources">
+      ${chips.join('')}
+      ${disagree ? '<span class="popup-sources-warn">⚠ расходятся</span>' : ''}
     </div>
   `;
 }
@@ -885,6 +919,30 @@ onBeforeUnmount(() => {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+:deep(.popup-sources) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: #667;
+  margin-bottom: 8px;
+}
+
+:deep(.popup-source-chip) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: #f1f5f9;
+  border-radius: 999px;
+}
+
+:deep(.popup-sources-warn) {
+  color: #b45309;
+  font-weight: 600;
 }
 
 :deep(.popup-hint) {

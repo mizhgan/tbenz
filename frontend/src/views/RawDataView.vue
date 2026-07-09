@@ -145,7 +145,7 @@ onMounted(loadCollections);
                 <th>firstSeenAt</th>
                 <th>lastSeenAt</th>
                 <th>lastStatus</th>
-                <th>gdebenzStationId</th>
+                <th>sourceLinks</th>
               </tr>
             </thead>
             <tbody>
@@ -157,7 +157,7 @@ onMounted(loadCollections);
                 <td>{{ s.firstSeenAt }}</td>
                 <td>{{ s.lastSeenAt }}</td>
                 <td>{{ s.lastStatus }}</td>
-                <td>{{ s.gdebenzStationId || '—' }}</td>
+                <td>{{ (s.sourceLinks || []).map((l) => `${l.sourceKey}:${l.refId}`).join(', ') || '—' }}</td>
               </tr>
             </tbody>
           </table>
