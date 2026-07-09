@@ -2,7 +2,7 @@ const { Markup } = require('telegraf');
 const TelegramChat = require('../models/TelegramChat');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
-const { escapeHtml } = require('./telegramNotifier');
+const { escapeHtml } = require('../utils/escapeHtml');
 
 // Same 6 events as the admin panel's TelegramChatForm.vue - kept in sync by
 // hand since the frontend and backend don't share a module, same as the

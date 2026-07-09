@@ -3,29 +3,13 @@ const telegramBot = require('./telegramBot');
 const telegramDigestData = require('./telegramDigestData');
 const telegramDigestImage = require('./telegramDigestImage');
 const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
+const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
 
 const AVAILABLE_LIKE = new Set(['available', 'maybe_available']);
 // Telegram's real cap is 4096 chars; keep a margin so HTML entity escaping
 // (e.g. "&amp;" for "&") can't push a chunk over the limit.
 const MAX_MESSAGE_LEN = 3500;
-
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&#39;';
-    }
-  });
-}
 
 function fuelLabel(fuelType) {
   return /^\d+$/.test(fuelType) ? `АИ-${fuelType}` : fuelType;
