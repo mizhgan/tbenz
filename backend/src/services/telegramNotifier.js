@@ -6,7 +6,23 @@ const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
 const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
 
-const AVAILABLE_LIKE = new Set(['available', 'maybe_available']);
+// Only the confirmed "available" status counts as "the fuel is here" for
+// appeared/disappeared notifications - "maybe_available" is an uncertain
+// signal from the source, and counting it as available-like (as an earlier
+// version of this did) meant a station flickering between not_available and
+// maybe_available fired a false "появилось" every time it touched
+// maybe_available, and a false "пропало" every time it left. Restricting
+// this to literal "available" makes that flicker produce no notification at
+// all (a real signal is required for either direction), and turns
+// maybe_available -> available into its own proper "появилось" (previously
+// swallowed, since both statuses used to count as the same "available-like"
+// bucket). Deliberately local to this file - metricsService.js's own
+// availability-percentage/outage-recovery math and
+// telegramPredictiveAlerts.js's "currently up" check both still treat
+// maybe_available as available-like on purpose, for different reasons (a
+// station that's "maybe available" really is partially counted in the
+// availability %, and really shouldn't be flagged as "about to run out").
+const AVAILABLE_LIKE = new Set(['available']);
 // Telegram's real cap is 4096 chars; keep a margin so HTML entity escaping
 // (e.g. "&amp;" for "&") can't push a chunk over the limit.
 const MAX_MESSAGE_LEN = 3500;
