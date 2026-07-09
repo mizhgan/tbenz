@@ -45,6 +45,28 @@ const getStation = asyncHandler(async (req, res) => {
   const station = await Station.findById(req.params.id).lean();
   if (!station) throw new HttpError(404, 'Station not found');
 
+  // tbankLastStatus/tbankLastFuelStatuses were added to the schema after
+  // stations already existed in the database - a document last written
+  // before that change simply doesn't have these keys yet (Mongo doesn't
+  // retroactively add fields, and .lean() skips Mongoose's own document
+  // hydration, which is the only place schema defaults get applied), so
+  // they'd otherwise come back as undefined and get dropped by
+  // JSON.stringify entirely - the frontend would then show a misleading
+  // "нет данных" for a station that actually has real tbank data.
+  // For any station that has never been gdebenz-matched, lastStatus/
+  // lastFuelStatuses ARE tbank's own unblended reading by construction
+  // (nothing else has ever written to them), so falling back to those
+  // reproduces exactly what tbankLastStatus will say once a fresh tbank
+  // poll repopulates it for real. A station that IS matched but predates
+  // the field genuinely has no clean unmerged reading to fall back to -
+  // that narrow case just shows "нет данных" until its next poll.
+  if (station.tbankLastStatus === undefined) {
+    station.tbankLastStatus = station.gdebenzStationId ? 'no_data' : station.lastStatus;
+  }
+  if (station.tbankLastFuelStatuses === undefined) {
+    station.tbankLastFuelStatuses = station.gdebenzStationId ? [] : station.lastFuelStatuses;
+  }
+
   // Enriches the same response the map/reports' StationDetailModal already
   // consumes (an extra `gdebenz` property is simply unused by that older
   // caller) rather than adding a second endpoint - the admin station-detail
