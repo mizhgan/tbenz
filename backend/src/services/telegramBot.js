@@ -1,6 +1,7 @@
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const { telegramBotToken } = require('../config/env');
 const TelegramChat = require('../models/TelegramChat');
+const { registerSettingsMenu } = require('./telegramSettingsMenu');
 const logger = require('../utils/logger');
 
 let bot = null;
@@ -51,8 +52,28 @@ async function start() {
 
   bot = new Telegraf(telegramBotToken);
 
+  // Must be registered before the catch-all bot.on('message', ...) below -
+  // see the doc comment on registerSettingsMenu for why registration order
+  // matters here.
+  registerSettingsMenu(bot, { upsertChatFromCtx });
+
   bot.start(async (ctx) => {
     const chatDoc = await upsertChatFromCtx(ctx);
+    // Private chats can self-serve from here on (see telegramSettingsMenu.js)
+    // - point them at /settings instead of just telling them to wait for an
+    // admin. Groups still go through the admin panel: anyone can add the bot
+    // to a group, so self-service there would let any member reconfigure
+    // notifications for the whole group, a different trust boundary than one
+    // person managing their own personal chat.
+    if (ctx.chat.type === 'private') {
+      await ctx.reply(
+        chatDoc.status === 'active'
+          ? 'Этот чат уже настроен. Откройте меню, чтобы изменить параметры рассылки.'
+          : 'Чат зарегистрирован. Настройте рассылку прямо здесь, в личке — районы, события, вотчлист станций.',
+        Markup.inlineKeyboard([[Markup.button.callback('⚙️ Настроить рассылку', 'settings:main')]])
+      );
+      return;
+    }
     await ctx.reply(
       chatDoc.status === 'active'
         ? 'Этот чат уже настроен администратором.'
