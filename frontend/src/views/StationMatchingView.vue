@@ -102,9 +102,12 @@ onMounted(loadSourcesAndAll);
     <div class="page-header">
       <h1>Сопоставление станций{{ selectedSourceLabel ? ` (${selectedSourceLabel})` : '' }}</h1>
       <div class="header-actions">
-        <select v-if="sources.length > 1" v-model="selectedSourceKey" @change="handleSourceChange">
-          <option v-for="s in sources" :key="s.key" :value="s.key">{{ s.label }}</option>
-        </select>
+        <label v-if="sources.length > 1" class="source-picker">
+          <span class="hint">Источник:</span>
+          <select v-model="selectedSourceKey" @change="handleSourceChange">
+            <option v-for="s in sources" :key="s.key" :value="s.key">{{ s.label }}</option>
+          </select>
+        </label>
         <button class="btn secondary" :disabled="loading" @click="loadAll">Обновить</button>
       </div>
     </div>
@@ -129,6 +132,7 @@ onMounted(loadSourcesAndAll);
         <div v-for="g in unmatched" :key="g.id" class="gdebenz-card">
           <div class="gdebenz-header">
             <div>
+              <span class="source-tag">{{ selectedSourceLabel || 'источник' }}</span>
               <strong>{{ g.name || 'Без названия' }}</strong>
               <span v-if="g.brand && g.brand !== g.name" class="muted"> ({{ g.brand }})</span>
               <div class="hint small">{{ g.address || 'адрес неизвестен' }}</div>
@@ -150,11 +154,12 @@ onMounted(loadSourcesAndAll);
           <ul v-else class="candidates">
             <li v-for="s in g.suggestions" :key="s.stationId">
               <div class="candidate-info">
+                <span class="source-tag tbank-tag">tbank</span>
                 <strong>{{ s.name || 'АЗС' }}</strong>
                 <span class="muted">{{ s.address }}</span>
                 <span class="hint small">
                   {{ s.distanceMeters }} м · схожесть названия {{ Math.round(s.nameSimilarity * 100) }}%
-                  <template v-if="s.alreadyMatched"> · уже сопоставлена с другой станцией gdebenz</template>
+                  <template v-if="s.alreadyMatched"> · уже сопоставлена с другой станцией {{ selectedSourceLabel || 'источника' }}</template>
                 </span>
               </div>
               <button
@@ -244,6 +249,31 @@ onMounted(loadSourcesAndAll);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.source-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.source-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+  background: #ede9fe;
+  color: #6d28d9;
+  vertical-align: middle;
+}
+
+.tbank-tag {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .hint {

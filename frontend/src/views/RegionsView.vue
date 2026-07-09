@@ -2,10 +2,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { regionsApi } from '../api/regions';
+import { stationMatchingApi } from '../api/stationMatching';
 import RegionForm from '../components/RegionForm.vue';
 
 const router = useRouter();
 const regions = ref([]);
+const sources = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
 const showForm = ref(false);
@@ -22,6 +24,22 @@ async function loadRegions() {
   } finally {
     loading.value = false;
   }
+}
+
+// tbank's own poll status has dedicated columns below (it's the primary
+// source every region always has); every other registered source (see
+// backend's sourceRegistry.js) only shows up in region.sourcePollStatus,
+// which otherwise has no label attached to it beyond a bare sourceKey.
+async function loadSources() {
+  try {
+    sources.value = await stationMatchingApi.listSources();
+  } catch (err) {
+    // Non-fatal - the per-source poll column just falls back to raw keys.
+  }
+}
+
+function sourceLabel(key) {
+  return sources.value.find((s) => s.key === key)?.label || key;
 }
 
 function openCreateForm() {
@@ -80,6 +98,7 @@ function formatDate(value) {
 }
 
 onMounted(() => {
+  loadSources();
   loadRegions();
   refreshTimer = setInterval(loadRegions, 15000);
 });
@@ -108,9 +127,10 @@ onBeforeUnmount(() => {
               <th>Название</th>
               <th>Границы (bbox)</th>
               <th>Интервал</th>
-              <th>Статус</th>
+              <th>Статус (tbank)</th>
               <th>Последний опрос</th>
-              <th>Станций</th>
+              <th>Станций (tbank)</th>
+              <th>Другие источники</th>
               <th></th>
             </tr>
           </thead>
@@ -136,6 +156,14 @@ onBeforeUnmount(() => {
               </td>
               <td>{{ formatDate(region.lastPolledAt) }}</td>
               <td>{{ region.lastPollStationCount }}</td>
+              <td>
+                <div v-if="!region.sourcePollStatus?.length" class="hint">—</div>
+                <div v-for="s in region.sourcePollStatus" :key="s.sourceKey" class="source-status-row">
+                  <span class="hint">{{ sourceLabel(s.sourceKey) }}:</span>
+                  <span class="badge" :class="s.status">{{ s.status === 'ok' ? 'ok' : s.status === 'error' ? 'ошибка' : 'никогда' }}</span>
+                  <span class="hint">{{ s.stationCount }} · {{ formatDate(s.lastPolledAt) }}</span>
+                </div>
+              </td>
               <td class="actions">
                 <button class="btn secondary" @click="viewOnMap(region)">Карта</button>
                 <button
@@ -189,5 +217,17 @@ onBeforeUnmount(() => {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.source-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.source-status-row:not(:last-child) {
+  margin-bottom: 4px;
 }
 </style>
