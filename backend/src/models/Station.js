@@ -31,8 +31,8 @@ const stationSchema = new Schema(
     // Last known overall availability status and per-fuel-type breakdown -
     // the *effective* value everything else in the app reads (metrics,
     // reports, forecasts, Telegram, map markers): tbank's own reading until
-    // a gdebenz match is confirmed, the merged result afterward (see
-    // mergeStatusService.js / gdebenzIngestService.js).
+    // a secondary source is confirmed matched, the merged result afterward
+    // (see mergeStatusService.js / secondarySourceIngestService.js).
     // "available" | "maybe_available" | "not_available" | "no_data".
     lastStatus: { type: String, default: 'no_data' },
     lastFuelStatuses: [
@@ -72,7 +72,7 @@ const stationSchema = new Schema(
     lastPredictiveRecoveryAlertAt: { type: Date, default: null },
     // Set once an admin confirms this Station is the same physical station
     // as a GdebenzStation (see stationMatchingController.js). Once set,
-    // gdebenzIngestService.js folds that second source's readings into
+    // secondarySourceIngestService.js folds that second source's readings into
     // lastStatus/lastFuelStatuses below via mergeStatusService.js - so from
     // every other consumer's point of view (metrics, reports, forecasts,
     // Telegram) a matched station's status is simply "what's currently in

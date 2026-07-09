@@ -1,8 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { stationMatchingApi } from '../api/stationMatching';
 import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
 
+const sources = ref([]);
+const selectedSourceKey = ref('');
 const unmatched = ref([]);
 const matched = ref([]);
 const loading = ref(true);
@@ -10,12 +12,13 @@ const errorMessage = ref('');
 const busyIds = ref(new Set());
 
 async function loadAll() {
+  if (!selectedSourceKey.value) return;
   loading.value = true;
   errorMessage.value = '';
   try {
     const [unmatchedRes, matchedRes] = await Promise.all([
-      stationMatchingApi.listUnmatched(),
-      stationMatchingApi.listMatched(),
+      stationMatchingApi.listUnmatched(selectedSourceKey.value),
+      stationMatchingApi.listMatched(selectedSourceKey.value),
     ]);
     unmatched.value = unmatchedRes;
     matched.value = matchedRes;
@@ -26,43 +29,56 @@ async function loadAll() {
   }
 }
 
-async function handleMatch(gdebenzId, stationId) {
-  busyIds.value.add(gdebenzId);
+async function loadSourcesAndAll() {
+  loading.value = true;
   errorMessage.value = '';
   try {
-    await stationMatchingApi.match(gdebenzId, stationId);
+    sources.value = await stationMatchingApi.listSources();
+    selectedSourceKey.value = sources.value[0]?.key || '';
+    await loadAll();
+  } catch (err) {
+    errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список источников';
+    loading.value = false;
+  }
+}
+
+async function handleMatch(secondaryId, stationId) {
+  busyIds.value.add(secondaryId);
+  errorMessage.value = '';
+  try {
+    await stationMatchingApi.match(selectedSourceKey.value, secondaryId, stationId);
     await loadAll();
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось сопоставить станцию';
   } finally {
-    busyIds.value.delete(gdebenzId);
+    busyIds.value.delete(secondaryId);
   }
 }
 
-async function handleIgnore(gdebenzId) {
-  busyIds.value.add(gdebenzId);
+async function handleIgnore(secondaryId) {
+  busyIds.value.add(secondaryId);
   errorMessage.value = '';
   try {
-    await stationMatchingApi.ignore(gdebenzId);
+    await stationMatchingApi.ignore(selectedSourceKey.value, secondaryId);
     await loadAll();
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось скрыть станцию';
   } finally {
-    busyIds.value.delete(gdebenzId);
+    busyIds.value.delete(secondaryId);
   }
 }
 
-async function handleUnmatch(gdebenzId) {
+async function handleUnmatch(secondaryId) {
   if (!confirm('Отменить сопоставление? Объединённые данные останутся в истории, новые опросы перестанут объединяться.')) return;
-  busyIds.value.add(gdebenzId);
+  busyIds.value.add(secondaryId);
   errorMessage.value = '';
   try {
-    await stationMatchingApi.unmatch(gdebenzId);
+    await stationMatchingApi.unmatch(selectedSourceKey.value, secondaryId);
     await loadAll();
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось отменить сопоставление';
   } finally {
-    busyIds.value.delete(gdebenzId);
+    busyIds.value.delete(secondaryId);
   }
 }
 
@@ -70,23 +86,36 @@ function fuelTypesLabel(types) {
   return (types || []).map(fuelTypeLabel).join(', ') || '—';
 }
 
-onMounted(loadAll);
+const selectedSourceLabel = computed(
+  () => sources.value.find((s) => s.key === selectedSourceKey.value)?.label || ''
+);
+
+async function handleSourceChange() {
+  await loadAll();
+}
+
+onMounted(loadSourcesAndAll);
 </script>
 
 <template>
   <div>
     <div class="page-header">
-      <h1>Сопоставление станций (gdebenz.ru)</h1>
-      <button class="btn secondary" :disabled="loading" @click="loadAll">Обновить</button>
+      <h1>Сопоставление станций{{ selectedSourceLabel ? ` (${selectedSourceLabel})` : '' }}</h1>
+      <div class="header-actions">
+        <select v-if="sources.length > 1" v-model="selectedSourceKey" @change="handleSourceChange">
+          <option v-for="s in sources" :key="s.key" :value="s.key">{{ s.label }}</option>
+        </select>
+        <button class="btn secondary" :disabled="loading" @click="loadAll">Обновить</button>
+      </div>
     </div>
 
     <p class="hint">
-      Второй источник данных о наличии топлива (gdebenz.ru) не даёт общего идентификатора со
-      станциями tbank, поэтому сопоставление станций делается вручную: для каждой новой станции
-      gdebenz ниже показаны ближайшие кандидаты по расстоянию и похожести названия. После
-      подтверждения статус этой станции gdebenz дальше объединяется со статусом tbank при каждом
-      опросе района — согласие источников даёт подтверждённый статус, а расхождение показывается
-      как «возможно доступно», а не выбирается наугад.
+      Дополнительный источник данных о наличии топлива ({{ selectedSourceLabel || 'источник' }}) не
+      даёт общего идентификатора со станциями tbank, поэтому сопоставление станций делается вручную:
+      для каждой новой станции источника ниже показаны ближайшие кандидаты по расстоянию и похожести
+      названия. После подтверждения статус этой станции дальше объединяется со статусом tbank при
+      каждом опросе района — согласие источников даёт подтверждённый статус, а расхождение
+      показывается как «возможно доступно», а не выбирается наугад.
     </p>
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
@@ -154,7 +183,7 @@ onMounted(loadAll);
           <table>
             <thead>
               <tr>
-                <th>gdebenz</th>
+                <th>{{ selectedSourceLabel || 'Источник' }}</th>
                 <th>Станция tbank</th>
                 <th>Статус станции (объединённый)</th>
                 <th></th>
@@ -209,6 +238,12 @@ onMounted(loadAll);
 .page-header h1 {
   font-size: 20px;
   margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .hint {

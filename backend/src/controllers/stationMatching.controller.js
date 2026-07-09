@@ -1,16 +1,17 @@
 const asyncHandler = require('../utils/asyncHandler');
 const { HttpError } = require('../middleware/errorHandler');
-const GdebenzStation = require('../models/GdebenzStation');
 const Station = require('../models/Station');
 const Region = require('../models/Region');
 const stationMatchingService = require('../services/stationMatchingService');
-const gdebenzIngestService = require('../services/gdebenzIngestService');
+const secondarySourceIngestService = require('../services/secondarySourceIngestService');
+const { getSource, listSources } = require('../services/sourceRegistry');
 
 // Dual-write helpers for Station.sourceLinks (see the field's doc comment on
-// the model) - kept in sync with gdebenzStationId here until every reader
-// has migrated over to the generalized field. Uses the same $pull-then-
-// $addToSet two-call pattern as scripts/mergeDuplicateStations.js, since
-// Mongo rejects $pull and $addToSet on the same array path in one update.
+// the model) - kept in sync with the legacy gdebenzStationId field (only
+// meaningful for sourceKey 'gdebenz') until every reader has migrated over
+// to the generalized field. Uses the same $pull-then-$addToSet two-call
+// pattern as scripts/mergeDuplicateStations.js, since Mongo rejects $pull
+// and $addToSet on the same array path in one update.
 function setSourceLink(station, sourceKey, refId) {
   station.sourceLinks = (station.sourceLinks || []).filter((l) => l.sourceKey !== sourceKey);
   station.sourceLinks.push({ sourceKey, refId });
@@ -20,22 +21,35 @@ async function clearSourceLink(stationId, sourceKey) {
   await Station.updateOne({ _id: stationId }, { $pull: { sourceLinks: { sourceKey } } });
 }
 
-function serializeGdebenz(g) {
+function requireSource(req) {
+  const sourceConfig = getSource(req.params.sourceKey);
+  if (!sourceConfig) throw new HttpError(404, `Unknown source "${req.params.sourceKey}"`);
+  return sourceConfig;
+}
+
+function serializeSecondary(doc) {
   return {
-    id: g._id,
-    externalId: g.externalId,
-    name: g.name,
-    brand: g.brand,
-    address: g.address,
-    lat: g.lat,
-    lon: g.lon,
-    status: g.status,
-    fuelTypes: g.fuelTypes,
-    conflict: g.conflict,
-    lastSeenAt: g.lastSeenAt,
-    ignored: g.ignored,
+    id: doc._id,
+    externalId: doc.externalId,
+    name: doc.name,
+    brand: doc.brand,
+    address: doc.address,
+    lat: doc.lat,
+    lon: doc.lon,
+    status: doc.status,
+    fuelTypes: doc.fuelTypes,
+    conflict: doc.conflict,
+    lastSeenAt: doc.lastSeenAt,
+    ignored: doc.ignored,
   };
 }
+
+// Lets the admin UI build a source-key selector (see StationMatchingView.vue)
+// without hardcoding source names/labels - the single place a future source
+// #3 becomes visible in this workflow is sourceRegistry.js's own list.
+const listSourceOptions = asyncHandler(async (req, res) => {
+  res.json(listSources().map((s) => ({ key: s.key, label: s.label })));
+});
 
 // Not paginated on purpose - "unmatched, needs review" is meant to trend
 // toward zero as an admin works through it, unlike the station lists
@@ -43,14 +57,16 @@ function serializeGdebenz(g) {
 const UNMATCHED_LIMIT = 200;
 
 const listUnmatched = asyncHandler(async (req, res) => {
-  const candidates = await GdebenzStation.find({ matchedStationId: null, ignored: false })
+  const sourceConfig = requireSource(req);
+  const candidates = await sourceConfig.model
+    .find({ matchedStationId: null, ignored: false })
     .sort({ lastSeenAt: -1 })
     .limit(UNMATCHED_LIMIT);
 
   const items = await Promise.all(
-    candidates.map(async (g) => ({
-      ...serializeGdebenz(g),
-      suggestions: (await stationMatchingService.suggestMatches(g)).map((s) => ({
+    candidates.map(async (doc) => ({
+      ...serializeSecondary(doc),
+      suggestions: (await stationMatchingService.suggestMatches(doc, sourceConfig.key)).map((s) => ({
         stationId: s.stationId,
         name: s.name,
         address: s.address,
@@ -65,19 +81,21 @@ const listUnmatched = asyncHandler(async (req, res) => {
 });
 
 const listMatched = asyncHandler(async (req, res) => {
-  const matches = await GdebenzStation.find({ matchedStationId: { $ne: null } })
+  const sourceConfig = requireSource(req);
+  const matches = await sourceConfig.model
+    .find({ matchedStationId: { $ne: null } })
     .sort({ updatedAt: -1 })
     .populate('matchedStationId', 'name address lastStatus');
 
   res.json(
-    matches.map((g) => ({
-      ...serializeGdebenz(g),
-      station: g.matchedStationId
+    matches.map((doc) => ({
+      ...serializeSecondary(doc),
+      station: doc.matchedStationId
         ? {
-            id: g.matchedStationId._id,
-            name: g.matchedStationId.name,
-            address: g.matchedStationId.address,
-            lastStatus: g.matchedStationId.lastStatus,
+            id: doc.matchedStationId._id,
+            name: doc.matchedStationId.name,
+            address: doc.matchedStationId.address,
+            lastStatus: doc.matchedStationId.lastStatus,
           }
         : null,
     }))
@@ -85,66 +103,81 @@ const listMatched = asyncHandler(async (req, res) => {
 });
 
 const confirmMatch = asyncHandler(async (req, res) => {
-  const gdebenzStation = await GdebenzStation.findById(req.params.id);
-  if (!gdebenzStation) throw new HttpError(404, 'Gdebenz station not found');
+  const sourceConfig = requireSource(req);
+  const secondaryDoc = await sourceConfig.model.findById(req.params.id);
+  if (!secondaryDoc) throw new HttpError(404, 'Station not found for this source');
 
   const { stationId } = req.body || {};
   if (!stationId) throw new HttpError(400, 'stationId is required');
   const station = await Station.findById(stationId);
   if (!station) throw new HttpError(404, 'Station not found');
 
-  gdebenzStation.matchedStationId = station._id;
-  gdebenzStation.ignored = false;
-  await gdebenzStation.save();
-  station.gdebenzStationId = gdebenzStation._id;
-  setSourceLink(station, 'gdebenz', gdebenzStation._id);
+  secondaryDoc.matchedStationId = station._id;
+  secondaryDoc.ignored = false;
+  await secondaryDoc.save();
+  if (sourceConfig.key === 'gdebenz') station.gdebenzStationId = secondaryDoc._id;
+  setSourceLink(station, sourceConfig.key, secondaryDoc._id);
   await station.save();
 
   // Apply immediately rather than waiting for the next poll tick, so the
   // admin sees the merged effect right away - the same write path
-  // gdebenzIngestService uses during ordinary ingestion, just triggered by
-  // this confirmation instead of a fresh gdebenz reading. Needs a Region for
-  // the StationSnapshot it writes; any region the gdebenz station was seen
-  // in works equally well here, since a snapshot's `region` is just which
-  // poll loop produced it; the merged status itself isn't region-specific.
-  const region = await Region.findOne({ _id: { $in: gdebenzStation.regions } });
+  // secondarySourceIngestService uses during ordinary ingestion, just
+  // triggered by this confirmation instead of a fresh poll. Needs a Region
+  // for the StationSnapshot it writes; any region the secondary source's
+  // document was seen in works equally well here, since a snapshot's
+  // `region` is just which poll loop produced it; the merged status itself
+  // isn't region-specific.
+  const region = await Region.findOne({ _id: { $in: secondaryDoc.regions } });
   if (region) {
-    await gdebenzIngestService.applyMergeToStation(station, gdebenzStation, region, new Date());
+    await secondarySourceIngestService.applyMergeToStation(station, region, new Date());
   }
 
   res.json({ ok: true });
 });
 
-const ignoreGdebenzStation = asyncHandler(async (req, res) => {
-  const gdebenzStation = await GdebenzStation.findById(req.params.id);
-  if (!gdebenzStation) throw new HttpError(404, 'Gdebenz station not found');
-  gdebenzStation.ignored = true;
-  await gdebenzStation.save();
+const ignoreSecondary = asyncHandler(async (req, res) => {
+  const sourceConfig = requireSource(req);
+  const secondaryDoc = await sourceConfig.model.findById(req.params.id);
+  if (!secondaryDoc) throw new HttpError(404, 'Station not found for this source');
+  secondaryDoc.ignored = true;
+  await secondaryDoc.save();
   res.json({ ok: true });
 });
 
 const unmatch = asyncHandler(async (req, res) => {
-  const gdebenzStation = await GdebenzStation.findById(req.params.id);
-  if (!gdebenzStation) throw new HttpError(404, 'Gdebenz station not found');
+  const sourceConfig = requireSource(req);
+  const secondaryDoc = await sourceConfig.model.findById(req.params.id);
+  if (!secondaryDoc) throw new HttpError(404, 'Station not found for this source');
 
-  if (gdebenzStation.matchedStationId) {
-    await Station.updateOne({ _id: gdebenzStation.matchedStationId }, { $set: { gdebenzStationId: null } });
-    await clearSourceLink(gdebenzStation.matchedStationId, 'gdebenz');
+  if (secondaryDoc.matchedStationId) {
+    if (sourceConfig.key === 'gdebenz') {
+      await Station.updateOne({ _id: secondaryDoc.matchedStationId }, { $set: { gdebenzStationId: null } });
+    }
+    await clearSourceLink(secondaryDoc.matchedStationId, sourceConfig.key);
   }
-  gdebenzStation.matchedStationId = null;
-  await gdebenzStation.save();
+  secondaryDoc.matchedStationId = null;
+  await secondaryDoc.save();
   res.json({ ok: true });
 });
 
 // The reverse entry point from listUnmatched: someone looking at one
 // specific Station (the station-detail admin view) rather than working
-// through the gdebenz-side queue, who wants to find/attach its gdebenz
-// counterpart directly.
+// through a source's own unmatched queue, who wants to find/attach its
+// counterpart in that source directly.
 const suggestForStation = asyncHandler(async (req, res) => {
+  const sourceConfig = requireSource(req);
   const station = await Station.findById(req.params.stationId, { name: 1, lat: 1, lon: 1 }).lean();
   if (!station) throw new HttpError(404, 'Station not found');
-  const candidates = await stationMatchingService.suggestGdebenzMatchesForStation(station);
+  const candidates = await stationMatchingService.suggestMatchesForStation(station, sourceConfig.key);
   res.json(candidates);
 });
 
-module.exports = { listUnmatched, listMatched, confirmMatch, ignoreGdebenzStation, unmatch, suggestForStation };
+module.exports = {
+  listSourceOptions,
+  listUnmatched,
+  listMatched,
+  confirmMatch,
+  ignoreSecondary,
+  unmatch,
+  suggestForStation,
+};

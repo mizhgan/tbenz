@@ -44,8 +44,8 @@ function resolveVotes(readings) {
  * access here, so it's cheap to unit-test every combination directly (see
  * backend/test/mergeStatusService.test.js) and cheap to call once per fuel
  * type per poll. A thin two-source, equal-weight wrapper over resolveVotes
- * above - kept so existing callers (mergeFuelStatuses/mergeOverallStatus,
- * and transitively gdebenzIngestService.js) don't need to change.
+ * above, kept for mergeFuelStatuses/mergeOverallStatus's own two-source
+ * callers.
  *
  * Rule: agreement is confirmed as-is; a real contradiction (one source says
  * available, the other not_available) becomes maybe_available rather than
@@ -54,6 +54,10 @@ function resolveVotes(readings) {
  * evidence than a confirmed reading from the other, so it's outvoted by
  * whichever side IS confirmed (available or not_available) rather than
  * diluting that confirmed reading down to uncertain.
+ *
+ * Not called by the ingest path anymore (see mergeStationOverallStatus/
+ * mergeStationFuelStatuses below, used by secondarySourceIngestService.js) -
+ * kept as the regression-tested two-source reference implementation.
  */
 function combineTwo(a, b) {
   return resolveVotes([
@@ -62,38 +66,43 @@ function combineTwo(a, b) {
   ]).status;
 }
 
+// A secondary source (gdebenz today, others later - see sourceRegistry.js)
+// reports at station granularity, not per fuel type: `status` is the
+// station's overall mapped status, and `fuelTypes` is which specific types
+// it currently claims are available (only meaningful when `status` itself
+// is available-like). A "not_available" is treated as applying to every
+// fuel type uniformly (no fuel at this station at all); an "available"/
+// "maybe_available" only says something about the specific types it
+// actually lists - for a type it doesn't mention, this source simply has no
+// opinion on that type, same as if it hadn't reported at all.
+function projectStationStatusOntoFuelType(status, fuelTypes, fuelType) {
+  if (status === 'not_available') return 'not_available';
+  if (status === 'no_data' || status === undefined) return undefined;
+  return (fuelTypes || []).includes(fuelType) ? status : undefined;
+}
+
 /**
- * Merges tbank's per-fuel-type statuses with a matched gdebenz station's
- * reading into one merged per-fuel-type list.
- *
- * gdebenz reports at station granularity, not per fuel type - `gdebenzStatus`
- * is the station's overall mapped status, and `gdebenzFuelTypes` is which
- * specific types it currently claims are available (only meaningful when
- * gdebenzStatus itself is available-like). A gdebenz "not_available" is
- * treated as applying to every fuel type uniformly (no fuel at this station
- * at all); a gdebenz "available"/"maybe_available" only says something about
- * the specific types it actually lists - for a type it doesn't mention,
- * gdebenz simply has no opinion, same as if it hadn't reported at all.
+ * Merges tbank's per-fuel-type statuses with any number of matched
+ * secondary sources' station-level readings into one merged per-fuel-type
+ * list - the N-source generalization of mergeFuelStatuses below.
+ * `secondaryReadings` is `[{status, fuelTypes, weight}]`, one entry per
+ * currently-linked secondary source (see Station.sourceLinks), not just the
+ * one that happened to poll most recently.
  */
-function mergeFuelStatuses(tbankFuelStatuses, gdebenzStatus, gdebenzFuelTypes) {
-  const gdebenzFuelSet = new Set(gdebenzFuelTypes || []);
+function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
   const byType = new Map((tbankFuelStatuses || []).map((f) => [f.fuelType, f.status]));
-  const allTypes = new Set([...byType.keys(), ...gdebenzFuelSet]);
+  const allTypes = new Set(byType.keys());
+  for (const r of secondaryReadings) {
+    for (const fuelType of r.fuelTypes || []) allTypes.add(fuelType);
+  }
 
   const merged = [];
   for (const fuelType of allTypes) {
-    const tStatus = byType.get(fuelType);
-
-    let gStatusForType;
-    if (gdebenzStatus === 'not_available') {
-      gStatusForType = 'not_available';
-    } else if (gdebenzStatus === 'no_data' || gdebenzStatus === undefined) {
-      gStatusForType = undefined;
-    } else {
-      gStatusForType = gdebenzFuelSet.has(fuelType) ? gdebenzStatus : undefined;
+    const votes = [{ status: byType.get(fuelType), weight: 1 }];
+    for (const r of secondaryReadings) {
+      votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
     }
-
-    merged.push({ fuelType, status: combineTwo(tStatus, gStatusForType) });
+    merged.push({ fuelType, status: resolveVotes(votes).status });
   }
   return merged;
 }
@@ -101,10 +110,35 @@ function mergeFuelStatuses(tbankFuelStatuses, gdebenzStatus, gdebenzFuelTypes) {
 // The station-level "lastStatus" summary field mirrors how stationParser.js
 // derives it for tbank (worst-known-wins isn't used here; overall status is
 // its own value from the source, not derived from the per-fuel breakdown) -
-// so the merged overall status is likewise combineTwo() of the two sources'
-// own overall readings, not re-derived from mergeFuelStatuses' output.
-function mergeOverallStatus(tbankStatus, gdebenzStatus) {
-  return combineTwo(tbankStatus, gdebenzStatus);
+// so the merged overall status is likewise a vote across every source's own
+// overall reading, not re-derived from mergeStationFuelStatuses' output.
+function mergeStationOverallStatus(tbankStatus, secondaryReadings) {
+  return resolveVotes([
+    { status: tbankStatus, weight: 1 },
+    ...secondaryReadings.map((r) => ({ status: r.status, weight: r.weight })),
+  ]).status;
 }
 
-module.exports = { combineTwo, mergeFuelStatuses, mergeOverallStatus, resolveVotes };
+/**
+ * Two-source, equal-weight special case of mergeStationFuelStatuses - kept
+ * for the existing regression-tested truth table (see
+ * backend/test/mergeStatusService.test.js); the generic ingest runner
+ * (secondarySourceIngestService.js) calls mergeStationFuelStatuses directly
+ * with every linked secondary source instead.
+ */
+function mergeFuelStatuses(tbankFuelStatuses, gdebenzStatus, gdebenzFuelTypes) {
+  return mergeStationFuelStatuses(tbankFuelStatuses, [{ status: gdebenzStatus, fuelTypes: gdebenzFuelTypes, weight: 1 }]);
+}
+
+function mergeOverallStatus(tbankStatus, gdebenzStatus) {
+  return mergeStationOverallStatus(tbankStatus, [{ status: gdebenzStatus, weight: 1 }]);
+}
+
+module.exports = {
+  combineTwo,
+  mergeFuelStatuses,
+  mergeOverallStatus,
+  mergeStationFuelStatuses,
+  mergeStationOverallStatus,
+  resolveVotes,
+};

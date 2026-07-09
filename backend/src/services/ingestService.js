@@ -3,7 +3,8 @@ const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
 const telegramNotifier = require('./telegramNotifier');
-const gdebenzIngestService = require('./gdebenzIngestService');
+const { ingestSecondarySourceRegion } = require('./secondarySourceIngestService');
+const { listSources } = require('./sourceRegistry');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
@@ -39,8 +40,9 @@ async function storeStation(parsed, region, polledAt) {
         // tbank's own reading, preserved separately - see the field's doc
         // comment on the Station model. This write always reflects tbank's
         // own poll; lastStatus/lastFuelStatuses above may get overwritten
-        // again right after by gdebenzIngestService's merge, later in this
-        // same ingest tick, if this station has a confirmed gdebenz match.
+        // again right after by secondarySourceIngestService's merge, later
+        // in this same ingest tick, if this station has any confirmed
+        // secondary-source match (see sourceRegistry.js).
         tbankLastStatus: parsed.status,
         tbankLastFuelStatuses: parsed.fuelStatuses,
         tbankLastSeenAt: polledAt,
@@ -123,15 +125,18 @@ async function ingestRegion(region) {
       logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
     }
 
-    // Best-effort, same reasoning as the Telegram notify above: gdebenz
-    // being down/slow/changed-shape must never break the primary tbank
-    // ingestion this function exists for. Runs on the same schedule as the
-    // tbank poll above (same region, same tick) rather than its own
-    // separate timer - see gdebenzIngestService.js.
-    try {
-      await gdebenzIngestService.ingestGdebenzRegion(region);
-    } catch (err) {
-      logger.error(`gdebenz ingest failed for region ${region.name}:`, err.message);
+    // Best-effort, same reasoning as the Telegram notify above: a secondary
+    // source (see sourceRegistry.js) being down/slow/changed-shape must
+    // never break the primary tbank ingestion this function exists for.
+    // Runs on the same schedule as the tbank poll above (same region, same
+    // tick) rather than its own separate timer - see
+    // secondarySourceIngestService.js.
+    for (const source of listSources()) {
+      try {
+        await ingestSecondarySourceRegion(source, region);
+      } catch (err) {
+        logger.error(`${source.key} ingest failed for region ${region.name}:`, err.message);
+      }
     }
 
     if (skipped > 0) {

@@ -143,11 +143,18 @@ function renderMap() {
   miniMap.invalidateSize();
 }
 
+// Hardcoded to gdebenz for now - this modal's UI itself isn't source-generic
+// yet (it shows exactly one "gdebenz" tile, see the template below); a
+// generic N-source version is a separate follow-up (see StationSourcesModal
+// in the refactor plan), not blocking the backend's routes/service already
+// being sourceKey-parameterized.
+const SOURCE_KEY = 'gdebenz';
+
 async function loadCandidates() {
   candidatesLoading.value = true;
   actionError.value = '';
   try {
-    candidates.value = await stationMatchingApi.candidatesForStation(props.stationId);
+    candidates.value = await stationMatchingApi.candidatesForStation(SOURCE_KEY, props.stationId);
     candidatesLoaded.value = true;
   } catch (err) {
     actionError.value = err.response?.data?.error || 'Не удалось загрузить кандидатов';
@@ -160,7 +167,7 @@ async function handleMatch(gdebenzStationId) {
   actionBusy.value = true;
   actionError.value = '';
   try {
-    await stationMatchingApi.match(gdebenzStationId, props.stationId);
+    await stationMatchingApi.match(SOURCE_KEY, gdebenzStationId, props.stationId);
     await load();
     emit('changed');
   } catch (err) {
@@ -176,7 +183,7 @@ async function handleUnmatch() {
   actionBusy.value = true;
   actionError.value = '';
   try {
-    await stationMatchingApi.unmatch(station.value.gdebenzStationId);
+    await stationMatchingApi.unmatch(SOURCE_KEY, station.value.gdebenzStationId);
     candidatesLoaded.value = false;
     candidates.value = [];
     await load();
@@ -321,7 +328,7 @@ onBeforeUnmount(() => {
                 Рядом не нашлось несопоставленных станций gdebenz.
               </p>
               <ul v-else class="candidates">
-                <li v-for="c in candidates" :key="c.gdebenzStationId">
+                <li v-for="c in candidates" :key="c.secondaryId">
                   <div class="candidate-info">
                     <strong>{{ c.name || 'АЗС' }}</strong>
                     <span class="muted">{{ c.address }}</span>
@@ -333,7 +340,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="btn secondary"
                     :disabled="actionBusy"
-                    @click="handleMatch(c.gdebenzStationId)"
+                    @click="handleMatch(c.secondaryId)"
                   >
                     Это та же станция
                   </button>

@@ -13,20 +13,18 @@ const regionSchema = new Schema(
     lastPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
     lastPollError: { type: String, default: null },
     lastPollStationCount: { type: Number, default: 0 },
-    // Same shape as the tbank poll-status fields above, but for the second
-    // (gdebenz) source - polled on the same schedule/bbox, see
-    // gdebenzIngestService.js. Kept separate so a gdebenz outage is visible
-    // in the admin panel without being confused with (or masking) a tbank
-    // poll failure.
+    // Superseded by sourcePollStatus below (generalized to N secondary
+    // sources - see services/sourceRegistry.js/secondarySourceIngestService.js).
+    // No longer written (confirmed nothing in the frontend reads these
+    // either); kept only until Stage 4 of the source-generalization refactor
+    // drops the fields outright.
     lastGdebenzPolledAt: { type: Date, default: null },
     lastGdebenzPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
     lastGdebenzPollError: { type: String, default: null },
     lastGdebenzPollStationCount: { type: Number, default: 0 },
-    // Generalized replacement for the four lastGdebenz* fields above, one
-    // entry per registered secondary source (see services/sourceRegistry.js)
-    // instead of a new set of named fields per source. Written alongside the
-    // gdebenz-specific fields for now (dual-write, see gdebenzIngestService.js)
-    // until every reader has migrated over.
+    // One entry per registered secondary source (see services/
+    // sourceRegistry.js), written by secondarySourceIngestService.js -
+    // replaces the four lastGdebenz* fields above.
     sourcePollStatus: [
       {
         _id: false,
