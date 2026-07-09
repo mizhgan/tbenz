@@ -13,12 +13,28 @@ const stationSchema = new Schema(
     regions: [{ type: Schema.Types.ObjectId, ref: 'Region' }],
     firstSeenAt: { type: Date, default: Date.now },
     lastSeenAt: { type: Date, default: Date.now },
-    // Last known overall availability status and per-fuel-type breakdown, as
-    // reported by the source (inferred from recent transaction activity, not
-    // an actual price/stock feed): "available" | "maybe_available" |
-    // "not_available" | "no_data".
+    // Last known overall availability status and per-fuel-type breakdown -
+    // the *effective* value everything else in the app reads (metrics,
+    // reports, forecasts, Telegram, map markers): tbank's own reading until
+    // a gdebenz match is confirmed, the merged result afterward (see
+    // mergeStatusService.js / gdebenzIngestService.js).
+    // "available" | "maybe_available" | "not_available" | "no_data".
     lastStatus: { type: String, default: 'no_data' },
     lastFuelStatuses: [
+      {
+        _id: false,
+        fuelType: { type: String },
+        status: { type: String },
+      },
+    ],
+    // tbank's own reading, kept separately from the (possibly merged)
+    // lastStatus/lastFuelStatuses above - written only by
+    // ingestService.storeStation, never touched by the gdebenz merge. Exists
+    // purely so the admin station-detail view can show "what did tbank
+    // itself say" side by side with gdebenz's own reading and the merged
+    // result, instead of only ever seeing the already-blended value.
+    tbankLastStatus: { type: String, default: 'no_data' },
+    tbankLastFuelStatuses: [
       {
         _id: false,
         fuelType: { type: String },

@@ -44,6 +44,12 @@ const routes = [
     meta: { adminOnly: true },
   },
   {
+    path: '/stations',
+    name: 'stations',
+    component: () => import('../views/StationsView.vue'),
+    meta: { adminOnly: true },
+  },
+  {
     path: '/station-matching',
     name: 'station-matching',
     component: () => import('../views/StationMatchingView.vue'),

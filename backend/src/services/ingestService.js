@@ -27,6 +27,13 @@ async function storeStation(parsed, region, polledAt) {
         lastSeenAt: polledAt,
         lastStatus: parsed.status,
         lastFuelStatuses: parsed.fuelStatuses,
+        // tbank's own reading, preserved separately - see the field's doc
+        // comment on the Station model. This write always reflects tbank's
+        // own poll; lastStatus/lastFuelStatuses above may get overwritten
+        // again right after by gdebenzIngestService's merge, later in this
+        // same ingest tick, if this station has a confirmed gdebenz match.
+        tbankLastStatus: parsed.status,
+        tbankLastFuelStatuses: parsed.fuelStatuses,
         lastTransactionAt: parsed.lastTransactionAt,
         lastRaw: parsed.raw,
       },

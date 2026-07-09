@@ -1,16 +1,22 @@
 const asyncHandler = require('../utils/asyncHandler');
 const { HttpError } = require('../middleware/errorHandler');
 const Station = require('../models/Station');
+const GdebenzStation = require('../models/GdebenzStation');
 const StationSnapshot = require('../models/StationSnapshot');
 const { getStationForecast } = require('../services/forecastService');
 
-// Lightweight search used by the admin UI's station-watchlist picker (e.g.
-// picking specific stations for a Telegram chat's subscription) - not meant
-// for bulk listing, just narrowing down a name/address search within an
-// optional region.
+// Doubles as the admin UI's station-watchlist picker (small `q`+`limit`
+// searches, the original use) and the "Станции" browse page's fuller list
+// (region/status/matchState filters, a bigger limit, a richer projection) -
+// same endpoint, same array response shape either way, so the original
+// callers keep working unchanged with the extra fields simply unused.
 const listStations = asyncHandler(async (req, res) => {
   const query = {};
   if (req.query.region) query.regions = req.query.region;
+  if (req.query.status) query.lastStatus = req.query.status;
+  if (req.query.matchState === 'matched') query.gdebenzStationId = { $ne: null };
+  else if (req.query.matchState === 'unmatched') query.gdebenzStationId = null;
+
   const q = (req.query.q || '').trim();
   if (q) {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -18,17 +24,53 @@ const listStations = asyncHandler(async (req, res) => {
     query.$or = [{ name: pattern }, { address: pattern }];
   }
 
-  const limit = Math.min(Number(req.query.limit) || 20, 100);
-  const stations = await Station.find(query, { name: 1, address: 1, regions: 1 })
+  const limit = Math.min(Number(req.query.limit) || 20, 500);
+  const stations = await Station.find(query, {
+    name: 1,
+    address: 1,
+    regions: 1,
+    lat: 1,
+    lon: 1,
+    lastStatus: 1,
+    lastSeenAt: 1,
+    gdebenzStationId: 1,
+  })
+    .sort({ name: 1 })
     .limit(limit)
     .lean();
   res.json(stations);
 });
 
 const getStation = asyncHandler(async (req, res) => {
-  const station = await Station.findById(req.params.id);
+  const station = await Station.findById(req.params.id).lean();
   if (!station) throw new HttpError(404, 'Station not found');
-  res.json(station);
+
+  // Enriches the same response the map/reports' StationDetailModal already
+  // consumes (an extra `gdebenz` property is simply unused by that older
+  // caller) rather than adding a second endpoint - the admin station-detail
+  // view needs the matched source's own reading (untouched by the merge,
+  // see mergeStatusService.js) to show it side by side with tbank's own and
+  // the merged result.
+  let gdebenz = null;
+  if (station.gdebenzStationId) {
+    const g = await GdebenzStation.findById(station.gdebenzStationId).lean();
+    if (g) {
+      gdebenz = {
+        id: g._id,
+        name: g.name,
+        brand: g.brand,
+        address: g.address,
+        lat: g.lat,
+        lon: g.lon,
+        status: g.status,
+        fuelTypes: g.fuelTypes,
+        conflict: g.conflict,
+        lastSeenAt: g.lastSeenAt,
+      };
+    }
+  }
+
+  res.json({ ...station, gdebenz });
 });
 
 const getStationHistory = asyncHandler(async (req, res) => {

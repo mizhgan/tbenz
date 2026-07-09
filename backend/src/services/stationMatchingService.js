@@ -1,4 +1,5 @@
 const Station = require('../models/Station');
+const GdebenzStation = require('../models/GdebenzStation');
 
 const EARTH_RADIUS_M = 6371000;
 const DEFAULT_RADIUS_M = 250;
@@ -89,4 +90,50 @@ async function suggestMatches(gdebenzStation, { radiusMeters = DEFAULT_RADIUS_M,
   return ranked;
 }
 
-module.exports = { suggestMatches, haversineMeters, nameSimilarity };
+/**
+ * The reverse of suggestMatches(): ranks candidate GdebenzStations for a
+ * given Station, for the station-detail admin view's "attach a source"
+ * flow - someone looking at one specific station (rather than working
+ * through the gdebenz-side unmatched queue) who wants to find its gdebenz
+ * counterpart. Excludes gdebenz stations that are already matched to some
+ * other Station, or that an admin has already dismissed as "not a station /
+ * no match" (see stationMatching.controller.js's ignoreGdebenzStation).
+ */
+async function suggestGdebenzMatchesForStation(station, { radiusMeters = DEFAULT_RADIUS_M, limit = DEFAULT_LIMIT } = {}) {
+  const latDelta = radiusMeters / 111320;
+  const lonDelta = radiusMeters / (111320 * Math.max(0.1, Math.cos(toRad(station.lat))));
+
+  const boxCandidates = await GdebenzStation.find(
+    {
+      matchedStationId: null,
+      ignored: false,
+      lat: { $gte: station.lat - latDelta, $lte: station.lat + latDelta },
+      lon: { $gte: station.lon - lonDelta, $lte: station.lon + lonDelta },
+    },
+    { name: 1, brand: 1, address: 1, lat: 1, lon: 1, status: 1, fuelTypes: 1 }
+  ).lean();
+
+  const ranked = boxCandidates
+    .map((g) => {
+      const distanceMeters = haversineMeters(station.lat, station.lon, g.lat, g.lon);
+      const similarity = Math.max(nameSimilarity(station.name, g.name), nameSimilarity(station.name, g.brand));
+      return {
+        gdebenzStationId: g._id,
+        name: g.name,
+        brand: g.brand,
+        address: g.address,
+        status: g.status,
+        fuelTypes: g.fuelTypes,
+        distanceMeters: Math.round(distanceMeters),
+        nameSimilarity: similarity,
+        score: similarity * 100 - distanceMeters / 5,
+      };
+    })
+    .filter((c) => c.distanceMeters <= radiusMeters)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return ranked;
+}
+
+module.exports = { suggestMatches, suggestGdebenzMatchesForStation, haversineMeters, nameSimilarity };

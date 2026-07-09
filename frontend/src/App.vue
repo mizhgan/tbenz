@@ -32,6 +32,7 @@ function handleLogout() {
         <router-link v-if="auth.isAdmin" to="/users">Пользователи</router-link>
         <router-link v-if="auth.isAdmin" to="/proxies">Прокси</router-link>
         <router-link v-if="auth.isAdmin" to="/telegram">Telegram</router-link>
+        <router-link v-if="auth.isAdmin" to="/stations">Станции</router-link>
         <router-link v-if="auth.isAdmin" to="/station-matching">Сопоставление</router-link>
         <router-link to="/settings">Настройки</router-link>
       </nav>

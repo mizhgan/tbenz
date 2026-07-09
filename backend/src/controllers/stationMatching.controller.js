@@ -120,4 +120,15 @@ const unmatch = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { listUnmatched, listMatched, confirmMatch, ignoreGdebenzStation, unmatch };
+// The reverse entry point from listUnmatched: someone looking at one
+// specific Station (the station-detail admin view) rather than working
+// through the gdebenz-side queue, who wants to find/attach its gdebenz
+// counterpart directly.
+const suggestForStation = asyncHandler(async (req, res) => {
+  const station = await Station.findById(req.params.stationId, { name: 1, lat: 1, lon: 1 }).lean();
+  if (!station) throw new HttpError(404, 'Station not found');
+  const candidates = await stationMatchingService.suggestGdebenzMatchesForStation(station);
+  res.json(candidates);
+});
+
+module.exports = { listUnmatched, listMatched, confirmMatch, ignoreGdebenzStation, unmatch, suggestForStation };
