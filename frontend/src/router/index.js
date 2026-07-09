@@ -56,6 +56,12 @@ const routes = [
     meta: { adminOnly: true },
   },
   {
+    path: '/raw-data',
+    name: 'raw-data',
+    component: () => import('../views/RawDataView.vue'),
+    meta: { adminOnly: true },
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),

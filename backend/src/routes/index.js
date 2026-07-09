@@ -6,6 +6,7 @@ const usersRoutes = require('./users.routes');
 const proxiesRoutes = require('./proxies.routes');
 const telegramRoutes = require('./telegram.routes');
 const stationMatchingRoutes = require('./stationMatching.routes');
+const rawDataRoutes = require('./rawData.routes');
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use('/users', usersRoutes);
 router.use('/proxies', proxiesRoutes);
 router.use('/telegram', telegramRoutes);
 router.use('/station-matching', stationMatchingRoutes);
+router.use('/raw-data', rawDataRoutes);
 
 module.exports = router;
