@@ -557,6 +557,32 @@ node scripts/mergeDuplicateStations.js
 node scripts/mergeDuplicateStations.js --apply
 ```
 
+### Запуск через Docker Compose
+
+Скрипт лежит в `backend/scripts/` — образ `backend` копирует эту папку
+(`Dockerfile`: `COPY scripts ./scripts`), но только начиная с этой версии,
+так что сначала образ нужно пересобрать:
+
+```bash
+docker compose build backend
+docker compose up -d backend
+```
+
+Дальше — `docker compose exec` внутрь уже запущенного контейнера
+`backend` (переменная `MONGO_URI` там уже настроена на `mongo` — тот же
+хост, что использует сам backend, — ничего дополнительно указывать не
+нужно):
+
+```bash
+docker compose exec backend node scripts/mergeDuplicateStations.js
+```
+
+Проверив вывод (dry run), реальное выполнение — тем же флагом:
+
+```bash
+docker compose exec backend node scripts/mergeDuplicateStations.js --apply
+```
+
 ## Запуск через Docker Compose (рекомендуется)
 
 ```bash
