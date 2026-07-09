@@ -263,12 +263,16 @@ function buildPopupHtml(s) {
       return `<div class="popup-fuel-row"><span class="popup-dot" style="background:${fm.color}"></span>${escapeHtml(fuelTypeLabel(f.fuelType))}: ${fm.label}</div>`;
     })
     .join('');
+  const lastTransactionLabel = s.lastTransactionAt
+    ? formatDateTime(new Date(s.lastTransactionAt).getTime())
+    : 'нет данных';
   return `
     <div class="station-popup">
       <div class="popup-title">${escapeHtml(s.name || 'АЗС')}</div>
       ${s.address ? `<div class="popup-address">${escapeHtml(s.address)}</div>` : ''}
       <div class="popup-status"><span class="popup-dot" style="background:${meta.color}"></span>${meta.label}${fuelSuffix}</div>
       ${fuelRows ? `<div class="popup-fuel-list">${fuelRows}</div>` : ''}
+      <div class="popup-hint">Последняя транзакция: ${escapeHtml(lastTransactionLabel)}</div>
       <button type="button" class="btn secondary popup-detail-btn">Подробная информация</button>
     </div>
   `;
@@ -881,6 +885,12 @@ onBeforeUnmount(() => {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+:deep(.popup-hint) {
+  color: #667;
+  font-size: 12px;
+  margin-bottom: 8px;
 }
 
 :deep(.popup-detail-btn) {
