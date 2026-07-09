@@ -11,6 +11,9 @@ const loading = ref(true);
 const errorMessage = ref('');
 const busyIds = ref(new Set());
 
+const searchQuery = ref('');
+const onlyWithCandidates = ref(false);
+
 async function loadAll() {
   if (!selectedSourceKey.value) return;
   loading.value = true;
@@ -42,13 +45,40 @@ async function loadSourcesAndAll() {
   }
 }
 
+// Cards with at least one candidate are what actually need a decision -
+// float them to the top so the (often much longer) tail of "nothing found
+// nearby" cards doesn't bury them.
+const filteredUnmatched = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  let list = unmatched.value;
+  if (q) {
+    list = list.filter(
+      (g) => (g.name || '').toLowerCase().includes(q) || (g.address || '').toLowerCase().includes(q)
+    );
+  }
+  if (onlyWithCandidates.value) {
+    list = list.filter((g) => g.suggestions.length > 0);
+  }
+  return [...list].sort((a, b) => (a.suggestions.length > 0 ? 0 : 1) - (b.suggestions.length > 0 ? 0 : 1));
+});
+
+// Every action below updates local state immediately instead of reloading
+// the whole page - a full listUnmatched reload recomputes match candidates
+// (haversine + name-similarity) for every single unmatched entry server-side,
+// which is the slow part (seconds, not milliseconds) and was forcing the
+// entire page to flash to a loading state after every click.
 async function handleMatch(secondaryId, stationId) {
   busyIds.value.add(secondaryId);
   errorMessage.value = '';
+  const idx = unmatched.value.findIndex((g) => g.id === secondaryId);
+  const removed = idx !== -1 ? unmatched.value.splice(idx, 1)[0] : null;
   try {
     await stationMatchingApi.match(selectedSourceKey.value, secondaryId, stationId);
-    await loadAll();
+    // Only the matched table needs a refresh - it's a cheap lookup (no
+    // per-item candidate search), unlike unmatched.
+    matched.value = await stationMatchingApi.listMatched(selectedSourceKey.value);
   } catch (err) {
+    if (removed) unmatched.value.splice(idx, 0, removed);
     errorMessage.value = err.response?.data?.error || 'Не удалось сопоставить станцию';
   } finally {
     busyIds.value.delete(secondaryId);
@@ -58,10 +88,12 @@ async function handleMatch(secondaryId, stationId) {
 async function handleIgnore(secondaryId) {
   busyIds.value.add(secondaryId);
   errorMessage.value = '';
+  const idx = unmatched.value.findIndex((g) => g.id === secondaryId);
+  const removed = idx !== -1 ? unmatched.value.splice(idx, 1)[0] : null;
   try {
     await stationMatchingApi.ignore(selectedSourceKey.value, secondaryId);
-    await loadAll();
   } catch (err) {
+    if (removed) unmatched.value.splice(idx, 0, removed);
     errorMessage.value = err.response?.data?.error || 'Не удалось скрыть станцию';
   } finally {
     busyIds.value.delete(secondaryId);
@@ -72,10 +104,17 @@ async function handleUnmatch(secondaryId) {
   if (!confirm('Отменить сопоставление? Объединённые данные останутся в истории, новые опросы перестанут объединяться.')) return;
   busyIds.value.add(secondaryId);
   errorMessage.value = '';
+  const idx = matched.value.findIndex((g) => g.id === secondaryId);
+  const removed = idx !== -1 ? matched.value.splice(idx, 1)[0] : null;
   try {
     await stationMatchingApi.unmatch(selectedSourceKey.value, secondaryId);
-    await loadAll();
+    // Unlike match/ignore above, this one station needs to reappear in the
+    // unmatched queue with freshly computed candidates - only a full
+    // listUnmatched recompute provides that. Runs in the background (no
+    // loading spinner) since unmatching is a rarer action than confirming.
+    unmatched.value = await stationMatchingApi.listUnmatched(selectedSourceKey.value);
   } catch (err) {
+    if (removed) matched.value.splice(idx, 0, removed);
     errorMessage.value = err.response?.data?.error || 'Не удалось отменить сопоставление';
   } finally {
     busyIds.value.delete(secondaryId);
@@ -91,6 +130,7 @@ const selectedSourceLabel = computed(
 );
 
 async function handleSourceChange() {
+  searchQuery.value = '';
   await loadAll();
 }
 
@@ -126,18 +166,36 @@ onMounted(loadSourcesAndAll);
 
     <template v-else>
       <div class="card section">
-        <h2>Требуют сопоставления ({{ unmatched.length }})</h2>
+        <div class="section-header">
+          <h2>Требуют сопоставления ({{ unmatched.length }})</h2>
+          <div class="filters">
+            <input v-model="searchQuery" type="text" placeholder="Поиск по названию/адресу" />
+            <label class="checkbox-label">
+              <input v-model="onlyWithCandidates" type="checkbox" />
+              Только с кандидатами
+            </label>
+          </div>
+        </div>
         <p v-if="!unmatched.length" class="hint">Несопоставленных станций нет.</p>
+        <p v-else-if="!filteredUnmatched.length" class="hint">Ничего не найдено по этому фильтру.</p>
+        <p v-else-if="filteredUnmatched.length !== unmatched.length" class="hint small">
+          Показано {{ filteredUnmatched.length }} из {{ unmatched.length }}.
+        </p>
 
-        <div v-for="g in unmatched" :key="g.id" class="gdebenz-card">
-          <div class="gdebenz-header">
+        <div
+          v-for="g in filteredUnmatched"
+          :key="g.id"
+          class="entry-card"
+          :class="{ 'has-candidates': g.suggestions.length > 0 }"
+        >
+          <div class="entry-header">
             <div>
               <span class="source-tag">{{ selectedSourceLabel || 'источник' }}</span>
-              <strong>{{ g.name || 'Без названия' }}</strong>
+              <strong class="entry-name">{{ g.name || 'Без названия' }}</strong>
               <span v-if="g.brand && g.brand !== g.name" class="muted"> ({{ g.brand }})</span>
               <div class="hint small">{{ g.address || 'адрес неизвестен' }}</div>
             </div>
-            <div class="gdebenz-status">
+            <div class="entry-status">
               <span class="badge-dot" :style="{ background: statusMeta(g.status).color }"></span>
               {{ statusMeta(g.status).label }}
               <span v-if="g.status !== 'not_available'" class="muted"> · {{ fuelTypesLabel(g.fuelTypes) }}</span>
@@ -147,7 +205,7 @@ onMounted(loadSourcesAndAll);
             </div>
           </div>
 
-          <p v-if="!g.suggestions.length" class="hint small">
+          <p v-if="!g.suggestions.length" class="hint small no-candidates-note">
             Рядом не нашлось ни одной станции tbank — возможно, она не входит ни в один
             отслеживаемый район, или её ещё не видел опрос tbank.
           </p>
@@ -164,7 +222,7 @@ onMounted(loadSourcesAndAll);
               </div>
               <button
                 type="button"
-                class="btn secondary"
+                class="btn success"
                 :disabled="busyIds.has(g.id)"
                 @click="handleMatch(g.id, s.stationId)"
               >
@@ -173,8 +231,8 @@ onMounted(loadSourcesAndAll);
             </li>
           </ul>
 
-          <div class="gdebenz-actions">
-            <button type="button" class="btn secondary" :disabled="busyIds.has(g.id)" @click="handleIgnore(g.id)">
+          <div class="entry-actions">
+            <button type="button" class="btn ghost" :disabled="busyIds.has(g.id)" @click="handleIgnore(g.id)">
               Не станция / нет соответствия
             </button>
           </div>
@@ -289,6 +347,41 @@ onMounted(loadSourcesAndAll);
   margin-bottom: 16px;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filters input[type='text'] {
+  padding: 6px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 220px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+  white-space: nowrap;
+}
+
 .section h2 {
   font-size: 16px;
   margin-top: 0;
@@ -298,16 +391,26 @@ onMounted(loadSourcesAndAll);
   color: #94a3b8;
 }
 
-.gdebenz-card {
-  padding: 12px 0;
-  border-bottom: 1px solid #eee;
+/* Each entry gets its own visually distinct surface (background + left
+   accent bar) instead of just a thin bottom border - with 20-100 of these
+   in a row, a border alone reads as one continuous blur. Entries that
+   actually have a candidate to review (sorted first, see
+   filteredUnmatched) get a stronger accent so they stand out from the
+   "nothing found nearby" tail. */
+.entry-card {
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: #f8fafc;
+  border-radius: 10px;
+  border-left: 3px solid #cbd5e1;
 }
 
-.gdebenz-card:last-child {
-  border-bottom: none;
+.entry-card.has-candidates {
+  border-left-color: #6d28d9;
+  background: #faf9ff;
 }
 
-.gdebenz-header {
+.entry-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -316,9 +419,17 @@ onMounted(loadSourcesAndAll);
   margin-bottom: 8px;
 }
 
-.gdebenz-status {
+.entry-name {
+  font-size: 15px;
+}
+
+.entry-status {
   text-align: right;
   font-size: 13px;
+}
+
+.no-candidates-note {
+  margin: 0;
 }
 
 .conflict-note {
@@ -335,7 +446,7 @@ onMounted(loadSourcesAndAll);
 
 .candidates {
   list-style: none;
-  margin: 8px 0;
+  margin: 8px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -347,7 +458,8 @@ onMounted(loadSourcesAndAll);
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 10px;
+  padding: 10px 12px;
+  background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   flex-wrap: wrap;
@@ -360,8 +472,32 @@ onMounted(loadSourcesAndAll);
   font-size: 13px;
 }
 
-.gdebenz-actions {
+.entry-actions {
   margin-top: 8px;
+}
+
+/* Confirming a match is the primary, common action here - green (distinct
+   from the app's default blue .btn, which is already used by "Обновить"
+   above) so it doesn't visually compete with every other button on the
+   page. "Не станция" is the opposite - a quiet, infrequent dismissal, so
+   it gets the .ghost treatment instead of a same-weight secondary button. */
+.btn.success {
+  background: #16a34a;
+  color: #fff;
+}
+
+.btn.success:hover {
+  background: #15803d;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.btn.ghost:hover {
+  background: #f1f5f9;
 }
 
 .table-wrap {
