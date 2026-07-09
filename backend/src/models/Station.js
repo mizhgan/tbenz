@@ -56,6 +56,11 @@ const stationSchema = new Schema(
         status: { type: String },
       },
     ],
+    // When tbank itself last polled this station - unlike lastSeenAt below,
+    // never touched by the gdebenz merge, so the admin station-detail view
+    // can show "when did tbank actually last see this station" instead of
+    // whichever source happened to poll most recently in a merged cycle.
+    tbankLastSeenAt: { type: Date, default: null },
     lastTransactionAt: { type: Date, default: null },
     // Full raw payload for this station as last received from the source API,
     // kept so nothing is lost if our field-mapping assumptions above change.

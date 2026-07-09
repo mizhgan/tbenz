@@ -74,12 +74,17 @@ async function load() {
   errorMessage.value = '';
   try {
     station.value = await stationsApi.get(props.stationId);
-    await nextTick();
-    renderMap();
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось загрузить станцию';
   } finally {
     loading.value = false;
+  }
+  // loading must already be false before this - the mini-map div only
+  // exists in the template's v-else-if="station" branch, which Vue won't
+  // render until the "Загрузка..." (v-if="loading") branch is gone.
+  if (station.value) {
+    await nextTick();
+    renderMap();
   }
 }
 
@@ -223,6 +228,7 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
                 {{ statusMeta(station.tbankLastStatus).label }}
               </div>
+              <div class="hint small">Обновлено: {{ formatDate(station.tbankLastSeenAt) }}</div>
             </div>
             <div class="source-tile">
               <div class="source-label">gdebenz</div>
@@ -231,6 +237,7 @@ onBeforeUnmount(() => {
                 {{ statusMeta(station.gdebenz.status).label }}
               </div>
               <div v-else class="hint small">не сопоставлено</div>
+              <div v-if="station.gdebenz" class="hint small">Обновлено: {{ formatDate(station.gdebenz.lastSeenAt) }}</div>
             </div>
             <div class="source-tile">
               <div class="source-label">Итог (что видят метрики/бот)</div>
@@ -238,6 +245,7 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
                 {{ statusMeta(station.lastStatus).label }}
               </div>
+              <div class="hint small">Обновлено: {{ formatDate(station.lastSeenAt) }}</div>
             </div>
           </div>
 

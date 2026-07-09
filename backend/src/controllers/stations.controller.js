@@ -66,6 +66,9 @@ const getStation = asyncHandler(async (req, res) => {
   if (station.tbankLastFuelStatuses === undefined) {
     station.tbankLastFuelStatuses = station.gdebenzStationId ? [] : station.lastFuelStatuses;
   }
+  if (station.tbankLastSeenAt === undefined) {
+    station.tbankLastSeenAt = station.gdebenzStationId ? null : station.lastSeenAt;
+  }
 
   // Enriches the same response the map/reports' StationDetailModal already
   // consumes (an extra `gdebenz` property is simply unused by that older

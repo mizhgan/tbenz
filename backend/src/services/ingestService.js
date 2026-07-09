@@ -43,6 +43,7 @@ async function storeStation(parsed, region, polledAt) {
         // same ingest tick, if this station has a confirmed gdebenz match.
         tbankLastStatus: parsed.status,
         tbankLastFuelStatuses: parsed.fuelStatuses,
+        tbankLastSeenAt: polledAt,
         lastTransactionAt: parsed.lastTransactionAt,
         lastRaw: parsed.raw,
       },
