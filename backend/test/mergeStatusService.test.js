@@ -86,6 +86,26 @@ test('resolveVotes: a source with no reading simply does not vote (absent, not a
   assert.equal(resolveVotes([{ status: 'available', weight: 1 }]).status, 'available');
 });
 
+test('resolveVotes: a weight-0 source (see sourceRegistry.js sberazs entry) never asserts anything on its own', () => {
+  // Unlike an "absent" reading (filtered out entirely, see the test above),
+  // a weight-0 reading is still a candidate vote but contributes nothing to
+  // totalWeight - the totalWeight<=0 guard is what keeps it from asserting
+  // a confirmed status even when it's the only source with an opinion,
+  // which any weight>0 would fail to do (weight cancels out in a
+  // single-voter weighted average regardless of how small it is).
+  assert.equal(resolveVotes([{ status: 'available', weight: 0 }]).status, 'no_data');
+  assert.equal(resolveVotes([{ status: 'not_available', weight: 0 }]).status, 'no_data');
+});
+
+test('resolveVotes: a weight-0 source is fully overridden by any real voter, not just outvoted', () => {
+  const withDissent = resolveVotes([
+    { status: 'not_available', weight: 1 },
+    { status: 'available', weight: 0 },
+  ]);
+  assert.equal(withDissent.status, 'not_available');
+  assert.equal(withDissent.confidence, 1); // no dilution at all, unlike a real (weight>0) disagreement
+});
+
 test('resolveVotes: a 2-1 split among equally-weighted sources is not confident enough to confirm', () => {
   // score = (1 + 1 - 1) / 3 = 0.33, below the +/-0.5 confirm threshold - a
   // slim majority among equal-trust sources is deliberately still reported

@@ -44,7 +44,27 @@ const SOURCES = [
     key: 'sberazs',
     label: 'sberazs.ru',
     model: SberazsStation,
-    weight: 1.0,
+    // Weighted at 0, not just "low" - a deliberate exception to the
+    // "seed new sources at 1.0" rule above, per an explicit call: sberazs's
+    // `availabilityStatus` is inferred from whether *any* recent card
+    // payment happened at the location at all, not a fuel purchase
+    // specifically (could be a shop/car wash at the same site), and its
+    // `fuels` list is the station's permanent equipment (which pumps it
+    // has), not a live availability signal the way gdebenz's `fuels_now` is
+    // - so it isn't just "less trustworthy per source", it's structurally
+    // not evidence of fuel availability at all.
+    //
+    // resolveVotes' weighted average cancels out weight entirely when a
+    // source is the *only* one voting on a station (score = its own
+    // reading regardless of how small a positive weight is) - so any
+    // weight > 0 would still let sberazs single-handedly assert a
+    // confirmed status on stations tbank/gdebenz have nothing to say
+    // about. 0 is the one value that actually keeps it at zero influence
+    // in every case (see resolveVotes' totalWeight <= 0 guard), including
+    // that one - it still shows up as its own tile/row in the admin UI for
+    // a human to weigh, it just never moves the canonical merged status
+    // metrics/reports/Telegram/bot read.
+    weight: 0,
     get enabled() {
       return sberazsEnabled;
     },
