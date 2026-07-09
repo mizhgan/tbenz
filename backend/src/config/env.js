@@ -30,4 +30,10 @@ module.exports = {
   // the other optional integrations above which are off by default.
   gdebenzApiBaseUrl: process.env.GDEBENZ_API_BASE_URL || 'https://gdebenz.ru/api/stations',
   gdebenzEnabled: process.env.GDEBENZ_ENABLED !== 'false',
+  // sberazs.ru is a third, independent fuel-availability source (payment/
+  // transaction-based, same underlying signal shape as tbank) - same
+  // "public endpoint, off only if explicitly disabled" reasoning as gdebenz
+  // above.
+  sberazsApiBaseUrl: process.env.SBERAZS_API_BASE_URL || 'https://sberazs.ru/api/stations',
+  sberazsEnabled: process.env.SBERAZS_ENABLED !== 'false',
 };

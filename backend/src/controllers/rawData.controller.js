@@ -3,6 +3,7 @@ const { HttpError } = require('../middleware/errorHandler');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
 const GdebenzStation = require('../models/GdebenzStation');
+const SberazsStation = require('../models/SberazsStation');
 const StationSnapshot = require('../models/StationSnapshot');
 
 // Deliberately a small, explicit whitelist - this exists purely so an admin
@@ -16,6 +17,7 @@ const COLLECTIONS = {
   regions: Region,
   stations: Station,
   gdebenzStations: GdebenzStation,
+  sberazsStations: SberazsStation,
   stationSnapshots: StationSnapshot,
 };
 

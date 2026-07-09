@@ -644,6 +644,8 @@ Vite dev-сервер (порт 5173) проксирует запросы `/api`
 | `TELEGRAM_BOT_TOKEN` | не задан | токен Telegram-бота (от @BotFather); если не задан, весь функционал бота выключен |
 | `GDEBENZ_API_BASE_URL` | `https://gdebenz.ru/api/stations` | адрес второго источника данных |
 | `GDEBENZ_ENABLED` | `true` | `false` полностью отключает опрос gdebenz (в отличие от Telegram-бота, включён по умолчанию — не требует токена) |
+| `SBERAZS_API_BASE_URL` | `https://sberazs.ru/api/stations` | адрес третьего источника данных (платёжный, как tbank) |
+| `SBERAZS_ENABLED` | `true` | `false` полностью отключает опрос sberazs (по умолчанию включён, как и gdebenz) |
 
 ## Модель данных (MongoDB)
 

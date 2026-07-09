@@ -1,7 +1,10 @@
 const GdebenzStation = require('../models/GdebenzStation');
 const gdebenzClient = require('./gdebenzClient');
 const gdebenzParser = require('./gdebenzParser');
-const { gdebenzEnabled } = require('../config/env');
+const SberazsStation = require('../models/SberazsStation');
+const sberazsClient = require('./sberazsClient');
+const sberazsParser = require('./sberazsParser');
+const { gdebenzEnabled, sberazsEnabled } = require('../config/env');
 
 // Single place that lists every *secondary* fuel-availability source (i.e.
 // every source besides tbank itself). tbank stays special-cased everywhere
@@ -36,6 +39,18 @@ const SOURCES = [
     fetchStations: gdebenzClient.fetchStations,
     extractStationsArray: gdebenzParser.extractGdebenzStationsArray,
     parseStation: gdebenzParser.parseGdebenzStation,
+  },
+  {
+    key: 'sberazs',
+    label: 'sberazs.ru',
+    model: SberazsStation,
+    weight: 1.0,
+    get enabled() {
+      return sberazsEnabled;
+    },
+    fetchStations: sberazsClient.fetchStations,
+    extractStationsArray: sberazsParser.extractStationsArray,
+    parseStation: sberazsParser.parseStation,
   },
 ];
 
