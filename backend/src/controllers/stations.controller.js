@@ -107,6 +107,37 @@ const getStation = asyncHandler(async (req, res) => {
   res.json({ ...station, sources });
 });
 
+/**
+ * Admin correction for a station's name/brand/address - tbank sometimes
+ * reports these wrong (a garbled name, a stale/off-by-one address) and
+ * there's no other authoritative source to defer to, so an admin can fix
+ * them directly. name/address edits set nameEditedByAdmin/addressEditedByAdmin
+ * (see the Station model's doc comment) so ingestService.storeStation stops
+ * overwriting that field from tbank's future polls - otherwise the fix
+ * would be silently reverted by the very next poll. brand has no ingest
+ * write path at all (tbank doesn't report one), so it's just a plain field.
+ */
+const updateStationDetails = asyncHandler(async (req, res) => {
+  const station = await Station.findById(req.params.id);
+  if (!station) throw new HttpError(404, 'Station not found');
+
+  const { name, brand, address } = req.body || {};
+  if (name !== undefined) {
+    station.name = String(name).trim() || null;
+    station.nameEditedByAdmin = true;
+  }
+  if (brand !== undefined) {
+    station.brand = String(brand).trim() || null;
+  }
+  if (address !== undefined) {
+    station.address = String(address).trim() || null;
+    station.addressEditedByAdmin = true;
+  }
+  await station.save();
+
+  res.json(station);
+});
+
 const getStationHistory = asyncHandler(async (req, res) => {
   const station = await Station.findById(req.params.id);
   if (!station) throw new HttpError(404, 'Station not found');
@@ -147,4 +178,4 @@ const getForecast = asyncHandler(async (req, res) => {
   res.json(forecast);
 });
 
-module.exports = { listStations, getStation, getStationHistory, getForecast };
+module.exports = { listStations, getStation, updateStationDetails, getStationHistory, getForecast };

@@ -16,8 +16,22 @@ const { Schema, model } = require('mongoose');
 const stationSchema = new Schema(
   {
     externalId: { type: String, required: true, index: true },
+    // name/address come from tbank's own raw report by default (see
+    // ingestService.storeStation) - tbank sometimes gets these wrong (a
+    // generic/garbled name, a stale or off-by-one address), and there's no
+    // "correct" source to defer to instead, so an admin can fix them
+    // directly (see stations.controller.js's updateStationDetails). Once
+    // edited, nameEditedByAdmin/addressEditedByAdmin below tell storeStation
+    // to stop overwriting that field from tbank's future polls - otherwise
+    // the very next poll (every ~10-15 min) would silently revert the fix.
     name: { type: String, default: null },
+    nameEditedByAdmin: { type: Boolean, default: false },
     address: { type: String, default: null },
+    addressEditedByAdmin: { type: Boolean, default: false },
+    // Brand/network (e.g. "Лукойл", "Роснефть") - unlike name/address, tbank
+    // has no field for this at all, so it's purely admin-entered with no
+    // ingest write path to guard against; null until an admin sets it.
+    brand: { type: String, default: null },
     lat: { type: Number, required: true },
     lon: { type: Number, required: true },
     // Preferred dedupe key when present (see ingestService.storeStation) -

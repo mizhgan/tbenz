@@ -83,13 +83,13 @@ function renderMap() {
   if (!miniMapContainer.value || !station.value) return;
   if (!miniMap) {
     miniMap = L.map(miniMapContainer.value, {
-      zoomControl: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      doubleClickZoom: false,
-      touchZoom: false,
-      boxZoom: false,
-      keyboard: false,
+      zoomControl: true,
+      dragging: true,
+      scrollWheelZoom: true,
+      doubleClickZoom: true,
+      touchZoom: true,
+      boxZoom: true,
+      keyboard: true,
     });
     miniMap.attributionControl.setPrefix(false);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {

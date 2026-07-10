@@ -502,6 +502,7 @@ onMounted(async () => {
       :station="detailStation"
       :region-id="selectedRegionId"
       @close="closeDetailModal"
+      @changed="loadMetrics"
     />
   </div>
 </template>

@@ -22,36 +22,41 @@ async function storeStation(parsed, region, polledAt) {
   // Needed before the update to detect available/unavailable transitions per
   // fuel type - findOneAndUpdate with new:true only gives us the post-update
   // document, which would make every poll look like a "first time seen".
+  // Also carries nameEditedByAdmin/addressEditedByAdmin, so an admin
+  // correction (see stations.controller.js's updateStationDetails) isn't
+  // silently reverted by this same write a few lines down.
   const previous = await Station.findOne(
     dedupeFilter,
-    { lastFuelStatuses: 1 }
+    { lastFuelStatuses: 1, nameEditedByAdmin: 1, addressEditedByAdmin: 1 }
   ).lean();
+
+  const setFields = {
+    externalId: parsed.externalId,
+    lat: parsed.lat,
+    lon: parsed.lon,
+    yandexOrgId: parsed.yandexOrgId,
+    lastSeenAt: polledAt,
+    lastStatus: parsed.status,
+    lastFuelStatuses: parsed.fuelStatuses,
+    // tbank's own reading, preserved separately - see the field's doc
+    // comment on the Station model. This write always reflects tbank's
+    // own poll; lastStatus/lastFuelStatuses above may get overwritten
+    // again right after by secondarySourceIngestService's merge, later
+    // in this same ingest tick, if this station has any confirmed
+    // secondary-source match (see sourceRegistry.js).
+    tbankLastStatus: parsed.status,
+    tbankLastFuelStatuses: parsed.fuelStatuses,
+    tbankLastSeenAt: polledAt,
+    lastTransactionAt: parsed.lastTransactionAt,
+    lastRaw: parsed.raw,
+  };
+  if (!previous?.nameEditedByAdmin) setFields.name = parsed.name;
+  if (!previous?.addressEditedByAdmin) setFields.address = parsed.address;
 
   const station = await Station.findOneAndUpdate(
     dedupeFilter,
     {
-      $set: {
-        externalId: parsed.externalId,
-        name: parsed.name,
-        address: parsed.address,
-        lat: parsed.lat,
-        lon: parsed.lon,
-        yandexOrgId: parsed.yandexOrgId,
-        lastSeenAt: polledAt,
-        lastStatus: parsed.status,
-        lastFuelStatuses: parsed.fuelStatuses,
-        // tbank's own reading, preserved separately - see the field's doc
-        // comment on the Station model. This write always reflects tbank's
-        // own poll; lastStatus/lastFuelStatuses above may get overwritten
-        // again right after by secondarySourceIngestService's merge, later
-        // in this same ingest tick, if this station has any confirmed
-        // secondary-source match (see sourceRegistry.js).
-        tbankLastStatus: parsed.status,
-        tbankLastFuelStatuses: parsed.fuelStatuses,
-        tbankLastSeenAt: polledAt,
-        lastTransactionAt: parsed.lastTransactionAt,
-        lastRaw: parsed.raw,
-      },
+      $set: setFields,
       $setOnInsert: { firstSeenAt: polledAt },
       $addToSet: { regions: region._id },
     },

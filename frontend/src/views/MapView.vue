@@ -749,6 +749,7 @@ onBeforeUnmount(() => {
       :region-id="selectedRegionId"
       :selected-fuel-type="selectedFuelType"
       @close="closeDetailModal"
+      @changed="loadSnapshot"
     />
 
     <ExportPanel

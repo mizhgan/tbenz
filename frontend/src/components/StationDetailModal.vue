@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import L from 'leaflet';
 import { metricsApi } from '../api/metrics';
 import { stationsApi } from '../api/regions';
@@ -16,7 +16,7 @@ const props = defineProps({
   regionId: { type: String, required: true },
   selectedFuelType: { type: String, default: '' },
 });
-const emit = defineEmits(['close']);
+const emit = defineEmits(['close', 'changed']);
 
 const miniMapContainer = ref(null);
 let miniMap = null;
@@ -48,6 +48,51 @@ async function loadSources() {
     sourcesError.value = 'Не удалось загрузить сведения об источниках';
   } finally {
     sourcesLoading.value = false;
+  }
+}
+
+// The header shows sourceDoc's name/brand/address once loaded (the full
+// Station document, including brand - which the map/reports snapshot the
+// `station` prop is built from doesn't carry at all) instead of the prop
+// directly, so an edit (see below) and tbank's own future corrections are
+// both reflected without waiting on the parent to refresh its own list.
+// Falls back to the prop only for the brief window before loadSources
+// resolves.
+const headerStation = computed(() => ({
+  name: sourceDoc.value?.name ?? props.station.name,
+  brand: sourceDoc.value?.brand ?? null,
+  address: sourceDoc.value?.address ?? props.station.address,
+}));
+
+const editingDetails = ref(false);
+const editForm = reactive({ name: '', brand: '', address: '' });
+const editBusy = ref(false);
+const editError = ref('');
+
+function openEditDetails() {
+  editForm.name = headerStation.value.name || '';
+  editForm.brand = headerStation.value.brand || '';
+  editForm.address = headerStation.value.address || '';
+  editError.value = '';
+  editingDetails.value = true;
+}
+
+async function saveDetails() {
+  editBusy.value = true;
+  editError.value = '';
+  try {
+    const updated = await stationsApi.update(props.station.stationId, {
+      name: editForm.name.trim(),
+      brand: editForm.brand.trim(),
+      address: editForm.address.trim(),
+    });
+    if (sourceDoc.value) Object.assign(sourceDoc.value, updated);
+    editingDetails.value = false;
+    emit('changed');
+  } catch (err) {
+    editError.value = err.response?.data?.error || 'Не удалось сохранить изменения';
+  } finally {
+    editBusy.value = false;
   }
 }
 
@@ -110,8 +155,13 @@ async function generateCard() {
     const forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
     const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
 
+    // Merges in headerStation's name/address rather than using the prop
+    // as-is, so a correction made in this same modal session (see
+    // saveDetails above) shows up on a card generated right after, instead
+    // of the stale value the parent's snapshot/table still has until its
+    // own next refresh.
     const blob = await renderStationCard({
-      station: props.station,
+      station: { ...props.station, name: headerStation.value.name, address: headerStation.value.address },
       reliability: reliability.value,
       forecast,
       history,
@@ -119,7 +169,7 @@ async function generateCard() {
     if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
     cardBlob = blob;
     cardUrl.value = URL.createObjectURL(blob);
-    const safeName = (props.station.name || 'station').replace(/[^\p{L}\p{N}]+/gu, '-');
+    const safeName = (headerStation.value.name || 'station').replace(/[^\p{L}\p{N}]+/gu, '-');
     cardFile = new File([blob], `${safeName}-card.png`, { type: 'image/png' });
   } catch (err) {
     cardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
@@ -143,7 +193,7 @@ async function copyCardToClipboard() {
 async function shareCard() {
   if (!cardFile) return;
   try {
-    await navigator.share({ files: [cardFile], title: `Статус станции: ${props.station.name || 'АЗС'}` });
+    await navigator.share({ files: [cardFile], title: `Статус станции: ${headerStation.value.name || 'АЗС'}` });
   } catch (err) {
     if (err.name !== 'AbortError') {
       cardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
@@ -156,14 +206,18 @@ onMounted(async () => {
   loadSources();
 
   await nextTick();
+  // Interactive (unlike StationSourcesModal's mini-map, which stays a fixed
+  // static preview) - a station's neighbors can be close together, and a
+  // fixed zoom level sometimes isn't enough to tell which pin is actually
+  // this station.
   miniMap = L.map(miniMapContainer.value, {
-    zoomControl: false,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    touchZoom: false,
-    boxZoom: false,
-    keyboard: false,
+    zoomControl: true,
+    dragging: true,
+    scrollWheelZoom: true,
+    doubleClickZoom: true,
+    touchZoom: true,
+    boxZoom: true,
+    keyboard: true,
   }).setView([props.station.lat, props.station.lon], 15);
   miniMap.attributionControl.setPrefix(false);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -192,10 +246,37 @@ onBeforeUnmount(() => {
     <div class="modal-backdrop" @click.self="emit('close')">
       <div class="card modal-card">
         <div class="modal-header">
-          <div>
-            <h2>{{ station.name || 'АЗС' }}</h2>
-            <p v-if="station.address" class="hint">{{ station.address }}</p>
+          <div v-if="!editingDetails">
+            <h2>
+              {{ headerStation.name || 'АЗС' }}
+              <button type="button" class="link-btn edit-link" @click="openEditDetails">изменить</button>
+            </h2>
+            <p v-if="headerStation.brand" class="hint">{{ headerStation.brand }}</p>
+            <p v-if="headerStation.address" class="hint">{{ headerStation.address }}</p>
           </div>
+          <form v-else class="edit-details-form" @submit.prevent="saveDetails">
+            <div class="form-row">
+              <label for="edit-name">Название</label>
+              <input id="edit-name" v-model="editForm.name" type="text" />
+            </div>
+            <div class="form-row">
+              <label for="edit-brand">Сеть</label>
+              <input id="edit-brand" v-model="editForm.brand" type="text" placeholder="Например, Лукойл" />
+            </div>
+            <div class="form-row">
+              <label for="edit-address">Адрес</label>
+              <input id="edit-address" v-model="editForm.address" type="text" />
+            </div>
+            <p v-if="editError" class="error-text">{{ editError }}</p>
+            <div class="edit-details-actions">
+              <button type="button" class="btn secondary" :disabled="editBusy" @click="editingDetails = false">
+                Отмена
+              </button>
+              <button type="submit" class="btn" :disabled="editBusy">
+                {{ editBusy ? 'Сохранение...' : 'Сохранить' }}
+              </button>
+            </div>
+          </form>
           <button type="button" class="link-btn close-btn" @click="emit('close')">✕</button>
         </div>
 
@@ -409,10 +490,33 @@ onBeforeUnmount(() => {
   font-size: 20px;
 }
 
+.edit-link {
+  font-size: 12px;
+  font-weight: 400;
+  color: #2563eb;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .close-btn {
   font-size: 18px;
   line-height: 1;
   padding: 4px 8px;
+}
+
+.edit-details-form {
+  flex: 1;
+}
+
+.edit-details-form .form-row {
+  margin-bottom: 8px;
+}
+
+.edit-details-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .mini-map {
