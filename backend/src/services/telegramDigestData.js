@@ -36,11 +36,22 @@ function topAvailableStations(periodStations) {
 async function buildRegionDigestData(region, { from, to, spanMs, sparklineBuckets = 12 }) {
   const prevFrom = new Date(from.getTime() - spanMs);
 
+  // Caps the requested bucket count to how many real poll ticks the region
+  // can actually produce within the span - the hourly digest asks for 12
+  // buckets (5 min each) regardless of region, but a region polling every
+  // 15 min (the common case) only ever lands a snapshot in 1 of every 3 of
+  // those, so most buckets came back empty (drawn as gaps, or - if a poll
+  // happened to land awkwardly relative to the bucket boundaries - no line
+  // at all). Sizing buckets to the region's own cadence instead means every
+  // bucket has a real chance of containing a poll.
+  const idealBucketCount = Math.max(1, Math.floor(spanMs / (region.pollIntervalMinutes * 60 * 1000)));
+  const bucketCount = Math.min(sparklineBuckets, idealBucketCount);
+
   const [current, periodStations, prevPeriodStations, series] = await Promise.all([
     metricsService.getCurrentSnapshot(region._id, to),
     metricsService.getStationMetrics(region._id, { from, to }),
     metricsService.getStationMetrics(region._id, { from: prevFrom, to: from }),
-    metricsService.getAvailabilitySeries(region._id, { from, to, bucketCount: sparklineBuckets }),
+    metricsService.getAvailabilitySeries(region._id, { from, to, bucketCount }),
   ]);
 
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
