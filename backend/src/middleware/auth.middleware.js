@@ -30,6 +30,28 @@ const requireAuth = asyncHandler(async (req, res, next) => {
   return next();
 });
 
+// For routes public visitors can reach but that show more to a logged-in
+// caller (see regions.controller.js's listRegions/getRegion, which return
+// fewer fields when req.user is unset) - same token verification as
+// requireAuth, but a missing/invalid/expired token means "anonymous", not
+// a rejected request. Never rejects on its own; a route that actually needs
+// a specific role still adds requireAdmin (or requireAuth) after it.
+const optionalAuth = asyncHandler(async (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const [scheme, token] = header.split(' ');
+  if (scheme !== 'Bearer' || !token) return next();
+
+  try {
+    const payload = verifyToken(token);
+    const user = await User.findById(payload.sub).select('username role');
+    if (user) req.user = { sub: user._id.toString(), username: user.username, role: user.role };
+  } catch (err) {
+    // Invalid/expired token on an optional-auth route - treat as anonymous
+    // rather than erroring, unlike requireAuth.
+  }
+  return next();
+});
+
 // Must run after requireAuth (relies on req.user being set).
 function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') {
@@ -38,4 +60,4 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
-module.exports = { requireAuth, requireAdmin };
+module.exports = { requireAuth, requireAdmin, optionalAuth };

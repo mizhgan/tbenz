@@ -20,30 +20,35 @@ const {
   getHeatmap,
   getTrendForecast,
 } = require('../controllers/metrics.controller');
-const { requireAuth, requireAdmin } = require('../middleware/auth.middleware');
+const { requireAuth, requireAdmin, optionalAuth } = require('../middleware/auth.middleware');
 
 const router = Router();
-router.use(requireAuth);
 
-// Read-only endpoints - available to any authenticated user (admin or viewer).
-router.get('/', listRegions);
-router.get('/:id', getRegion);
-
-// Mutating endpoints - admins only.
-router.post('/', requireAdmin, createRegion);
-router.put('/:id', requireAdmin, updateRegion);
-router.delete('/:id', requireAdmin, deleteRegion);
-router.post('/:id/poll', requireAdmin, pollRegionNow);
+// Public (map/reports pages) - listRegions/getRegion trim operational
+// fields (poll status, error text, source URLs) for an anonymous caller;
+// optionalAuth lets them see the full set they already get today, unchanged
+// (see regions.controller.js's PUBLIC_REGION_EXCLUDE).
+router.get('/', optionalAuth, listRegions);
+router.get('/:id', optionalAuth, getRegion);
 router.get('/:id/history-range', getHistoryRange);
 router.get('/:id/snapshot-times', getSnapshotTimes);
 router.get('/:id/snapshot', getRegionSnapshot);
-router.get('/:id/poll-stats', getPollStats);
-router.get('/:id/poll-logs', getPollLogs);
-router.get('/:id/raw-response', getRawResponse);
 router.get('/:id/metrics/trend', getTrend);
 router.get('/:id/metrics/stations', getStations);
 router.get('/:id/metrics/brands', getBrands);
 router.get('/:id/metrics/heatmap', getHeatmap);
 router.get('/:id/metrics/trend-forecast', getTrendForecast);
+
+// Operationally sensitive (proxy failures, scraper URLs, raw third-party
+// responses) - stays behind a login, any role.
+router.get('/:id/poll-stats', requireAuth, getPollStats);
+router.get('/:id/poll-logs', requireAuth, getPollLogs);
+router.get('/:id/raw-response', requireAuth, getRawResponse);
+
+// Mutating endpoints - admins only.
+router.post('/', requireAuth, requireAdmin, createRegion);
+router.put('/:id', requireAuth, requireAdmin, updateRegion);
+router.delete('/:id', requireAuth, requireAdmin, deleteRegion);
+router.post('/:id/poll', requireAuth, requireAdmin, pollRegionNow);
 
 module.exports = router;

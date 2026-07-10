@@ -104,7 +104,16 @@ const getStation = asyncHandler(async (req, res) => {
     });
   }
 
-  res.json({ ...station, sources });
+  // lastRaw/sourceLinks/*EditedByAdmin are internal bookkeeping with no
+  // public UI use - lastRaw is the full raw tbank payload (verbose, no use
+  // outside debugging), sourceLinks is only ever consumed above to build
+  // `sources` (the frontend never reads the raw ObjectIds), and the
+  // editedByAdmin flags exist purely to stop ingestService.storeStation from
+  // reverting an admin's correction (see the Station model's doc comment) -
+  // stripped unconditionally (not just for anonymous callers), since nothing
+  // authenticated reads them either.
+  const { lastRaw, sourceLinks, nameEditedByAdmin, addressEditedByAdmin, ...publicStation } = station;
+  res.json({ ...publicStation, sources });
 });
 
 /**

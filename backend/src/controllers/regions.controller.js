@@ -66,13 +66,27 @@ function validateRegionInput(body, { partial = false } = {}) {
 // so the "copy URL" button works without an extra round-trip.
 const RAW_RESPONSE_EXCLUDE = '-lastRawResponse -sourcePollStatus.rawResponse';
 
+// An anonymous visitor (the public map/reports pages, see optionalAuth on
+// these routes) gets this instead - on top of RAW_RESPONSE_EXCLUDE, also
+// drops every operationally-sensitive poll-status field (scraper target
+// URLs, source error text, poll timestamps/counts) that has no business
+// going to the public internet. bbox/name/active/pollIntervalMinutes stay -
+// not sensitive, and the map/reports pages only ever read `_id`/`name`
+// anyway. Logged-in callers (any role) keep getting RAW_RESPONSE_EXCLUDE's
+// full set unchanged, since RegionsView.vue reads sourcePollStatus/
+// lastPollStatus/lastRequestUrl directly off this same response.
+const PUBLIC_REGION_EXCLUDE =
+  '-lastRawResponse -sourcePollStatus -lastPollStatus -lastPollError -lastPollStationCount -lastRequestUrl -lastPolledAt';
+
 const listRegions = asyncHandler(async (req, res) => {
-  const regions = await Region.find().select(RAW_RESPONSE_EXCLUDE).sort({ createdAt: -1 });
+  const select = req.user ? RAW_RESPONSE_EXCLUDE : PUBLIC_REGION_EXCLUDE;
+  const regions = await Region.find().select(select).sort({ createdAt: -1 });
   res.json(regions);
 });
 
 const getRegion = asyncHandler(async (req, res) => {
-  const region = await Region.findById(req.params.id).select(RAW_RESPONSE_EXCLUDE);
+  const select = req.user ? RAW_RESPONSE_EXCLUDE : PUBLIC_REGION_EXCLUDE;
+  const region = await Region.findById(req.params.id).select(select);
   if (!region) throw new HttpError(404, 'Region not found');
   res.json(region);
 });

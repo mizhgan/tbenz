@@ -19,11 +19,13 @@ const routes = [
     path: '/map',
     name: 'map',
     component: () => import('../views/MapView.vue'),
+    meta: { public: true },
   },
   {
     path: '/reports',
     name: 'reports',
     component: () => import('../views/ReportsView.vue'),
+    meta: { public: true },
   },
   {
     path: '/users',
