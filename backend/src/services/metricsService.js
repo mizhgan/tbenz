@@ -1,8 +1,20 @@
 const StationSnapshot = require('../models/StationSnapshot');
 const Station = require('../models/Station');
 const { listSources } = require('./sourceRegistry');
+const { memoizeAsync } = require('../utils/cache');
 
 const DEFAULT_TZ = 'Europe/Moscow';
+
+// Snapshots land every pollIntervalMinutes (10 by default), so recomputing
+// these aggregations more than once every few minutes buys nothing but load.
+// A short TTL plus in-flight dedup is enough to collapse both same-user
+// re-renders and the reports page's own redundant internal calls (e.g.
+// getBrandMetrics -> getStationMetrics) into a single query.
+const METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function rangeKey(regionId, { from, to, bucketHours, tz } = {}) {
+  return JSON.stringify([String(regionId), from?.toISOString(), to?.toISOString(), bucketHours, tz]);
+}
 
 function buildMatch(regionId, from, to) {
   const match = { region: regionId };
@@ -144,7 +156,7 @@ async function getCurrentSnapshot(regionId, at) {
 /**
  * Region-wide availability trend, bucketed into fixed-size time windows.
  */
-async function getAvailabilityTrend(regionId, { from, to, bucketHours = 24, tz = DEFAULT_TZ }) {
+async function getAvailabilityTrendUncached(regionId, { from, to, bucketHours = 24, tz = DEFAULT_TZ }) {
   const match = buildMatch(regionId, from, to);
   const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
   const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
@@ -172,6 +184,11 @@ async function getAvailabilityTrend(regionId, { from, to, bucketHours = 24, tz =
     ...withKnownPct(row),
   }));
 }
+
+const getAvailabilityTrend = memoizeAsync(getAvailabilityTrendUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (regionId, opts) => rangeKey(regionId, opts),
+});
 
 /**
  * Availability series bucketed into roughly `bucketCount` evenly-spaced
@@ -251,7 +268,7 @@ function computeOutages(history) {
  * Per-station reliability metrics: availability share (excluding no_data),
  * outage count and average recovery time within the given range.
  */
-async function getStationMetrics(regionId, { from, to }) {
+async function getStationMetricsUncached(regionId, { from, to }) {
   const match = buildMatch(regionId, from, to);
 
   const countRows = await StationSnapshot.aggregate([
@@ -293,6 +310,11 @@ async function getStationMetrics(regionId, { from, to }) {
   });
 }
 
+const getStationMetrics = memoizeAsync(getStationMetricsUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (regionId, opts) => rangeKey(regionId, opts),
+});
+
 /**
  * Availability grouped by station "name" (the source's brand/network field,
  * e.g. "Лукойл", "Роснефть") - built on top of per-station metrics rather
@@ -329,7 +351,7 @@ async function getBrandMetrics(regionId, range) {
  * Average availability by ISO weekday (1=Mon..7=Sun) and hour-of-day (0-23)
  * in the given timezone - reveals patterns like "mornings before restock".
  */
-async function getHeatmap(regionId, { from, to, tz = DEFAULT_TZ }) {
+async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
   const match = buildMatch(regionId, from, to);
 
   const rows = await StationSnapshot.aggregate([
@@ -355,6 +377,11 @@ async function getHeatmap(regionId, { from, to, tz = DEFAULT_TZ }) {
     ...withKnownPct(row),
   }));
 }
+
+const getHeatmap = memoizeAsync(getHeatmapUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (regionId, opts) => rangeKey(regionId, opts),
+});
 
 module.exports = {
   getCurrentSnapshot,

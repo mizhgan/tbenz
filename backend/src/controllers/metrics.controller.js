@@ -5,6 +5,11 @@ const metricsService = require('../services/metricsService');
 const { getRegionTrendForecast } = require('../services/forecastService');
 
 const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
+// A wide-open range forces the metrics queries to scan and, for
+// getStationMetrics, materialize every raw snapshot in the window in
+// memory - unbounded on a low-memory host. 92 days comfortably covers the
+// reports page's own presets (up to 30 days) with headroom.
+const MAX_RANGE_MS = 92 * 24 * 60 * 60 * 1000;
 
 function parseRange(query) {
   const to = query.to ? new Date(query.to) : new Date();
@@ -14,6 +19,9 @@ function parseRange(query) {
   }
   if (from >= to) {
     throw new HttpError(400, '"from" must be before "to"');
+  }
+  if (to.getTime() - from.getTime() > MAX_RANGE_MS) {
+    throw new HttpError(400, `Range too wide - max ${MAX_RANGE_MS / (24 * 60 * 60 * 1000)} days`);
   }
   return { from, to };
 }
