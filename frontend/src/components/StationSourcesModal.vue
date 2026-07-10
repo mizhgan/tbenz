@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import L from 'leaflet';
 import { stationsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
@@ -33,6 +33,41 @@ let markersLayer = null;
 const SOURCE_KEY = 'gdebenz';
 
 const matchedSource = computed(() => (station.value?.sources || []).find((s) => s.key === SOURCE_KEY) || null);
+
+// Same name/brand/address correction as StationDetailModal.vue (the public
+// map card) - see that component's doc comment on why edits set
+// nameEditedByAdmin/addressEditedByAdmin instead of just writing the field.
+const editingDetails = ref(false);
+const editForm = reactive({ name: '', brand: '', address: '' });
+const editBusy = ref(false);
+const editError = ref('');
+
+function openEditDetails() {
+  editForm.name = station.value?.name || '';
+  editForm.brand = station.value?.brand || '';
+  editForm.address = station.value?.address || '';
+  editError.value = '';
+  editingDetails.value = true;
+}
+
+async function saveDetails() {
+  editBusy.value = true;
+  editError.value = '';
+  try {
+    const updated = await stationsApi.update(props.stationId, {
+      name: editForm.name.trim(),
+      brand: editForm.brand.trim(),
+      address: editForm.address.trim(),
+    });
+    if (station.value) Object.assign(station.value, updated);
+    editingDetails.value = false;
+    emit('changed');
+  } catch (err) {
+    editError.value = err.response?.data?.error || 'Не удалось сохранить изменения';
+  } finally {
+    editBusy.value = false;
+  }
+}
 
 // Same haversine used server-side (stationMatchingService.js) - here purely
 // for display ("how far apart are the two sources' coordinates"), not for
@@ -195,10 +230,40 @@ onBeforeUnmount(() => {
     <div class="modal-backdrop" @click.self="emit('close')">
       <div class="card modal-card">
         <div class="modal-header">
-          <div>
-            <h2>{{ station?.name || 'Станция' }}</h2>
-            <p v-if="station?.address" class="hint">{{ station.address }}</p>
+          <div v-if="station && !editingDetails">
+            <h2>
+              {{ station.name || 'Станция' }}
+              <button type="button" class="link-btn edit-link" @click="openEditDetails">изменить</button>
+            </h2>
+            <p v-if="station.brand" class="hint">{{ station.brand }}</p>
+            <p v-if="station.address" class="hint">{{ station.address }}</p>
           </div>
+          <div v-else-if="!station">
+            <h2>Станция</h2>
+          </div>
+          <form v-else class="edit-details-form" @submit.prevent="saveDetails">
+            <div class="form-row">
+              <label for="edit-name">Название</label>
+              <input id="edit-name" v-model="editForm.name" type="text" />
+            </div>
+            <div class="form-row">
+              <label for="edit-brand">Сеть</label>
+              <input id="edit-brand" v-model="editForm.brand" type="text" placeholder="Например, Лукойл" />
+            </div>
+            <div class="form-row">
+              <label for="edit-address">Адрес</label>
+              <input id="edit-address" v-model="editForm.address" type="text" />
+            </div>
+            <p v-if="editError" class="error-text">{{ editError }}</p>
+            <div class="edit-details-actions">
+              <button type="button" class="btn secondary" :disabled="editBusy" @click="editingDetails = false">
+                Отмена
+              </button>
+              <button type="submit" class="btn" :disabled="editBusy">
+                {{ editBusy ? 'Сохранение...' : 'Сохранить' }}
+              </button>
+            </div>
+          </form>
           <button type="button" class="link-btn close-btn" @click="emit('close')">✕</button>
         </div>
 
@@ -383,10 +448,33 @@ onBeforeUnmount(() => {
   font-size: 20px;
 }
 
+.edit-link {
+  font-size: 12px;
+  font-weight: 400;
+  color: #2563eb;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .close-btn {
   font-size: 18px;
   line-height: 1;
   padding: 4px 8px;
+}
+
+.edit-details-form {
+  flex: 1;
+}
+
+.edit-details-form .form-row {
+  margin-bottom: 8px;
+}
+
+.edit-details-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .mini-map {
