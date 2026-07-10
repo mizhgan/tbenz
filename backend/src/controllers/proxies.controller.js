@@ -65,6 +65,97 @@ function validateProxyInput(body, { partial = false } = {}) {
   return out;
 }
 
+// Parses one `scheme://[user:pass@]host:port` line (e.g.
+// "socks5://n64ilbgq:kwm0nnrlqb77@finland3.hshp.twowaysout.monster:31356",
+// the exact format proxy-pool vendors typically hand out) into the fields
+// createProxy already validates - reuses the platform URL parser rather
+// than a hand-rolled regex, since it already handles the encoding
+// (%-escapes in user/pass) these credentials sometimes contain.
+function parseProxyLine(line) {
+  let url;
+  try {
+    url = new URL(line);
+  } catch {
+    return { error: 'не похоже на URL вида scheme://[user:pass@]host:port' };
+  }
+
+  const type = url.protocol.replace(/:$/, '').toLowerCase();
+  if (!Proxy.TYPES.includes(type)) {
+    return { error: `неизвестный тип "${type}" (ожидается: ${Proxy.TYPES.join(', ')})` };
+  }
+  if (!url.hostname) return { error: 'не указан хост' };
+
+  const port = Number(url.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { error: 'не указан или некорректен порт' };
+  }
+
+  return {
+    type,
+    host: url.hostname,
+    port,
+    username: decodeURIComponent(url.username || ''),
+    password: decodeURIComponent(url.password || ''),
+  };
+}
+
+/**
+ * Bulk-imports proxies from a pasted list, one `scheme://[user:pass@]host:port`
+ * per line (blank lines and lines starting with # are ignored, for pasting a
+ * commented list as-is). A line matching an already-known host:port updates
+ * that proxy in place (credentials rotate periodically for some pool
+ * vendors) rather than creating a duplicate entry, and - since importing
+ * implies "these are freshly obtained, known-good credentials" - clears any
+ * prior auto-disable bookkeeping the same way explicitly re-activating a
+ * proxy does (see updateProxy above), instead of leaving a proxy stuck
+ * inactive because of failures under its old credentials.
+ */
+const importProxies = asyncHandler(async (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'));
+
+  if (!lines.length) throw new HttpError(400, 'Не найдено ни одной строки для импорта');
+
+  let created = 0;
+  let updated = 0;
+  const skipped = [];
+
+  for (const line of lines) {
+    const parsed = parseProxyLine(line);
+    if (parsed.error) {
+      skipped.push({ line, reason: parsed.error });
+      continue;
+    }
+
+    const existing = await Proxy.findOne({ host: parsed.host, port: parsed.port });
+    if (existing) {
+      existing.type = parsed.type;
+      existing.username = parsed.username;
+      existing.password = parsed.password;
+      existing.active = true;
+      existing.consecutiveFailures = 0;
+      existing.disabledReason = null;
+      await existing.save();
+      updated += 1;
+    } else {
+      await Proxy.create({
+        type: parsed.type,
+        host: parsed.host,
+        port: parsed.port,
+        username: parsed.username,
+        password: parsed.password,
+        active: true,
+      });
+      created += 1;
+    }
+  }
+
+  res.json({ created, updated, skipped });
+});
+
 const listProxies = asyncHandler(async (req, res) => {
   const proxies = await Proxy.find().sort({ createdAt: 1 });
   res.json(proxies.map(serializeProxy));
@@ -122,4 +213,4 @@ const checkProxy = asyncHandler(async (req, res) => {
   res.json(serializeProxy(proxy));
 });
 
-module.exports = { listProxies, createProxy, updateProxy, deleteProxy, checkProxy };
+module.exports = { listProxies, createProxy, updateProxy, deleteProxy, checkProxy, importProxies };

@@ -2,11 +2,13 @@
 import { onMounted, ref } from 'vue';
 import { proxiesApi } from '../api/proxies';
 import ProxyForm from '../components/ProxyForm.vue';
+import ProxyImportForm from '../components/ProxyImportForm.vue';
 
 const proxies = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
 const showForm = ref(false);
+const showImport = ref(false);
 const editingProxy = ref(null);
 const checkingIds = ref(new Set());
 const togglingIds = ref(new Set());
@@ -101,7 +103,10 @@ onMounted(loadProxies);
   <div>
     <div class="page-header">
       <h1>Прокси для запросов к источнику данных</h1>
-      <button class="btn" @click="openCreateForm">+ Добавить прокси</button>
+      <div class="header-actions">
+        <button class="btn secondary" @click="showImport = true">Импорт из списка</button>
+        <button class="btn" @click="openCreateForm">+ Добавить прокси</button>
+      </div>
     </div>
 
     <p class="hint">
@@ -188,6 +193,12 @@ onMounted(loadProxies);
       @submit="handleSubmit"
       @cancel="showForm = false"
     />
+
+    <ProxyImportForm
+      v-if="showImport"
+      @imported="loadProxies"
+      @cancel="showImport = false"
+    />
   </div>
 </template>
 
@@ -202,6 +213,11 @@ onMounted(loadProxies);
 .page-header h1 {
   font-size: 20px;
   margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .hint {
