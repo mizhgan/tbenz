@@ -61,6 +61,27 @@ async function storeSecondaryStation(sourceConfig, parsed, region, polledAt) {
  * both applyMergeToStation (single fresh snapshot) and applyMergeToStationForTick
  * (overwrites the current poll tick's snapshot) below.
  */
+// A source reporting "available"/"maybe_available" but naming zero specific
+// fuel types is a claim with nothing behind it - the per-fuel-type merge
+// already can't use it either way (projectStationStatusOntoFuelType in
+// mergeStatusService.js only ever projects an available-like status onto a
+// type that's actually in fuelTypes, trivially none when the list is empty),
+// but the *overall* station-level vote used to take the status at face
+// value regardless - verified live: a station with gdebenz status=available,
+// fuelTypes=[] read "available" (green on the map) while every individual
+// fuel type showed "нет данных", since nothing backed the claim for any of
+// them. Downgrading to no_data here (excluded from voting - see
+// resolveVotes) makes an available-like claim only move the merged result
+// when it actually says which fuel it's talking about, consistently for
+// both the overall status and the per-type breakdown. 'not_available' is
+// unaffected - it's a legitimate confirmed-empty claim that applies
+// uniformly to every fuel type by design, no fuelTypes list needed.
+const AVAILABLE_LIKE = new Set(['available', 'maybe_available']);
+function readingStatus(doc) {
+  if (AVAILABLE_LIKE.has(doc.status) && !(doc.fuelTypes || []).length) return 'no_data';
+  return doc.status;
+}
+
 async function computeMergedStatusForStation(station) {
   const secondaryReadings = [];
   for (const link of station.sourceLinks || []) {
@@ -68,7 +89,7 @@ async function computeMergedStatusForStation(station) {
     if (!sourceConfig) continue; // an unregistered/removed source's stale link - ignore, don't crash the merge
     const doc = await sourceConfig.model.findById(link.refId).lean();
     if (!doc) continue;
-    secondaryReadings.push({ status: doc.status, fuelTypes: doc.fuelTypes, weight: sourceConfig.weight });
+    secondaryReadings.push({ status: readingStatus(doc), fuelTypes: doc.fuelTypes, weight: sourceConfig.weight });
   }
 
   return {
