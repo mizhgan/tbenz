@@ -5,8 +5,11 @@ import L from 'leaflet';
 import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
+import MapShareCardModal from '../components/MapShareCardModal.vue';
 import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
 import { formatPct } from '../utils/colorScale';
+import { renderMapShareCard } from '../utils/mapShareCard';
+import { canCopyImageToClipboard } from '../utils/stationCard';
 import {
   canShareFile,
   captureMapBase,
@@ -84,6 +87,8 @@ const currentSummary = computed(() => {
   const availablePct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
   return { counts, availablePct, total: stations.value.length };
 });
+
+const selectedRegion = computed(() => regions.value.find((r) => r._id === selectedRegionId.value) || null);
 
 // Keyed by brand name -> visible. Populated lazily as brands show up in
 // loaded snapshots (see ensureBrandFilterKeys) rather than rebuilt from
@@ -170,6 +175,21 @@ const exportCanShare = ref(false);
 const exportFrameInfo = ref('');
 const videoExportSupported = ref(!!pickVideoMimeType());
 let exportResultFile = null;
+
+// Shareable "map snapshot" card - a single still image (map + markers +
+// currentSummary's stat tiles) rather than the animation export above,
+// which needs a from/to range and produces a GIF/video. Same
+// generate -> preview -> copy/download/share UI pattern as the station and
+// region report cards (StationDetailModal.vue/ReportsView.vue).
+const showShareCard = ref(false);
+const shareCardGenerating = ref(false);
+const shareCardUrl = ref(null);
+const shareCardError = ref('');
+const shareCardCopyFeedback = ref('');
+const shareCardCanShare = ref(false);
+const shareCardClipboardSupported = canCopyImageToClipboard();
+let shareCardBlob = null;
+let shareCardFile = null;
 
 const mapContainer = ref(null);
 let map = null;
@@ -559,6 +579,112 @@ async function handleGenerateExport({ fromMs, toMs, maxFrames, frameDelayMs, for
   }
 }
 
+function resetShareCard() {
+  if (shareCardUrl.value) {
+    URL.revokeObjectURL(shareCardUrl.value);
+    shareCardUrl.value = null;
+  }
+  shareCardBlob = null;
+  shareCardFile = null;
+  shareCardCanShare.value = false;
+  shareCardCopyFeedback.value = '';
+  shareCardError.value = '';
+}
+
+// Captures the map exactly as currently shown (same base-tile capture the
+// animation export uses, plus the same status/brand-filtered markers
+// actually on screen right now - not the unfiltered currentSummary set,
+// so the picture matches what the user was just looking at) and composes
+// it with currentSummary's stat tiles into one shareable image.
+async function generateShareCard() {
+  if (!map) return;
+  resetShareCard();
+  shareCardGenerating.value = true;
+
+  const unlock = lockMapInteraction(map);
+  try {
+    const size = map.getSize();
+    markersLayer.remove();
+    let baseCanvas;
+    try {
+      baseCanvas = await captureMapBase(map);
+    } finally {
+      markersLayer.addTo(map);
+    }
+
+    const frameCanvas = document.createElement('canvas');
+    frameCanvas.width = size.x;
+    frameCanvas.height = size.y;
+    const ctx = frameCanvas.getContext('2d');
+    ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
+
+    const visibleStations = stations.value.filter(
+      (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
+    );
+    for (const s of visibleStations) {
+      const pt = map.latLngToContainerPoint([s.lat, s.lon]);
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = statusMeta(effectiveStatus(s)).color;
+      ctx.fill();
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    }
+
+    const blob = await renderMapShareCard({
+      regionName: selectedRegion.value?.name || 'Район',
+      mapCanvas: frameCanvas,
+      counts: currentSummary.value.counts,
+      availablePct: currentSummary.value.availablePct,
+      generatedAt: Date.now(),
+    });
+    shareCardBlob = blob;
+    shareCardUrl.value = URL.createObjectURL(blob);
+    const safeName = (selectedRegion.value?.name || 'map').replace(/[^\p{L}\p{N}]+/gu, '-');
+    shareCardFile = new File([blob], `${safeName}-map.png`, { type: 'image/png' });
+    shareCardCanShare.value = canShareFile(shareCardFile);
+  } catch (err) {
+    shareCardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
+  } finally {
+    shareCardGenerating.value = false;
+    unlock();
+  }
+}
+
+function openShareCard() {
+  showShareCard.value = true;
+  generateShareCard();
+}
+
+function closeShareCard() {
+  showShareCard.value = false;
+  resetShareCard();
+}
+
+async function copyShareCardToClipboard() {
+  if (!shareCardBlob) return;
+  shareCardCopyFeedback.value = '';
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': shareCardBlob })]);
+    shareCardCopyFeedback.value = 'ok';
+  } catch (err) {
+    shareCardCopyFeedback.value = 'error';
+    shareCardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
+  }
+}
+
+async function shareShareCard() {
+  if (!shareCardFile) return;
+  try {
+    await navigator.share({ files: [shareCardFile], title: 'Карта доступности топлива' });
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      shareCardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+    }
+  }
+}
+
 onMounted(async () => {
   map = L.map(mapContainer.value).setView([55.75, 37.62], 6);
   // Leaflet's own "Leaflet" link in the attribution control is just its
@@ -644,6 +770,7 @@ onBeforeUnmount(() => {
           {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
         </button>
         <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
+        <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
       </template>
       <p v-else class="hint">
         Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
@@ -770,6 +897,20 @@ onBeforeUnmount(() => {
       @generate="handleGenerateExport"
       @reset="resetExportResult"
       @share="handleShareExport"
+    />
+
+    <MapShareCardModal
+      v-if="showShareCard"
+      :generating="shareCardGenerating"
+      :result-url="shareCardUrl"
+      :can-share="shareCardCanShare"
+      :clipboard-supported="shareCardClipboardSupported"
+      :copy-feedback="shareCardCopyFeedback"
+      :error-message="shareCardError"
+      @close="closeShareCard"
+      @regenerate="generateShareCard"
+      @copy="copyShareCardToClipboard"
+      @share="shareShareCard"
     />
   </div>
 </template>
