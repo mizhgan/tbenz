@@ -4,20 +4,26 @@ const { mergeStationFuelStatuses, mergeStationOverallStatus } = require('./merge
 const { getSource } = require('./sourceRegistry');
 const telegramNotifier = require('./telegramNotifier');
 const { recordPollAttempt } = require('./pollLogService');
+const { capRawResponse } = require('../utils/rawResponseCap');
 const logger = require('../utils/logger');
 
 // Dual-write helper for Region.sourcePollStatus (see the field's doc comment
 // on the model) - upserts this source's entry in place rather than pushing a
-// duplicate every poll tick.
-function setSourcePollStatus(region, sourceKey, { lastPolledAt, status, error, stationCount }) {
+// duplicate every poll tick. requestUrl/rawResponse are optional: the error
+// path below always has a URL (built independently of the failed request)
+// but never a response, and omitting rawResponse there (rather than passing
+// null) leaves whatever real response is already stored from this source's
+// last success in place instead of wiping it.
+function setSourcePollStatus(region, sourceKey, { lastPolledAt, status, error, stationCount, requestUrl, rawResponse }) {
+  const patch = { lastPolledAt, status, error, stationCount };
+  if (requestUrl !== undefined) patch.requestUrl = requestUrl;
+  if (rawResponse !== undefined) patch.rawResponse = rawResponse;
+
   const entry = region.sourcePollStatus.find((s) => s.sourceKey === sourceKey);
   if (entry) {
-    entry.lastPolledAt = lastPolledAt;
-    entry.status = status;
-    entry.error = error;
-    entry.stationCount = stationCount;
+    Object.assign(entry, patch);
   } else {
-    region.sourcePollStatus.push({ sourceKey, lastPolledAt, status, error, stationCount });
+    region.sourcePollStatus.push({ sourceKey, ...patch });
   }
 }
 
@@ -205,13 +211,9 @@ async function remergeStationsForTick(stationIds, region, polledAt) {
  */
 async function ingestSecondarySourceRegion(sourceConfig, region) {
   const polledAt = new Date();
+  const bbox = { minLat: region.minLat, maxLat: region.maxLat, minLon: region.minLon, maxLon: region.maxLon };
   try {
-    const payload = await sourceConfig.fetchStations({
-      minLat: region.minLat,
-      maxLat: region.maxLat,
-      minLon: region.minLon,
-      maxLon: region.maxLon,
-    });
+    const { data: payload, requestUrl } = await sourceConfig.fetchStations(bbox);
     const rawStations = sourceConfig.extractStationsArray(payload);
 
     let stored = 0;
@@ -232,7 +234,14 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
       }
     }
 
-    setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'ok', error: null, stationCount: stored });
+    setSourcePollStatus(region, sourceConfig.key, {
+      lastPolledAt: polledAt,
+      status: 'ok',
+      error: null,
+      stationCount: stored,
+      requestUrl,
+      rawResponse: capRawResponse(payload),
+    });
     await region.save();
     await recordPollAttempt({ region, sourceKey: sourceConfig.key, status: 'ok', error: null, stationCount: stored });
 
@@ -242,7 +251,23 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
     logger.info(`Region "${region.name}" (${sourceConfig.key}): stored ${stored} station(s)`);
     return { stationCount: stored, skipped, matchedStationIds };
   } catch (err) {
-    setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'error', error: err.message, stationCount: 0 });
+    // Same reasoning as tbankClient's own catch path: the request may never
+    // have gone out, but the URL is still worth showing/copying, and
+    // rawResponse is deliberately omitted (not set to null) so a stale-but-
+    // real previous response stays in place instead of being wiped.
+    let requestUrl;
+    try {
+      requestUrl = sourceConfig.buildRequestUrl(bbox);
+    } catch {
+      // Must never shadow the real ingest error below.
+    }
+    setSourcePollStatus(region, sourceConfig.key, {
+      lastPolledAt: polledAt,
+      status: 'error',
+      error: err.message,
+      stationCount: 0,
+      requestUrl,
+    });
     await region.save();
     await recordPollAttempt({ region, sourceKey: sourceConfig.key, status: 'error', error: err.message, stationCount: 0 });
     logger.error(`Region "${region.name}": ${sourceConfig.key} poll failed:`, err.message);

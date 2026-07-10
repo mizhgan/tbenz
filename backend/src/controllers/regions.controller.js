@@ -58,13 +58,21 @@ function validateRegionInput(body, { partial = false } = {}) {
   return out;
 }
 
+// Raw response bodies (lastRawResponse / sourcePollStatus[].rawResponse) are
+// excluded here and from getRegion below - the Regions admin page polls
+// these every 15s, and a raw payload can be sizeable (see
+// utils/rawResponseCap.js); fetched on demand instead via
+// GET /regions/:id/raw-response. requestUrl (a short string) stays included
+// so the "copy URL" button works without an extra round-trip.
+const RAW_RESPONSE_EXCLUDE = '-lastRawResponse -sourcePollStatus.rawResponse';
+
 const listRegions = asyncHandler(async (req, res) => {
-  const regions = await Region.find().sort({ createdAt: -1 });
+  const regions = await Region.find().select(RAW_RESPONSE_EXCLUDE).sort({ createdAt: -1 });
   res.json(regions);
 });
 
 const getRegion = asyncHandler(async (req, res) => {
-  const region = await Region.findById(req.params.id);
+  const region = await Region.findById(req.params.id).select(RAW_RESPONSE_EXCLUDE);
   if (!region) throw new HttpError(404, 'Region not found');
   res.json(region);
 });
@@ -142,6 +150,30 @@ const getPollLogs = asyncHandler(async (req, res) => {
   res.json(logs);
 });
 
+// The one field deliberately left out of listRegions/getRegion above -
+// fetched on its own, on demand, when an admin actually wants to inspect a
+// source's last raw response.
+const getRawResponse = asyncHandler(async (req, res) => {
+  const sourceKey = req.query.sourceKey;
+  if (!sourceKey) throw new HttpError(400, 'sourceKey is required');
+
+  if (sourceKey === 'tbank') {
+    const region = await Region.findById(req.params.id, { lastRequestUrl: 1, lastRawResponse: 1, lastPolledAt: 1 });
+    if (!region) throw new HttpError(404, 'Region not found');
+    return res.json({
+      requestUrl: region.lastRequestUrl,
+      rawResponse: region.lastRawResponse,
+      capturedAt: region.lastPolledAt,
+    });
+  }
+
+  const region = await Region.findById(req.params.id, { sourcePollStatus: 1 });
+  if (!region) throw new HttpError(404, 'Region not found');
+  const entry = region.sourcePollStatus.find((s) => s.sourceKey === sourceKey);
+  if (!entry) throw new HttpError(404, 'No poll data for this source yet');
+  res.json({ requestUrl: entry.requestUrl, rawResponse: entry.rawResponse, capturedAt: entry.lastPolledAt });
+});
+
 const getHistoryRange = asyncHandler(async (req, res) => {
   const regionId = new mongoose.Types.ObjectId(req.params.id);
   const [range] = await StationSnapshot.aggregate([
@@ -192,4 +224,5 @@ module.exports = {
   getRegionSnapshot,
   getPollStats,
   getPollLogs,
+  getRawResponse,
 };

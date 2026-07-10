@@ -37,6 +37,7 @@ const SOURCES = [
     // same way, without needing to know gdebenzParser.js's own more
     // descriptive (gdebenz-specific) export names.
     fetchStations: gdebenzClient.fetchStations,
+    buildRequestUrl: gdebenzClient.buildRequestUrl,
     extractStationsArray: gdebenzParser.extractGdebenzStationsArray,
     parseStation: gdebenzParser.parseGdebenzStation,
   },
@@ -69,6 +70,7 @@ const SOURCES = [
       return sberazsEnabled;
     },
     fetchStations: sberazsClient.fetchStations,
+    buildRequestUrl: sberazsClient.buildRequestUrl,
     extractStationsArray: sberazsParser.extractStationsArray,
     parseStation: sberazsParser.parseStation,
   },

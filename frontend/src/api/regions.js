@@ -15,6 +15,8 @@ export const regionsApi = {
   pollStats: (id) => http.get(`/regions/${id}/poll-stats`).then((r) => r.data),
   pollLogs: (id, sourceKey, limit) =>
     http.get(`/regions/${id}/poll-logs`, { params: { sourceKey, limit } }).then((r) => r.data),
+  rawResponse: (id, sourceKey) =>
+    http.get(`/regions/${id}/raw-response`, { params: { sourceKey } }).then((r) => r.data),
 };
 
 export const stationsApi = {

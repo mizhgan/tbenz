@@ -1,4 +1,5 @@
-const { fetchStations } = require('./tbankClient');
+const tbankClient = require('./tbankClient');
+const { fetchStations } = tbankClient;
 const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
@@ -6,6 +7,7 @@ const telegramNotifier = require('./telegramNotifier');
 const { ingestSecondarySourceRegion, remergeStationsForTick } = require('./secondarySourceIngestService');
 const { listSources } = require('./sourceRegistry');
 const { recordPollAttempt } = require('./pollLogService');
+const { capRawResponse } = require('../utils/rawResponseCap');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
@@ -82,13 +84,9 @@ async function storeStation(parsed, region, polledAt) {
  */
 async function ingestRegion(region) {
   const polledAt = new Date();
+  const bbox = { minLat: region.minLat, maxLat: region.maxLat, minLon: region.minLon, maxLon: region.maxLon };
   try {
-    const payload = await fetchStations({
-      minLat: region.minLat,
-      maxLat: region.maxLat,
-      minLon: region.minLon,
-      maxLon: region.maxLon,
-    });
+    const { data: payload, requestUrl } = await fetchStations(bbox);
     const rawStations = extractStationsArray(payload);
 
     let stored = 0;
@@ -119,6 +117,8 @@ async function ingestRegion(region) {
     region.lastPollStatus = 'ok';
     region.lastPollError = null;
     region.lastPollStationCount = stored;
+    region.lastRequestUrl = requestUrl;
+    region.lastRawResponse = capRawResponse(payload);
     await region.save();
     await recordPollAttempt({ region, sourceKey: 'tbank', status: 'ok', error: null, stationCount: stored });
 
@@ -210,6 +210,16 @@ async function ingestRegion(region) {
     region.lastPolledAt = polledAt;
     region.lastPollStatus = 'error';
     region.lastPollError = err.message;
+    // The request itself may never have gone out (or gone out and failed) -
+    // still worth showing/copying, so an admin can try it by hand. Doesn't
+    // touch lastRawResponse: a stale-but-real previous response is more
+    // useful to keep around than wiping it because this attempt had none.
+    try {
+      region.lastRequestUrl = tbankClient.buildRequestUrl(bbox);
+    } catch {
+      // Building the URL itself shouldn't ever throw, but this must never
+      // shadow the real ingest error below if it somehow does.
+    }
     await region.save();
     await recordPollAttempt({ region, sourceKey: 'tbank', status: 'error', error: err.message, stationCount: 0 });
     logger.error(`Region "${region.name}": poll failed:`, err.message);

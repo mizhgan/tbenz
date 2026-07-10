@@ -5,6 +5,7 @@ import { regionsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
 import RegionForm from '../components/RegionForm.vue';
 import PollLogModal from '../components/PollLogModal.vue';
+import RawResponseModal from '../components/RawResponseModal.vue';
 
 const router = useRouter();
 const regions = ref([]);
@@ -21,6 +22,8 @@ const pollingIds = ref(new Set());
 // not part of Region.
 const pollStatsByRegion = ref(new Map());
 const logModal = ref(null);
+const rawModal = ref(null);
+const copiedUrlKey = ref('');
 
 let refreshTimer = null;
 
@@ -65,6 +68,7 @@ function sourceRows(region) {
       lastPolledAt: region.lastPolledAt,
       stationCount: region.lastPollStationCount,
       error: region.lastPollError,
+      requestUrl: region.lastRequestUrl,
     },
     ...(region.sourcePollStatus || []).map((s) => ({
       sourceKey: s.sourceKey,
@@ -72,9 +76,29 @@ function sourceRows(region) {
       lastPolledAt: s.lastPolledAt,
       stationCount: s.stationCount,
       error: s.error,
+      requestUrl: s.requestUrl,
     })),
   ];
   return rows.map((r) => ({ ...r, label: sourceLabel(r.sourceKey), stats: statsByKey.get(r.sourceKey) || null }));
+}
+
+async function copyUrl(region, row) {
+  if (!row.requestUrl) return;
+  try {
+    await navigator.clipboard.writeText(row.requestUrl);
+    const key = `${region._id}:${row.sourceKey}`;
+    copiedUrlKey.value = key;
+    setTimeout(() => {
+      if (copiedUrlKey.value === key) copiedUrlKey.value = '';
+    }, 1500);
+  } catch {
+    // Clipboard API unavailable (e.g. insecure context) - nothing useful to
+    // do; the URL is still visible via the raw-response modal.
+  }
+}
+
+function openRaw(region, sourceKey, label) {
+  rawModal.value = { regionId: region._id, sourceKey, label };
 }
 
 async function loadPollStats() {
@@ -216,6 +240,17 @@ onBeforeUnmount(() => {
                     <button type="button" class="link-btn log-link" @click="openLog(region, row.sourceKey, row.label)">
                       журнал
                     </button>
+                    <button type="button" class="link-btn log-link" @click="openRaw(region, row.sourceKey, row.label)">
+                      сырой ответ
+                    </button>
+                    <button
+                      v-if="row.requestUrl"
+                      type="button"
+                      class="link-btn log-link"
+                      @click="copyUrl(region, row)"
+                    >
+                      {{ copiedUrlKey === `${region._id}:${row.sourceKey}` ? 'скопировано' : 'копировать URL' }}
+                    </button>
                   </div>
                   <div v-if="row.stats" class="hint small">
                     24ч: {{ row.stats.attempts24h }} опрос{{ row.stats.attempts24h === 1 ? '' : 'ов' }},
@@ -260,6 +295,14 @@ onBeforeUnmount(() => {
       :source-key="logModal.sourceKey"
       :source-label="logModal.label"
       @close="logModal = null"
+    />
+
+    <RawResponseModal
+      v-if="rawModal"
+      :region-id="rawModal.regionId"
+      :source-key="rawModal.sourceKey"
+      :source-label="rawModal.label"
+      @close="rawModal = null"
     />
   </div>
 </template>

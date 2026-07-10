@@ -17,6 +17,16 @@ const client = axios.create({
   },
 });
 
+function bboxParams({ minLat, maxLat, minLon, maxLon }) {
+  return { bbox: `${minLon},${minLat},${maxLon},${maxLat}` };
+}
+
+// See tbankClient.js's buildRequestUrl for why this is exposed on its own
+// rather than only ever derived from a successful response.
+function buildRequestUrl(bbox) {
+  return client.getUri({ url: '', params: bboxParams(bbox) });
+}
+
 /**
  * Fetches gas stations for a bounding box from sberazs.ru. Bbox filtering is
  * genuinely server-side (verified live: a far-away bbox returns zero
@@ -26,11 +36,9 @@ const client = axios.create({
  * reasoning as gdebenzClient.js - a public endpoint with no sign (yet) that
  * it needs one.
  */
-async function fetchStations({ minLat, maxLat, minLon, maxLon }) {
-  const response = await client.get('', {
-    params: { bbox: `${minLon},${minLat},${maxLon},${maxLat}` },
-  });
-  return response.data;
+async function fetchStations(bbox) {
+  const response = await client.get('', { params: bboxParams(bbox) });
+  return { data: response.data, requestUrl: buildRequestUrl(bbox) };
 }
 
-module.exports = { fetchStations };
+module.exports = { fetchStations, buildRequestUrl };

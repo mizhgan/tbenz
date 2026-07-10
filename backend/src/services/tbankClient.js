@@ -23,6 +23,16 @@ function buildClient(agent) {
   });
 }
 
+// The actual URL a poll for this bbox hits, independent of whether the
+// request goes out directly or through a proxy (a proxy changes the
+// outbound TCP path, not the target URL) - callable on its own so admins can
+// see/copy it from the Regions page even for a request that's currently
+// failing (see ingestService.js's catch path, which has no response to pull
+// a URL out of).
+function buildRequestUrl(params) {
+  return buildClient(null).getUri({ url: '', params });
+}
+
 /**
  * Fetches gas stations / recent transactions for a bounding box from
  * toplivo.tbank.ru. The exact response shape hasn't been verified against a
@@ -38,11 +48,12 @@ function buildClient(agent) {
  */
 async function fetchStations({ minLat, maxLat, minLon, maxLon }) {
   const params = { minLat, maxLat, minLon, maxLon };
+  const requestUrl = buildRequestUrl(params);
   const activeProxyCount = await Proxy.countDocuments({ active: true });
 
   if (activeProxyCount === 0) {
     const response = await buildClient(null).get('', { params });
-    return response.data;
+    return { data: response.data, requestUrl };
   }
 
   const triedIds = [];
@@ -58,7 +69,7 @@ async function fetchStations({ minLat, maxLat, minLon, maxLon }) {
       const agent = proxyService.buildAgent(proxy);
       const response = await buildClient(agent).get('', { params });
       await proxyService.recordSuccess(proxy._id);
-      return response.data;
+      return { data: response.data, requestUrl };
     } catch (err) {
       lastErr = err;
       logger.warn(`Proxy ${proxy.host}:${proxy.port} request failed: ${err.message}`);
@@ -69,4 +80,4 @@ async function fetchStations({ minLat, maxLat, minLon, maxLon }) {
   throw lastErr || new Error('No active proxies were available to complete the request');
 }
 
-module.exports = { fetchStations };
+module.exports = { fetchStations, buildRequestUrl };

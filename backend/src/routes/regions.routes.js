@@ -11,6 +11,7 @@ const {
   getRegionSnapshot,
   getPollStats,
   getPollLogs,
+  getRawResponse,
 } = require('../controllers/regions.controller');
 const {
   getTrend,
@@ -38,6 +39,7 @@ router.get('/:id/snapshot-times', getSnapshotTimes);
 router.get('/:id/snapshot', getRegionSnapshot);
 router.get('/:id/poll-stats', getPollStats);
 router.get('/:id/poll-logs', getPollLogs);
+router.get('/:id/raw-response', getRawResponse);
 router.get('/:id/metrics/trend', getTrend);
 router.get('/:id/metrics/stations', getStations);
 router.get('/:id/metrics/brands', getBrands);
