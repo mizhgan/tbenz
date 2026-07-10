@@ -777,18 +777,31 @@ onBeforeUnmount(() => {
       <div ref="mapContainer" class="leaflet-map"></div>
 
       <!-- Always-visible entry point into the drawer below - region,
-           slider, filters and export/share all live behind it now, so the
-           map itself (not a control bar) is what a visitor sees first. -->
-      <button
-        type="button"
-        class="drawer-toggle"
-        :class="{ active: drawerOpen }"
-        :aria-expanded="drawerOpen"
-        @click="drawerOpen = !drawerOpen"
-      >
-        <span class="drawer-toggle-icon">☰</span>
-        Фильтры
-      </button>
+           slider, export/share etc. still live behind it, so the map
+           itself (not a control bar) is what a visitor sees first. The
+           status checkboxes are the one exception: common enough to act on
+           that they sit right next to the toggle instead, in their own
+           sibling element (not nested inside the button) so clicking them
+           toggles a status without also opening/closing the drawer. -->
+      <div class="toggle-bar">
+        <button
+          type="button"
+          class="drawer-toggle"
+          :class="{ active: drawerOpen }"
+          :aria-expanded="drawerOpen"
+          @click="drawerOpen = !drawerOpen"
+        >
+          <span class="drawer-toggle-icon">☰</span>
+          Фильтры
+        </button>
+
+        <div v-if="currentSummary.total" class="quick-status-filters">
+          <label v-for="key in STATUS_KEYS" :key="key" class="quick-status-checkbox" :title="statusMeta(key).label">
+            <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
+            <span class="dot" :style="{ background: statusMeta(key).color }"></span>
+          </label>
+        </div>
+      </div>
 
       <!-- Compact glanceable summary that stays visible even with the
            drawer closed - the one piece of the old control bar worth never
@@ -1020,11 +1033,17 @@ onBeforeUnmount(() => {
 /* Floating entry point for the drawer below - top-left, the corner
    Leaflet's own zoom control used to occupy (moved to bottomright in
    onMounted specifically to free this spot up, see the map init code). */
-.drawer-toggle {
+.toggle-bar {
   position: absolute;
   top: 12px;
   left: 12px;
   z-index: 460;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.drawer-toggle {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1052,6 +1071,53 @@ onBeforeUnmount(() => {
 .drawer-toggle-icon {
   font-size: 15px;
   line-height: 1;
+}
+
+/* Quick-access status checkboxes next to the toggle - a sibling, not a
+   child of the button, specifically so clicking a checkbox toggles that
+   status without also firing the button's own click handler (which would
+   open/close the drawer). Mirrors the full .filter-checkbox list still
+   inside the drawer - same statusFilters state, just faster to reach for
+   the common case of hiding/showing a status without opening anything. */
+.quick-status-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.quick-status-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.quick-status-checkbox input[type='checkbox'] {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Narrow phones: toggle-bar + status-badge (both absolutely positioned,
+   independent of each other) can together exceed the viewport width and
+   overlap - tighten spacing rather than hide anything, so all the same
+   controls stay reachable. */
+@media (max-width: 480px) {
+  .toggle-bar {
+    gap: 6px;
+  }
+
+  .drawer-toggle {
+    padding: 9px 12px;
+  }
+
+  .quick-status-filters {
+    gap: 6px;
+    padding: 0 8px;
+  }
 }
 
 /* The one piece of the old control bar that stays visible with the drawer
