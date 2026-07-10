@@ -8,6 +8,7 @@ import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
+import { useAuthStore } from '../store/auth';
 import StationForecast from './StationForecast.vue';
 import StationHistoryChart from './StationHistoryChart.vue';
 
@@ -17,6 +18,13 @@ const props = defineProps({
   selectedFuelType: { type: String, default: '' },
 });
 const emit = defineEmits(['close', 'changed']);
+
+// This modal is reachable from the public map/reports pages (unlike
+// StationSourcesModal.vue, which only ever renders behind the already
+// admin-gated /stations route) - PUT /stations/:id is admin-only server
+// side regardless, but showing a viewer an "изменить" link that would just
+// 403 on submit is misleading, so it's hidden for them entirely instead.
+const auth = useAuthStore();
 
 const miniMapContainer = ref(null);
 let miniMap = null;
@@ -249,12 +257,14 @@ onBeforeUnmount(() => {
           <div v-if="!editingDetails">
             <h2>
               {{ headerStation.name || 'АЗС' }}
-              <button type="button" class="link-btn edit-link" @click="openEditDetails">изменить</button>
+              <button v-if="auth.isAdmin" type="button" class="link-btn edit-link" @click="openEditDetails">
+                изменить
+              </button>
             </h2>
             <p v-if="headerStation.brand" class="hint">{{ headerStation.brand }}</p>
             <p v-if="headerStation.address" class="hint">{{ headerStation.address }}</p>
           </div>
-          <form v-else class="edit-details-form" @submit.prevent="saveDetails">
+          <form v-else-if="auth.isAdmin" class="edit-details-form" @submit.prevent="saveDetails">
             <div class="form-row">
               <label for="edit-name">Название</label>
               <input id="edit-name" v-model="editForm.name" type="text" />
