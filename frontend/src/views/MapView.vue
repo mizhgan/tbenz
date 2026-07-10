@@ -44,6 +44,13 @@ const loadingStations = ref(false);
 // covering every *subsequent* snapshot fetch (slider drags, live refresh)
 // with just the map's own spinner overlay.
 const initialLoading = ref(true);
+// Off-canvas filters/region/slider panel over the map (see .drawer-panel) -
+// closed by default so the map itself is the first thing a visitor sees
+// full-bleed, not a control bar. Auto-opens once on the very first load if
+// there's no data yet (see the watcher below onMounted) so a first-time
+// visitor whose region genuinely has nothing to show isn't left staring at
+// an empty map with no visible way to find out why.
+const drawerOpen = ref(false);
 const errorMessage = ref('');
 const liveMode = ref(true);
 const hasFitted = ref(false);
@@ -694,7 +701,12 @@ async function shareShareCard() {
 }
 
 onMounted(async () => {
-  map = L.map(mapContainer.value).setView([55.75, 37.62], 6);
+  // zoomControl: false + added back at bottomright - Leaflet's default
+  // topleft position would sit right under the new drawer-toggle button
+  // (see .drawer-toggle/.status-badge in the template), which also lives in
+  // that corner now that the old control bar no longer pushes the map down.
+  map = L.map(mapContainer.value, { zoomControl: false }).setView([55.75, 37.62], 6);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
   // Leaflet's own "Leaflet" link in the attribution control is just its
   // default branding, not a license requirement - drop it. The OpenStreetMap
   // attribution added by the tile layer below stays: it's required by OSM's
@@ -731,6 +743,12 @@ onMounted(async () => {
     }
   } finally {
     initialLoading.value = false;
+    // A region with no historical data yet shows its explanation inside the
+    // drawer (see the template) - open it automatically this one time so a
+    // first-time visitor actually sees why the map looks empty, instead of
+    // that message sitting behind an unopened toggle with no hint anything
+    // needs attention.
+    if (!hasRange.value) drawerOpen.value = true;
   }
 
   liveTimer = setInterval(async () => {
@@ -753,110 +771,163 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="map-page">
-    <div class="controls card">
-      <div class="form-row region-select">
-        <label>Район</label>
-        <select v-if="regions.length" v-model="selectedRegionId" @change="handleRegionChange">
-          <option v-for="r in regions" :key="r._id" :value="r._id">{{ r.name }}</option>
-        </select>
-        <div v-else class="skeleton skeleton-select" aria-hidden="true"></div>
-      </div>
+    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
-      <Transition name="fade" mode="out-in">
-        <div v-if="hasRange" key="controls" class="controls-loaded">
-          <div class="slider-block">
-            <label>Момент времени: {{ atLabel }}</label>
-            <input
-              type="range"
-              :min="range.from"
-              :max="range.to"
-              step="60000"
-              v-model.number="atMs"
-              @input="handleSliderInput"
-              @change="handleSliderChange"
-            />
-            <div class="slider-labels">
-              <span>{{ formatDateTime(range.from) }}</span>
-              <span>{{ formatDateTime(range.to) }}</span>
-            </div>
-          </div>
-          <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
-            {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
-          </button>
-          <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
-          <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
+    <div class="map-wrap">
+      <div ref="mapContainer" class="leaflet-map"></div>
 
-          <div class="filter-block">
-            <select
-              v-if="availableFuelTypes.length"
-              v-model="selectedFuelType"
-              class="fuel-type-select"
-              @change="handleFilterChange"
-            >
-              <option value="">Общий статус (все виды топлива)</option>
-              <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
-            </select>
-
-            <span class="filter-label">Показывать:</span>
-            <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
-              <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
-              <span class="dot" :style="{ background: statusMeta(key).color }"></span>
-              {{ statusMeta(key).label }}
-            </label>
-
-            <button
-              v-if="availableBrands.length"
-              ref="brandButtonRef"
-              type="button"
-              class="btn secondary brand-filter-toggle"
-              :class="{ active: brandPanelOpen }"
-              @click="toggleBrandPanel"
-            >
-              Сети
-              <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
-                фильтр
-              </span>
-            </button>
-          </div>
+      <Transition name="fade">
+        <div v-if="loadingStations" class="map-loading-overlay">
+          <div class="spinner"></div>
         </div>
-        <div v-else-if="initialLoading" key="skeleton" class="controls-skeleton" aria-hidden="true">
-          <div class="skeleton skeleton-slider"></div>
-          <div class="skeleton skeleton-btn"></div>
-          <div class="skeleton skeleton-btn"></div>
-          <div class="skeleton skeleton-chip" v-for="n in 4" :key="n"></div>
+      </Transition>
+
+      <!-- Always-visible entry point into the drawer below - region,
+           slider, filters and export/share all live behind it now, so the
+           map itself (not a control bar) is what a visitor sees first. -->
+      <button
+        type="button"
+        class="drawer-toggle"
+        :class="{ active: drawerOpen }"
+        :aria-expanded="drawerOpen"
+        @click="drawerOpen = !drawerOpen"
+      >
+        <span class="drawer-toggle-icon">☰</span>
+        Фильтры
+      </button>
+
+      <!-- Compact glanceable summary that stays visible even with the
+           drawer closed - the one piece of the old control bar worth never
+           fully hiding, see currentSummary's own doc comment. -->
+      <Transition name="fade">
+        <div
+          v-if="currentSummary.total"
+          class="status-badge"
+          :style="{ borderTopColor: statusMeta('available').color }"
+        >
+          <strong :style="{ color: statusMeta('available').color }">
+            {{ formatPct(currentSummary.availablePct) }}
+          </strong>
+          <span class="hint small">{{ currentSummary.total }} ст.</span>
         </div>
-        <p v-else key="empty" class="hint">
-          Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
-        </p>
       </Transition>
 
       <Transition name="fade">
-        <div v-if="currentSummary.total" class="current-state-inline">
-          <span class="current-state-label">
-            Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
-          </span>
-          <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
-            {{ formatPct(currentSummary.availablePct) }}
-          </strong>
-          <span class="current-state-item">
-            <span class="dot" :style="{ background: statusMeta('available').color }"></span>
-            {{ currentSummary.counts.available }}
-          </span>
-          <span class="current-state-item">
-            <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
-            {{ currentSummary.counts.maybe_available }}
-          </span>
-          <span class="current-state-item">
-            <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
-            {{ currentSummary.counts.not_available }}
-          </span>
-          <span class="current-state-item">
-            <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
-            {{ currentSummary.counts.no_data }}
-          </span>
-          <span class="current-state-shown hint small">
-            показано {{ filteredStations.length }} из {{ stations.length }}
-          </span>
+        <div v-if="drawerOpen" class="drawer-backdrop" @click="drawerOpen = false"></div>
+      </Transition>
+
+      <Transition name="slide">
+        <div v-if="drawerOpen" class="drawer-panel card">
+          <div class="drawer-header">
+            <h2>Фильтры</h2>
+            <button type="button" class="link-btn close-btn" @click="drawerOpen = false">✕</button>
+          </div>
+
+          <div class="form-row region-select">
+            <label>Район</label>
+            <select v-if="regions.length" v-model="selectedRegionId" @change="handleRegionChange">
+              <option v-for="r in regions" :key="r._id" :value="r._id">{{ r.name }}</option>
+            </select>
+            <div v-else class="skeleton skeleton-select" aria-hidden="true"></div>
+          </div>
+
+          <Transition name="fade" mode="out-in">
+            <div v-if="hasRange" key="controls" class="controls-loaded">
+              <div class="slider-block">
+                <label>Момент времени: {{ atLabel }}</label>
+                <input
+                  type="range"
+                  :min="range.from"
+                  :max="range.to"
+                  step="60000"
+                  v-model.number="atMs"
+                  @input="handleSliderInput"
+                  @change="handleSliderChange"
+                />
+                <div class="slider-labels">
+                  <span>{{ formatDateTime(range.from) }}</span>
+                  <span>{{ formatDateTime(range.to) }}</span>
+                </div>
+              </div>
+              <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
+                {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
+              </button>
+              <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
+              <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
+
+              <div class="filter-block">
+                <select
+                  v-if="availableFuelTypes.length"
+                  v-model="selectedFuelType"
+                  class="fuel-type-select"
+                  @change="handleFilterChange"
+                >
+                  <option value="">Общий статус (все виды топлива)</option>
+                  <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
+                </select>
+
+                <span class="filter-label">Показывать:</span>
+                <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
+                  <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
+                  <span class="dot" :style="{ background: statusMeta(key).color }"></span>
+                  {{ statusMeta(key).label }}
+                </label>
+
+                <button
+                  v-if="availableBrands.length"
+                  ref="brandButtonRef"
+                  type="button"
+                  class="btn secondary brand-filter-toggle"
+                  :class="{ active: brandPanelOpen }"
+                  @click="toggleBrandPanel"
+                >
+                  Сети
+                  <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
+                    фильтр
+                  </span>
+                </button>
+              </div>
+            </div>
+            <div v-else-if="initialLoading" key="skeleton" class="controls-skeleton" aria-hidden="true">
+              <div class="skeleton skeleton-slider"></div>
+              <div class="skeleton skeleton-btn"></div>
+              <div class="skeleton skeleton-btn"></div>
+              <div class="skeleton skeleton-chip" v-for="n in 4" :key="n"></div>
+            </div>
+            <p v-else key="empty" class="hint">
+              Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
+            </p>
+          </Transition>
+
+          <Transition name="fade">
+            <div v-if="currentSummary.total" class="current-state-inline">
+              <span class="current-state-label">
+                Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
+              </span>
+              <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
+                {{ formatPct(currentSummary.availablePct) }}
+              </strong>
+              <span class="current-state-item">
+                <span class="dot" :style="{ background: statusMeta('available').color }"></span>
+                {{ currentSummary.counts.available }}
+              </span>
+              <span class="current-state-item">
+                <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
+                {{ currentSummary.counts.maybe_available }}
+              </span>
+              <span class="current-state-item">
+                <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
+                {{ currentSummary.counts.not_available }}
+              </span>
+              <span class="current-state-item">
+                <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
+                {{ currentSummary.counts.no_data }}
+              </span>
+              <span class="current-state-shown hint small">
+                показано {{ filteredStations.length }} из {{ stations.length }}
+              </span>
+            </div>
+          </Transition>
         </div>
       </Transition>
     </div>
@@ -888,17 +959,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Teleport>
-
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
-
-    <div class="map-wrap">
-      <div ref="mapContainer" class="leaflet-map"></div>
-      <Transition name="fade">
-        <div v-if="loadingStations" class="map-loading-overlay">
-          <div class="spinner"></div>
-        </div>
-      </Transition>
-    </div>
 
     <StationDetailModal
       v-if="showDetailModal && selectedStation"
@@ -952,70 +1012,173 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
-.controls {
+/* Floating entry point for the drawer below - top-left, the corner
+   Leaflet's own zoom control used to occupy (moved to bottomright in
+   onMounted specifically to free this spot up, see the map init code). */
+.drawer-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 460;
   display: flex;
   align-items: center;
-  gap: 24px;
-  flex-wrap: wrap;
+  gap: 7px;
+  padding: 9px 16px;
+  background: #fff;
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #14213d;
+}
+
+.drawer-toggle:hover {
+  background: #f8fafc;
+}
+
+.drawer-toggle.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.drawer-toggle-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* The one piece of the old control bar that stays visible with the drawer
+   closed - top-right, mirroring the toggle's corner on the left. */
+.status-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 460;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 64px;
+  padding: 6px 14px 8px;
+  background: #fff;
+  border-radius: 8px;
+  border-top: 3px solid;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.status-badge strong {
+  font-size: 19px;
+  line-height: 1.3;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  /* Above Leaflet's own controls (its panes/controls go up to z-index 1000)
+     - on a narrow screen the drawer can approach the map's full width, and
+     should fully cover the zoom control underneath rather than let it poke
+     through at a higher stacking level. */
+  z-index: 1200;
+}
+
+.drawer-panel {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 360px;
+  max-width: 88vw;
+  overflow-y: auto;
+  z-index: 1210;
+  border-radius: 0 10px 10px 0;
+  box-shadow: 3px 0 16px rgba(0, 0, 0, 0.3);
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.drawer-header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+/* Vue <Transition name="slide"> - the drawer sliding in/out from the left,
+   separate from the shared .fade-* pair (main.css) which the backdrop and
+   status badge use instead. */
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.22s ease;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  transform: translateX(-100%);
 }
 
 .region-select select {
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid #ccd2d9;
-  min-width: 220px;
+  width: 100%;
 }
 
-/* Mirrors .controls' own flex layout exactly - a wrapper was needed here so
-   <Transition> has a single root element to animate, but the slider/
-   buttons/filter-block inside still need to flow and wrap together with
-   the region-select box next to them, same as when they were direct
-   .controls children. */
+/* A narrow ~360px drawer, unlike the old full-width control bar - everything
+   stacks in one column instead of wrapping across a wide row. */
 .controls-loaded {
   display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-wrap: wrap;
-  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  margin-top: 16px;
 }
 
 /* Same shape as .controls-loaded's real content once loaded (slider +
-   2 buttons + 4 filter chips) - a placeholder skeleton rather than a
-   blank gap while the region/range/snapshot requests are still in flight. */
+   2 buttons + 4 filter rows) - a placeholder skeleton rather than a blank
+   gap while the region/range/snapshot requests are still in flight. */
 .controls-skeleton {
   display: flex;
-  align-items: center;
-  gap: 24px;
-  flex-wrap: wrap;
-  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .skeleton-slider {
-  width: 280px;
+  width: 100%;
   height: 40px;
 }
 
 .skeleton-btn {
-  width: 140px;
+  width: 100%;
   height: 34px;
 }
 
 .skeleton-chip {
-  width: 90px;
-  height: 24px;
-  border-radius: 999px;
+  width: 70%;
+  height: 20px;
+  border-radius: 4px;
 }
 
-/* Replaces the old full KPI-grid card: same numbers, but a single line
-   folded into the controls bar instead of a separate card - keeps the
-   current-state summary visible without eating a whole row of vertical
-   space of its own. */
+.controls-loaded > .btn,
+.filter-block .btn {
+  width: 100%;
+}
+
+/* Replaces the old full KPI-grid card: same numbers, but a compact block
+   folded into the drawer instead of a separate card - the .status-badge
+   above already covers "at a glance", this is the detail behind it. */
 .current-state-inline {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 14px;
   width: 100%;
+  margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid #eee;
   font-size: 13px;
@@ -1024,6 +1187,7 @@ onBeforeUnmount(() => {
 
 .current-state-label {
   color: #667;
+  width: 100%;
 }
 
 .current-state-pct {
@@ -1037,15 +1201,14 @@ onBeforeUnmount(() => {
 }
 
 .current-state-shown {
-  margin-left: auto;
+  width: 100%;
 }
 
 .slider-block {
-  flex: 1;
-  min-width: 280px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  width: 100%;
 }
 
 .slider-block input[type='range'] {
@@ -1187,11 +1350,11 @@ onBeforeUnmount(() => {
 
 .filter-block {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   width: 100%;
-  padding-top: 4px;
+  padding-top: 10px;
   border-top: 1px solid #eee;
 }
 
@@ -1201,7 +1364,8 @@ onBeforeUnmount(() => {
 }
 
 .fuel-type-select {
-  padding: 4px 8px;
+  width: 100%;
+  padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid #ccd2d9;
   font-size: 13px;
