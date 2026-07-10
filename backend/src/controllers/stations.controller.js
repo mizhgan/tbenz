@@ -118,11 +118,19 @@ const getStationHistory = asyncHandler(async (req, res) => {
     if (req.query.to) query.polledAt.$lte = new Date(req.query.to);
   }
 
+  // Sort descending to grab the *most recent* `limit` snapshots (the common
+  // case: no from/to, just "recent history for a card/chart") - sorting
+  // ascending-then-limit would instead keep the oldest ones whenever a
+  // station has more history than `limit`, silently dropping everything
+  // since. Reversed back to chronological order before responding, since
+  // every consumer (StationHistoryChart.vue, stationCard.js) expects
+  // oldest -> newest.
   const limit = Math.min(Number(req.query.limit) || 500, 5000);
   const snapshots = await StationSnapshot.find(query)
     .select('-raw')
-    .sort({ polledAt: 1 })
+    .sort({ polledAt: -1 })
     .limit(limit);
+  snapshots.reverse();
 
   res.json(snapshots);
 });
