@@ -62,6 +62,12 @@ const FUEL_TYPE_MAP = {
   ai95: '95',
   ai98: '98',
   ai100: '100',
+  // Some pumps sell AI-98/AI-100 interchangeably through one nozzle - sberazs
+  // reports that as one combined type rather than two separate readings.
+  // Folded onto "100" (the higher grade) rather than kept as its own type,
+  // so it merges with tbank/gdebenz's plain "100" instead of showing up as a
+  // third, unrelated fuel type next to it.
+  ai98_100: '100',
 };
 
 function mapFuelType(rawType) {
