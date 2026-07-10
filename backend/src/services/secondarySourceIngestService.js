@@ -44,21 +44,17 @@ async function storeSecondaryStation(sourceConfig, parsed, region, polledAt) {
 }
 
 /**
- * Recomputes and writes the merged status for a Station, folding in every
- * currently-linked secondary source's latest stored reading (via
- * Station.sourceLinks) - not just the one that happened to poll and trigger
- * this recompute. With exactly one linked secondary source (gdebenz, today)
- * this reads identically to the old two-source applyMergeToStation; once a
- * second secondary source can be linked to the same station, this is what
- * makes both of them count. Writes to the exact same fields the tbank poll
- * itself does (see ingestService.storeStation) and appends a StationSnapshot
- * the same way - so from every other consumer's point of view (metrics,
- * reports, forecasts, Telegram) this looks like an ordinary poll, not a
- * second/third data source.
+ * Reads every currently-linked secondary source's latest stored reading (via
+ * Station.sourceLinks) and folds it with tbank's own last reading into one
+ * merged {status, fuelStatuses} pair - not just the one source that happened
+ * to poll and trigger the recompute. With exactly one linked secondary
+ * source (gdebenz, today) this reads identically to the old two-source
+ * merge; once a second secondary source can be linked to the same station,
+ * this is what makes both of them count. Pure read, no writes - shared by
+ * both applyMergeToStation (single fresh snapshot) and applyMergeToStationForTick
+ * (overwrites the current poll tick's snapshot) below.
  */
-async function applyMergeToStation(station, region, polledAt) {
-  const previousFuelStatuses = station.lastFuelStatuses;
-
+async function computeMergedStatusForStation(station) {
   const secondaryReadings = [];
   for (const link of station.sourceLinks || []) {
     const sourceConfig = getSource(link.sourceKey);
@@ -68,8 +64,33 @@ async function applyMergeToStation(station, region, polledAt) {
     secondaryReadings.push({ status: doc.status, fuelTypes: doc.fuelTypes, weight: sourceConfig.weight });
   }
 
-  const mergedFuelStatuses = mergeStationFuelStatuses(station.tbankLastFuelStatuses, secondaryReadings);
-  const mergedStatus = mergeStationOverallStatus(station.tbankLastStatus, secondaryReadings);
+  return {
+    mergedFuelStatuses: mergeStationFuelStatuses(station.tbankLastFuelStatuses, secondaryReadings),
+    mergedStatus: mergeStationOverallStatus(station.tbankLastStatus, secondaryReadings),
+  };
+}
+
+/**
+ * Recomputes and writes the merged status for a Station, then appends a
+ * brand-new StationSnapshot for it. Writes to the exact same fields the
+ * tbank poll itself does (see ingestService.storeStation) - so from every
+ * other consumer's point of view (metrics, reports, forecasts, Telegram)
+ * this looks like an ordinary poll, not a second/third data source.
+ *
+ * Only for one-off, out-of-band recomputes that aren't standing in for a
+ * poll tick's own snapshot - today, that's stationMatching.controller.js's
+ * confirmMatch applying a brand-new match immediately instead of waiting for
+ * the next poll. The region poll loop itself uses applyMergeToStationForTick
+ * below instead, specifically to avoid inserting a second snapshot on top of
+ * the one ingestService.storeStation already wrote this same tick (see that
+ * function's doc comment for why: an extra row per linked secondary source
+ * per tick silently double/triple-counted matched stations in every
+ * snapshot-driven aggregate - metrics percentages, outage streaks, hourly
+ * forecast profiles).
+ */
+async function applyMergeToStation(station, region, polledAt) {
+  const previousFuelStatuses = station.lastFuelStatuses;
+  const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
 
   station.lastStatus = mergedStatus;
   station.lastFuelStatuses = mergedFuelStatuses;
@@ -92,15 +113,78 @@ async function applyMergeToStation(station, region, polledAt) {
 }
 
 /**
+ * Same recompute as applyMergeToStation, but for the region poll loop: all
+ * secondary sources for a region are ingested against the same tbank poll
+ * tick (see ingestService.ingestRegion), and ingestService.storeStation
+ * already created this tick's StationSnapshot for every station, tagged with
+ * the tick's own `polledAt`. Overwrites that exact row (matched on
+ * {station, polledAt}) instead of inserting a new one, so a station matched
+ * to N secondary sources still ends up with exactly one snapshot for this
+ * tick - carrying the final merged status once every source has been read -
+ * rather than N+1.
+ */
+async function applyMergeToStationForTick(station, region, polledAt) {
+  const previousFuelStatuses = station.lastFuelStatuses;
+  const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
+
+  station.lastStatus = mergedStatus;
+  station.lastFuelStatuses = mergedFuelStatuses;
+  station.lastSeenAt = polledAt;
+  await station.save();
+
+  await StationSnapshot.findOneAndUpdate(
+    { station: station._id, polledAt },
+    {
+      $set: {
+        region: region._id,
+        lat: station.lat,
+        lon: station.lon,
+        status: mergedStatus,
+        fuelStatuses: mergedFuelStatuses,
+        lastTransactionAt: station.lastTransactionAt,
+        raw: { mergedFromSourceLinks: station.sourceLinks },
+      },
+    },
+    { upsert: true }
+  );
+
+  return telegramNotifier.computeTransitions(previousFuelStatuses, mergedFuelStatuses);
+}
+
+/**
+ * Batch entry point for the region poll loop: dedupes station ids touched by
+ * any secondary source this tick (a station matched to two sources appears
+ * once per source's own ingest pass) and remerges each exactly once, after
+ * every source's own storeSecondaryStation write for this tick has already
+ * landed - so a station matched to both gdebenz and sberazs picks up both
+ * sources' latest readings in its one merge, instead of merging twice with
+ * whichever source happened to be read first missing the other's update.
+ */
+async function remergeStationsForTick(stationIds, region, polledAt) {
+  const uniqueIds = [...new Set(stationIds.map(String))];
+  const stationEvents = [];
+  for (const id of uniqueIds) {
+    const station = await Station.findById(id);
+    if (!station) continue; // matched station deleted since this source's poll ran
+    const transitions = await applyMergeToStationForTick(station, region, polledAt);
+    if (transitions.length) stationEvents.push({ station, transitions });
+  }
+  return stationEvents;
+}
+
+/**
  * Fetches stations for a region's bounding box (same bbox as tbank) from one
- * registered secondary source, upserts each into that source's own
- * collection, and for any that are already admin-confirmed matches to a
- * Station, folds the new reading into that Station via applyMergeToStation.
- * Mirrors ingestService.ingestRegion's own shape (per-region poll-status
- * bookkeeping, best-effort Telegram notify) so a problem with any one source
- * is visible the same way a tbank one would be, without ever being able to
- * break tbank ingestion itself - see the try/catch around each call to this
- * function in ingestService.ingestRegion.
+ * registered secondary source and upserts each into that source's own
+ * collection. Returns the matchedStationId of every admin-confirmed match
+ * touched this call, for the caller to remerge - doesn't merge/notify itself
+ * (see remergeStationsForTick above), so that a station matched to several
+ * sources gets exactly one remerge/notification per poll tick, folding in
+ * every source's just-stored reading at once, instead of one remerge per
+ * source that happened to touch it. Mirrors ingestService.ingestRegion's own
+ * shape (per-region poll-status bookkeeping) so a problem with any one
+ * source is visible the same way a tbank one would be, without ever being
+ * able to break tbank ingestion itself - see the try/catch around each call
+ * to this function in ingestService.ingestRegion.
  */
 async function ingestSecondarySourceRegion(sourceConfig, region) {
   const polledAt = new Date();
@@ -115,7 +199,7 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
 
     let stored = 0;
     let skipped = 0;
-    const stationEvents = [];
+    const matchedStationIds = [];
     for (const raw of rawStations) {
       const parsed = sourceConfig.parseStation(raw);
       if (!parsed) {
@@ -125,14 +209,7 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
       try {
         const secondaryDoc = await storeSecondaryStation(sourceConfig, parsed, region, polledAt);
         stored += 1;
-
-        if (secondaryDoc.matchedStationId) {
-          const station = await Station.findById(secondaryDoc.matchedStationId);
-          if (station) {
-            const transitions = await applyMergeToStation(station, region, polledAt);
-            if (transitions.length) stationEvents.push({ station, transitions });
-          }
-        }
+        if (secondaryDoc.matchedStationId) matchedStationIds.push(secondaryDoc.matchedStationId);
       } catch (err) {
         logger.error(`Failed to store ${sourceConfig.key} station for region ${region.name}:`, err.message);
       }
@@ -141,17 +218,11 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
     setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'ok', error: null, stationCount: stored });
     await region.save();
 
-    try {
-      await telegramNotifier.notifyRegionChanges(region, stationEvents);
-    } catch (err) {
-      logger.error(`Telegram notify (${sourceConfig.key} merge) failed for region ${region.name}:`, err.message);
-    }
-
     if (skipped > 0) {
       logger.warn(`Region "${region.name}" (${sourceConfig.key}): skipped ${skipped} station(s) with unrecognized shape`);
     }
     logger.info(`Region "${region.name}" (${sourceConfig.key}): stored ${stored} station(s)`);
-    return { stationCount: stored, skipped };
+    return { stationCount: stored, skipped, matchedStationIds };
   } catch (err) {
     setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'error', error: err.message, stationCount: 0 });
     await region.save();
@@ -160,4 +231,4 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
   }
 }
 
-module.exports = { ingestSecondarySourceRegion, applyMergeToStation };
+module.exports = { ingestSecondarySourceRegion, applyMergeToStation, remergeStationsForTick };

@@ -3,7 +3,7 @@ const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
 const telegramNotifier = require('./telegramNotifier');
-const { ingestSecondarySourceRegion } = require('./secondarySourceIngestService');
+const { ingestSecondarySourceRegion, remergeStationsForTick } = require('./secondarySourceIngestService');
 const { listSources } = require('./sourceRegistry');
 const logger = require('../utils/logger');
 
@@ -131,11 +131,29 @@ async function ingestRegion(region) {
     // Runs on the same schedule as the tbank poll above (same region, same
     // tick) rather than its own separate timer - see
     // secondarySourceIngestService.js.
+    const matchedStationIds = [];
     for (const source of listSources()) {
       try {
-        await ingestSecondarySourceRegion(source, region);
+        const result = await ingestSecondarySourceRegion(source, region);
+        matchedStationIds.push(...result.matchedStationIds);
       } catch (err) {
         logger.error(`${source.key} ingest failed for region ${region.name}:`, err.message);
+      }
+    }
+
+    // One remerge per station touched by any source this tick (not one per
+    // source) - reuses this tick's own `polledAt` so it overwrites the
+    // StationSnapshot storeStation already wrote above instead of appending
+    // a duplicate. See remergeStationsForTick's doc comment for why: a
+    // second/third snapshot row per tick for matched stations was silently
+    // inflating their weight in every snapshot-driven aggregate (metrics
+    // percentages, outage streaks, hourly forecast profiles).
+    if (matchedStationIds.length) {
+      try {
+        const mergeEvents = await remergeStationsForTick(matchedStationIds, region, polledAt);
+        await telegramNotifier.notifyRegionChanges(region, mergeEvents);
+      } catch (err) {
+        logger.error(`Secondary-source merge failed for region ${region.name}:`, err.message);
       }
     }
 
