@@ -344,9 +344,10 @@ onMounted(async () => {
     <div class="controls card">
       <div class="form-row region-select">
         <label>Район</label>
-        <select v-model="selectedRegionId" @change="handleRegionChange">
+        <select v-if="regions.length" v-model="selectedRegionId" @change="handleRegionChange">
           <option v-for="r in regions" :key="r._id" :value="r._id">{{ r.name }}</option>
         </select>
+        <div v-else class="skeleton skeleton-select" aria-hidden="true"></div>
       </div>
 
       <div class="form-row">

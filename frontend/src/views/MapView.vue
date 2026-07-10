@@ -36,6 +36,14 @@ const stations = ref([]);
 const selectedStation = ref(null);
 const showDetailModal = ref(false);
 const loadingStations = ref(false);
+// True only until the very first regions+range+snapshot sequence finishes
+// (see onMounted) - drives the one-time skeleton treatment for the controls
+// bar (region select, filters, slider) so a slow connection shows an
+// obviously-still-loading placeholder shaped like the real UI instead of an
+// empty gap that then pops in all at once. loadingStations above keeps
+// covering every *subsequent* snapshot fetch (slider drags, live refresh)
+// with just the map's own spinner overlay.
+const initialLoading = ref(true);
 const errorMessage = ref('');
 const liveMode = ref(true);
 const hasFitted = ref(false);
@@ -715,10 +723,14 @@ onMounted(async () => {
   window.addEventListener('scroll', handleWindowScroll, true);
   window.addEventListener('resize', closeBrandPanel);
 
-  await loadRegions();
-  if (selectedRegionId.value) {
-    await loadRange();
-    await loadSnapshot();
+  try {
+    await loadRegions();
+    if (selectedRegionId.value) {
+      await loadRange();
+      await loadSnapshot();
+    }
+  } finally {
+    initialLoading.value = false;
   }
 
   liveTimer = setInterval(async () => {
@@ -744,98 +756,109 @@ onBeforeUnmount(() => {
     <div class="controls card">
       <div class="form-row region-select">
         <label>Район</label>
-        <select v-model="selectedRegionId" @change="handleRegionChange">
+        <select v-if="regions.length" v-model="selectedRegionId" @change="handleRegionChange">
           <option v-for="r in regions" :key="r._id" :value="r._id">{{ r.name }}</option>
         </select>
+        <div v-else class="skeleton skeleton-select" aria-hidden="true"></div>
       </div>
 
-      <template v-if="hasRange">
-        <div class="slider-block">
-          <label>Момент времени: {{ atLabel }}</label>
-          <input
-            type="range"
-            :min="range.from"
-            :max="range.to"
-            step="60000"
-            v-model.number="atMs"
-            @input="handleSliderInput"
-            @change="handleSliderChange"
-          />
-          <div class="slider-labels">
-            <span>{{ formatDateTime(range.from) }}</span>
-            <span>{{ formatDateTime(range.to) }}</span>
+      <Transition name="fade" mode="out-in">
+        <div v-if="hasRange" key="controls" class="controls-loaded">
+          <div class="slider-block">
+            <label>Момент времени: {{ atLabel }}</label>
+            <input
+              type="range"
+              :min="range.from"
+              :max="range.to"
+              step="60000"
+              v-model.number="atMs"
+              @input="handleSliderInput"
+              @change="handleSliderChange"
+            />
+            <div class="slider-labels">
+              <span>{{ formatDateTime(range.from) }}</span>
+              <span>{{ formatDateTime(range.to) }}</span>
+            </div>
+          </div>
+          <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
+            {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
+          </button>
+          <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
+          <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
+
+          <div class="filter-block">
+            <select
+              v-if="availableFuelTypes.length"
+              v-model="selectedFuelType"
+              class="fuel-type-select"
+              @change="handleFilterChange"
+            >
+              <option value="">Общий статус (все виды топлива)</option>
+              <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
+            </select>
+
+            <span class="filter-label">Показывать:</span>
+            <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
+              <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
+              <span class="dot" :style="{ background: statusMeta(key).color }"></span>
+              {{ statusMeta(key).label }}
+            </label>
+
+            <button
+              v-if="availableBrands.length"
+              ref="brandButtonRef"
+              type="button"
+              class="btn secondary brand-filter-toggle"
+              :class="{ active: brandPanelOpen }"
+              @click="toggleBrandPanel"
+            >
+              Сети
+              <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
+                фильтр
+              </span>
+            </button>
           </div>
         </div>
-        <button class="btn secondary" :class="{ active: liveMode }" @click="jumpToNow">
-          {{ liveMode ? '● Живой режим' : 'К текущему моменту' }}
-        </button>
-        <button class="btn secondary" @click="openExportPanel">🎞 Экспорт анимации</button>
-        <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
-      </template>
-      <p v-else class="hint">
-        Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
-      </p>
+        <div v-else-if="initialLoading" key="skeleton" class="controls-skeleton" aria-hidden="true">
+          <div class="skeleton skeleton-slider"></div>
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-chip" v-for="n in 4" :key="n"></div>
+        </div>
+        <p v-else key="empty" class="hint">
+          Для этого района ещё нет исторических данных. Опросите его на странице «Районы».
+        </p>
+      </Transition>
 
-      <div v-if="hasRange" class="filter-block">
-        <select
-          v-if="availableFuelTypes.length"
-          v-model="selectedFuelType"
-          class="fuel-type-select"
-          @change="handleFilterChange"
-        >
-          <option value="">Общий статус (все виды топлива)</option>
-          <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
-        </select>
-
-        <span class="filter-label">Показывать:</span>
-        <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
-          <input type="checkbox" v-model="statusFilters[key]" @change="handleFilterChange" />
-          <span class="dot" :style="{ background: statusMeta(key).color }"></span>
-          {{ statusMeta(key).label }}
-        </label>
-
-        <button
-          v-if="availableBrands.length"
-          ref="brandButtonRef"
-          type="button"
-          class="btn secondary brand-filter-toggle"
-          :class="{ active: brandPanelOpen }"
-          @click="toggleBrandPanel"
-        >
-          Сети
-          <span v-if="availableBrands.some((b) => brandFilters[b] === false)" class="brand-filter-badge">
-            фильтр
+      <Transition name="fade">
+        <div v-if="currentSummary.total" class="current-state-inline">
+          <span class="current-state-label">
+            Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
           </span>
-        </button>
-      </div>
-
-      <div v-if="currentSummary.total" class="current-state-inline">
-        <span class="current-state-label">
-          Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
-        </span>
-        <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
-          {{ formatPct(currentSummary.availablePct) }}
-        </strong>
-        <span class="current-state-item">
-          <span class="dot" :style="{ background: statusMeta('available').color }"></span>
-          {{ currentSummary.counts.available }}
-        </span>
-        <span class="current-state-item">
-          <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
-          {{ currentSummary.counts.maybe_available }}
-        </span>
-        <span class="current-state-item">
-          <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
-          {{ currentSummary.counts.not_available }}
-        </span>
-        <span class="current-state-item">
-          <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
-          {{ currentSummary.counts.no_data }}
-        </span>
-        <span class="current-state-shown hint small">
-          показано {{ filteredStations.length }} из {{ stations.length }}
-        </span>
-      </div>
+          <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
+            {{ formatPct(currentSummary.availablePct) }}
+          </strong>
+          <span class="current-state-item">
+            <span class="dot" :style="{ background: statusMeta('available').color }"></span>
+            {{ currentSummary.counts.available }}
+          </span>
+          <span class="current-state-item">
+            <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
+            {{ currentSummary.counts.maybe_available }}
+          </span>
+          <span class="current-state-item">
+            <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
+            {{ currentSummary.counts.not_available }}
+          </span>
+          <span class="current-state-item">
+            <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
+            {{ currentSummary.counts.no_data }}
+          </span>
+          <span class="current-state-shown hint small">
+            показано {{ filteredStations.length }} из {{ stations.length }}
+          </span>
+        </div>
+      </Transition>
     </div>
 
     <Teleport to="body">
@@ -868,7 +891,14 @@ onBeforeUnmount(() => {
 
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
-    <div ref="mapContainer" class="leaflet-map"></div>
+    <div class="map-wrap">
+      <div ref="mapContainer" class="leaflet-map"></div>
+      <Transition name="fade">
+        <div v-if="loadingStations" class="map-loading-overlay">
+          <div class="spinner"></div>
+        </div>
+      </Transition>
+    </div>
 
     <StationDetailModal
       v-if="showDetailModal && selectedStation"
@@ -934,6 +964,46 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   border: 1px solid #ccd2d9;
   min-width: 220px;
+}
+
+/* Mirrors .controls' own flex layout exactly - a wrapper was needed here so
+   <Transition> has a single root element to animate, but the slider/
+   buttons/filter-block inside still need to flow and wrap together with
+   the region-select box next to them, same as when they were direct
+   .controls children. */
+.controls-loaded {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+
+/* Same shape as .controls-loaded's real content once loaded (slider +
+   2 buttons + 4 filter chips) - a placeholder skeleton rather than a
+   blank gap while the region/range/snapshot requests are still in flight. */
+.controls-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+
+.skeleton-slider {
+  width: 280px;
+  height: 40px;
+}
+
+.skeleton-btn {
+  width: 140px;
+  height: 34px;
+}
+
+.skeleton-chip {
+  width: 90px;
+  height: 24px;
+  border-radius: 999px;
 }
 
 /* Replaces the old full KPI-grid card: same numbers, but a single line
@@ -1010,6 +1080,24 @@ onBeforeUnmount(() => {
   .leaflet-map {
     min-height: 480px;
   }
+}
+
+.map-wrap {
+  position: relative;
+}
+
+.map-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(244, 246, 248, 0.55);
+  border-radius: 10px;
+  /* Above the tile/marker layers (Leaflet's own panes use z-index up to a
+     few hundred) but below the brand-filter overlay/modals (z-index 2000+),
+     which should never be visually blocked by a loading spinner. */
+  z-index: 450;
 }
 
 /* Station quick-info popup on marker click, replacing the old always-on
