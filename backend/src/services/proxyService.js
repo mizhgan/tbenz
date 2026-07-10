@@ -28,35 +28,87 @@ async function pickRandomActiveProxy(excludeIds = []) {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-async function recordSuccess(proxyId) {
-  await Proxy.findByIdAndUpdate(proxyId, {
-    $set: {
-      consecutiveFailures: 0,
-      lastUsedAt: new Date(),
-      lastSuccessAt: new Date(),
-      lastError: null,
-    },
-    $inc: { totalRequests: 1, successCount: 1 },
-  });
+// Finds (or creates) this proxy's per-source stat entry and returns the
+// live subdocument to mutate in place - shared by the non-tbank branches of
+// recordSuccess/recordFailure below. See Proxy.js's doc comment on
+// sourceStats for why every source but tbank goes through here instead of
+// the top-level counters.
+function getOrCreateSourceStat(proxy, sourceKey) {
+  let entry = proxy.sourceStats.find((s) => s.sourceKey === sourceKey);
+  if (!entry) {
+    proxy.sourceStats.push({ sourceKey });
+    entry = proxy.sourceStats[proxy.sourceStats.length - 1];
+  }
+  return entry;
 }
 
-async function recordFailure(proxyId, err) {
+/**
+ * Records a successful request through this proxy. `sourceKey` defaults to
+ * 'tbank' (this pool's original consumer, and every existing call site) -
+ * only tbank's outcomes touch the top-level counters that drive
+ * auto-disabling; any other source updates its own entry in sourceStats
+ * instead, purely for visibility (see Proxy.js's doc comment).
+ */
+async function recordSuccess(proxyId, sourceKey = 'tbank') {
+  if (sourceKey === 'tbank') {
+    await Proxy.findByIdAndUpdate(proxyId, {
+      $set: {
+        consecutiveFailures: 0,
+        lastUsedAt: new Date(),
+        lastSuccessAt: new Date(),
+        lastError: null,
+      },
+      $inc: { totalRequests: 1, successCount: 1 },
+    });
+    return;
+  }
+
+  const proxy = await Proxy.findById(proxyId);
+  if (!proxy) return;
+  const stat = getOrCreateSourceStat(proxy, sourceKey);
+  stat.totalRequests += 1;
+  stat.successCount += 1;
+  stat.consecutiveFailures = 0;
+  stat.lastUsedAt = new Date();
+  stat.lastSuccessAt = new Date();
+  stat.lastError = null;
+  await proxy.save();
+}
+
+/**
+ * Records a failed request through this proxy - see recordSuccess's doc
+ * comment for the sourceKey split. Only a tbank failure can push
+ * consecutiveFailures past proxyFailureThreshold and auto-disable the
+ * proxy; a non-tbank source accumulates its own consecutiveFailures in
+ * sourceStats but can never disable the proxy for everyone else.
+ */
+async function recordFailure(proxyId, err, sourceKey = 'tbank') {
   const proxy = await Proxy.findById(proxyId);
   if (!proxy) return;
 
-  proxy.consecutiveFailures += 1;
-  proxy.totalRequests += 1;
-  proxy.failureCount += 1;
-  proxy.lastUsedAt = new Date();
-  proxy.lastErrorAt = new Date();
-  proxy.lastError = err?.message || String(err);
+  if (sourceKey === 'tbank') {
+    proxy.consecutiveFailures += 1;
+    proxy.totalRequests += 1;
+    proxy.failureCount += 1;
+    proxy.lastUsedAt = new Date();
+    proxy.lastErrorAt = new Date();
+    proxy.lastError = err?.message || String(err);
 
-  if (proxy.consecutiveFailures >= proxyFailureThreshold && proxy.active) {
-    proxy.active = false;
-    proxy.disabledReason = `Автоматически отключен после ${proxy.consecutiveFailures} ошибок подряд`;
-    logger.warn(
-      `Proxy ${proxy.host}:${proxy.port} auto-disabled after ${proxy.consecutiveFailures} consecutive failures`
-    );
+    if (proxy.consecutiveFailures >= proxyFailureThreshold && proxy.active) {
+      proxy.active = false;
+      proxy.disabledReason = `Автоматически отключен после ${proxy.consecutiveFailures} ошибок подряд`;
+      logger.warn(
+        `Proxy ${proxy.host}:${proxy.port} auto-disabled after ${proxy.consecutiveFailures} consecutive failures`
+      );
+    }
+  } else {
+    const stat = getOrCreateSourceStat(proxy, sourceKey);
+    stat.totalRequests += 1;
+    stat.failureCount += 1;
+    stat.consecutiveFailures += 1;
+    stat.lastUsedAt = new Date();
+    stat.lastErrorAt = new Date();
+    stat.lastError = err?.message || String(err);
   }
 
   await proxy.save();
