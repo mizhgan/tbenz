@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 
 const { port, corsOrigin } = require('./config/env');
 const { connectDb } = require('./db/mongoose');
@@ -30,6 +31,7 @@ async function main() {
   // nginx container itself, one shared IP for all visitors.
   app.set('trust proxy', 1);
   app.use(helmet());
+  app.use(compression());
   app.use(cors({ origin: corsOrigin }));
   app.use(express.json({ limit: '2mb' }));
   app.use(morgan('tiny'));

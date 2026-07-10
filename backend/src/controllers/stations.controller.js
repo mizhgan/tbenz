@@ -172,6 +172,11 @@ const getStationHistory = asyncHandler(async (req, res) => {
     .limit(limit);
   snapshots.reverse();
 
+  // No server-side memoization here (unlike getForecast below) - query-param
+  // variety (from/to/limit) is high enough that a cache key would rarely
+  // hit; browser/intermediary caching via this header still helps for the
+  // common repeat-open-same-station case within the window.
+  res.set('Cache-Control', 'public, max-age=120');
   res.json(snapshots);
 });
 
@@ -184,6 +189,7 @@ const getForecast = asyncHandler(async (req, res) => {
   const tz = req.query.tz || undefined;
 
   const forecast = await getStationForecast(station._id, { hoursAhead, lookbackDays, tz });
+  res.set('Cache-Control', 'public, max-age=300');
   res.json(forecast);
 });
 

@@ -215,14 +215,28 @@ const getSnapshotTimes = asyncHandler(async (req, res) => {
   res.json({ times });
 });
 
+const LIVE_SNAPSHOT_BUCKET_MS = 60 * 1000;
+
 const getRegionSnapshot = asyncHandler(async (req, res) => {
   const regionId = new mongoose.Types.ObjectId(req.params.id);
-  const at = req.query.at ? new Date(req.query.at) : new Date();
-  if (Number.isNaN(at.getTime())) {
-    throw new HttpError(400, 'Invalid "at" timestamp');
+
+  let at;
+  if (req.query.at) {
+    at = new Date(req.query.at);
+    if (Number.isNaN(at.getTime())) throw new HttpError(400, 'Invalid "at" timestamp');
+  } else {
+    // Live case (no explicit `at`, the map's own live-mode polling) -
+    // rounded to a 60s boundary so repeated polls within the same window
+    // share one cached aggregation (see metricsService.getCurrentSnapshot)
+    // instead of each recomputing the map's live view from scratch. The
+    // underlying data only actually changes on each ~10-15 min real poll
+    // tick anyway, so a request landing up to a minute "in the past" is
+    // never stale in any way a viewer could notice.
+    at = new Date(Math.floor(Date.now() / LIVE_SNAPSHOT_BUCKET_MS) * LIVE_SNAPSHOT_BUCKET_MS);
   }
 
   const stations = await metricsService.getCurrentSnapshot(regionId, at);
+  res.set('Cache-Control', 'public, max-age=60');
   res.json({ at, stations });
 });
 

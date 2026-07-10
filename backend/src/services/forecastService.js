@@ -1,5 +1,6 @@
 const StationSnapshot = require('../models/StationSnapshot');
 const { computeOutages, getAvailabilityTrend } = require('./metricsService');
+const { memoizeAsync } = require('../utils/cache');
 
 const DEFAULT_TZ = 'Europe/Moscow';
 const WEEKDAY_MAP = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
@@ -141,7 +142,7 @@ async function getStationRecoveryStats(stationId, { lookbackDays = 28 } = {}) {
  * assumes the recent past (last `lookbackDays` days) is representative of
  * the near future, which is a reasonable but not guaranteed assumption.
  */
-async function getStationForecast(stationId, { hoursAhead = 24, lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
+async function getStationForecastUncached(stationId, { hoursAhead = 24, lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
   const [{ profile, overallAvailablePct }, streak] = await Promise.all([
     getStationHourlyProfile(stationId, { lookbackDays, tz }),
     getCurrentStatusStreak(stationId),
@@ -170,6 +171,21 @@ async function getStationForecast(stationId, { hoursAhead = 24, lookbackDays = 2
     hours,
   };
 }
+
+// StationDetailModal.vue opens this for every station any visitor clicks -
+// walks up to 500 snapshots (getCurrentStatusStreak) plus a 28-day profile
+// aggregation (getStationHourlyProfile) on every call, uncached until now.
+// Same 5 min TTL as metricsService.js's own memoized functions - the
+// `currentStatus`/`estimatedRecoveryAt` fields can lag a real recovery by up
+// to that long, but the station's actual live status is shown elsewhere in
+// the same modal straight from the (uncached) Station document, so this is
+// bounded, cosmetic staleness on a supplementary forecast, not the primary
+// status a visitor sees.
+const getStationForecast = memoizeAsync(getStationForecastUncached, {
+  ttlMs: 5 * 60 * 1000,
+  keyFn: (stationId, opts = {}) =>
+    JSON.stringify([String(stationId), opts.hoursAhead ?? 24, opts.lookbackDays ?? 28, opts.tz ?? DEFAULT_TZ]),
+});
 
 function linearRegression(points) {
   const valid = points.filter((p) => Number.isFinite(p.y));

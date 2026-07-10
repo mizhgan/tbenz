@@ -55,7 +55,7 @@ const STATUS_COUNTS_GROUP = {
  * a period. Shared by the region-snapshot endpoint (map's live/at-time view)
  * and the Telegram digest (current status breakdown).
  */
-async function getCurrentSnapshot(regionId, at) {
+async function getCurrentSnapshotUncached(regionId, at) {
   const sources = listSources();
 
   const pipeline = [
@@ -152,6 +152,20 @@ async function getCurrentSnapshot(regionId, at) {
 
   return StationSnapshot.aggregate(pipeline);
 }
+
+// This is the single hottest public endpoint (the map's live view polls it
+// repeatedly, see MapView.vue/regions.controller.js's getRegionSnapshot) -
+// unlike the other memoized functions below, callers vary in how precise
+// their own `at` needs to be: the map's live-mode controller rounds `at` to
+// a 60s boundary before calling this (so concurrent/repeated live polls
+// share one cached aggregation), while the Telegram digest and the map's
+// historical time-slider pass an exact timestamp on purpose and get their
+// own cache entry each - this function itself doesn't need to know which
+// case it's in, it just caches whatever key it's given.
+const getCurrentSnapshot = memoizeAsync(getCurrentSnapshotUncached, {
+  ttlMs: 60 * 1000,
+  keyFn: (regionId, at) => `${String(regionId)}:${at.getTime()}`,
+});
 
 /**
  * Region-wide availability trend, bucketed into fixed-size time windows.
