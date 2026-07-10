@@ -776,12 +776,6 @@ onBeforeUnmount(() => {
     <div class="map-wrap">
       <div ref="mapContainer" class="leaflet-map"></div>
 
-      <Transition name="fade">
-        <div v-if="loadingStations" class="map-loading-overlay">
-          <div class="spinner"></div>
-        </div>
-      </Transition>
-
       <!-- Always-visible entry point into the drawer below - region,
            slider, filters and export/share all live behind it now, so the
            map itself (not a control bar) is what a visitor sees first. -->
@@ -805,9 +799,12 @@ onBeforeUnmount(() => {
           class="status-badge"
           :style="{ borderTopColor: statusMeta('available').color }"
         >
-          <strong :style="{ color: statusMeta('available').color }">
-            {{ formatPct(currentSummary.availablePct) }}
-          </strong>
+          <span class="status-badge-pct-wrap">
+            <span v-if="loadingStations" class="status-badge-spinner"></span>
+            <strong :style="{ color: statusMeta('available').color }">
+              {{ formatPct(currentSummary.availablePct) }}
+            </strong>
+          </span>
           <span class="hint small">{{ currentSummary.total }} ст.</span>
         </div>
       </Transition>
@@ -1009,7 +1006,15 @@ onBeforeUnmount(() => {
 .map-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* .map-page dropped its gap when it went full-bleed (the map itself now
+   fills all remaining space) - this is the one sibling that still needs
+   breathing room from the map below it. */
+.map-page > .error-text {
+  margin: 8px 12px;
 }
 
 /* Floating entry point for the drawer below - top-left, the corner
@@ -1071,6 +1076,24 @@ onBeforeUnmount(() => {
 .status-badge strong {
   font-size: 19px;
   line-height: 1.3;
+}
+
+/* Rings the percentage while stations are (re)loading, instead of the old
+   full-map dimming overlay - that overlay blocked clicks/pans, which is
+   exactly what a user is doing most of the time on this page, so loading
+   state now lives entirely inside this already-visible badge. */
+.status-badge-pct-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.status-badge-spinner {
+  position: absolute;
+  inset: -5px;
+  border: 2px solid rgba(37, 99, 235, 0.15);
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spinner-rotate 0.7s linear infinite;
 }
 
 .drawer-backdrop {
@@ -1227,40 +1250,18 @@ onBeforeUnmount(() => {
   color: #1d4ed8;
 }
 
-/* No sidebar competing for width any more - the map gets the full page
-   width, and a taller default height since it's no longer stretched to
-   match a sidebar's content height (the old flex row's align-items:
-   stretch is gone along with the sidebar itself). */
+/* Fills .map-wrap edge-to-edge (see .content--full-bleed / .map-page) -
+   no card styling since this is the whole page now, not a card floating
+   in one. */
 .leaflet-map {
   width: 100%;
-  min-height: 680px;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-@media (max-width: 860px) {
-  .leaflet-map {
-    min-height: 480px;
-  }
+  height: 100%;
 }
 
 .map-wrap {
   position: relative;
-}
-
-.map-loading-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(244, 246, 248, 0.55);
-  border-radius: 10px;
-  /* Above the tile/marker layers (Leaflet's own panes use z-index up to a
-     few hundred) but below the brand-filter overlay/modals (z-index 2000+),
-     which should never be visually blocked by a loading spinner. */
-  z-index: 450;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Station quick-info popup on marker click, replacing the old always-on

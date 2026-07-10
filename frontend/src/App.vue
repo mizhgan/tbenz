@@ -1,11 +1,16 @@
 <script setup>
 import { computed, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './store/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
+const route = useRoute();
 const isAuthenticated = computed(() => auth.isAuthenticated);
+// The map page wants to fill the viewport edge-to-edge below the header
+// (see .content--full-bleed) - every other page keeps .content's normal
+// padding.
+const isFullBleed = computed(() => route.name === 'map');
 
 onMounted(() => {
   // Locally cached role can be stale (pre-role token, or a role change made
@@ -46,7 +51,7 @@ function handleLogout() {
         <router-link v-else to="/login">Войти</router-link>
       </div>
     </header>
-    <main class="content">
+    <main class="content" :class="{ 'content--full-bleed': isFullBleed }">
       <router-view />
     </main>
   </div>

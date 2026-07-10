@@ -18,7 +18,13 @@ body {
 .layout {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  /* height (not min-height) so a definite size actually reaches descendants -
+     percentage heights (see .leaflet-map/.map-wrap/.map-page) don't resolve
+     through an ancestor chain that bottoms out in min-height/auto, even
+     though flex-grow gives every intermediate flex item a concrete pixel
+     size along the way. Pages taller than the viewport still scroll fine:
+     overflow content isn't clipped, it just extends past this box. */
+  height: 100%;
 }
 
 .topbar {
@@ -118,6 +124,17 @@ body {
 .content {
   flex: 1;
   padding: 24px;
+}
+
+/* Map page only (see App.vue's isFullBleed) - edge-to-edge below the header
+   instead of sitting in a padded column like every other page, and capped
+   to exactly the remaining viewport height (no page-level scrollbar) since
+   the map itself, not surrounding content, is meant to fill that space. */
+.content--full-bleed {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .card {
