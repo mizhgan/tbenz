@@ -27,14 +27,17 @@ services:
       MIN_POLL_INTERVAL_MINUTES: ${MIN_POLL_INTERVAL_MINUTES:-1}
       CORS_ORIGIN: ${CORS_ORIGIN:-*}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-    # No host port mapping - only reachable via the internal docker network
-    # (frontend's nginx proxies /api/ to http://backend:4000, see
-    # frontend/nginx.conf). Previously published as 4000:4000, which let
-    # anyone hit the raw Express API directly, bypassing nginx entirely -
-    # including any rate limiting/caching added there, and the app-level
-    # rate limiter here too if traffic never passed through this container's
-    # own network stack the same way. For local debugging, bind to
-    # 127.0.0.1 instead of re-adding a public 4000:4000.
+    # Bound to loopback only, not 0.0.0.0 - this host's system-level nginx
+    # (/etc/nginx/sites-available/tbenz.conf, outside this compose file,
+    # Certbot-managed) proxies https://tbenz.in/api/ straight to
+    # 127.0.0.1:4000, so removing this mapping entirely broke all public API
+    # traffic in production (found live: /api/regions came back 502, since
+    # nothing was listening on 4000 for that nginx to reach). Loopback-only
+    # still keeps the original goal - no external client can reach the raw
+    # Express API directly over the internet, only processes on this host
+    # (this system nginx, or local debugging) can.
+    ports:
+      - "127.0.0.1:4000:4000"
 
   frontend:
     build: ./frontend
