@@ -67,11 +67,11 @@ async function storeStation(parsed, region, polledAt) {
     raw: parsed.raw,
   });
 
-  const transitions = telegramNotifier.computeTransitions(
-    previous?.lastFuelStatuses || [],
-    parsed.fuelStatuses
-  );
-  return { station, transitions };
+  // The transition notification isn't computed here - see ingestRegion's own
+  // comment on why it's deferred until every write for this tick (this
+  // tbank write, then any secondary-source remerge) has landed, using this
+  // `previousFuelStatuses` as the one true "before" value.
+  return { station, previousFuelStatuses: previous?.lastFuelStatuses || [] };
 }
 
 /**
@@ -92,11 +92,13 @@ async function ingestRegion(region) {
 
     let stored = 0;
     let skipped = 0;
-    // Collected across the whole poll and sent as one batch per chat below,
-    // instead of notifying the moment each station is stored - the source
-    // reports every station's state at once, so a poll that changes several
-    // stations shouldn't turn into a burst of near-simultaneous messages.
-    const stationEvents = [];
+    // Each touched station's fuel statuses from *before any write this
+    // tick* - the one true "previous" a transition notification should be
+    // compared against (see the comment on the final notifyRegionChanges
+    // call below for why this has to be a single before/after comparison
+    // spanning both the tbank write and any secondary-source remerge,
+    // rather than one comparison per write).
+    const previousByStationId = new Map();
     for (const raw of rawStations) {
       const parsed = parseStation(raw);
       if (!parsed) {
@@ -104,8 +106,8 @@ async function ingestRegion(region) {
         continue;
       }
       try {
-        const { station, transitions } = await storeStation(parsed, region, polledAt);
-        if (transitions.length) stationEvents.push({ station, transitions });
+        const { station, previousFuelStatuses } = await storeStation(parsed, region, polledAt);
+        previousByStationId.set(String(station._id), previousFuelStatuses);
         stored += 1;
       } catch (err) {
         logger.error(`Failed to store station for region ${region.name}:`, err.message);
@@ -118,14 +120,7 @@ async function ingestRegion(region) {
     region.lastPollStationCount = stored;
     await region.save();
 
-    // Best-effort: a Telegram hiccup must never break ingestion.
-    try {
-      await telegramNotifier.notifyRegionChanges(region, stationEvents);
-    } catch (err) {
-      logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
-    }
-
-    // Best-effort, same reasoning as the Telegram notify above: a secondary
+    // Best-effort, same reasoning as the Telegram notify below: a secondary
     // source (see sourceRegistry.js) being down/slow/changed-shape must
     // never break the primary tbank ingestion this function exists for.
     // Runs on the same schedule as the tbank poll above (same region, same
@@ -141,6 +136,18 @@ async function ingestRegion(region) {
       }
     }
 
+    // A station matched to a secondary source but not itself present in
+    // tbank's response this tick (previousByStationId has no entry for it
+    // yet) still needs its true "before" value captured, from right before
+    // the remerge below is its only write this tick.
+    const uniqueMatchedIds = [...new Set(matchedStationIds.map(String))];
+    for (const id of uniqueMatchedIds) {
+      if (!previousByStationId.has(id)) {
+        const existing = await Station.findById(id, { lastFuelStatuses: 1 }).lean();
+        previousByStationId.set(id, existing?.lastFuelStatuses || []);
+      }
+    }
+
     // One remerge per station touched by any source this tick (not one per
     // source) - reuses this tick's own `polledAt` so it overwrites the
     // StationSnapshot storeStation already wrote above instead of appending
@@ -150,11 +157,44 @@ async function ingestRegion(region) {
     // percentages, outage streaks, hourly forecast profiles).
     if (matchedStationIds.length) {
       try {
-        const mergeEvents = await remergeStationsForTick(matchedStationIds, region, polledAt);
-        await telegramNotifier.notifyRegionChanges(region, mergeEvents);
+        await remergeStationsForTick(matchedStationIds, region, polledAt);
       } catch (err) {
         logger.error(`Secondary-source merge failed for region ${region.name}:`, err.message);
       }
+    }
+
+    // Transitions computed once per touched station, comparing its status
+    // from before ANY write this tick to its final status after both the
+    // tbank write and (if matched) the remerge - and sent as one batch per
+    // chat, instead of notifying the moment each station is stored, since a
+    // poll that changes several stations shouldn't turn into a burst of
+    // near-simultaneous messages. Comparing before/after in two separate
+    // hops instead (previous vs tbank-raw, then tbank-raw vs merged) used to
+    // silently drop real available -> not_available transitions whenever
+    // tbank's own raw reading was 'no_data' in between (common once a
+    // station's live signal comes from a secondary source rather than
+    // tbank itself): 'no_data' is neither 'available' nor 'not_available',
+    // so neither hop's strict comparison ever saw the true
+    // available -> not_available pair - "появилось" alerts kept firing
+    // (that event only needs "wasn't available before, is now") while
+    // "пропало" alerts (which need the *exact* prior state to be
+    // 'available') silently stopped.
+    const touchedIds = [...new Set([...previousByStationId.keys()])];
+    const stationEvents = [];
+    if (touchedIds.length) {
+      const finalStations = await Station.find({ _id: { $in: touchedIds } });
+      for (const station of finalStations) {
+        const previousFuelStatuses = previousByStationId.get(String(station._id)) || [];
+        const transitions = telegramNotifier.computeTransitions(previousFuelStatuses, station.lastFuelStatuses);
+        if (transitions.length) stationEvents.push({ station, transitions });
+      }
+    }
+
+    // Best-effort: a Telegram hiccup must never break ingestion.
+    try {
+      await telegramNotifier.notifyRegionChanges(region, stationEvents);
+    } catch (err) {
+      logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
     }
 
     if (skipped > 0) {

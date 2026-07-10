@@ -123,8 +123,11 @@ async function applyMergeToStation(station, region, polledAt) {
  * tick - carrying the final merged status once every source has been read -
  * rather than N+1.
  */
+// No transition/notify computation here on purpose (unlike applyMergeToStation
+// above) - see remergeStationsForTick's doc comment for why the region poll
+// loop computes transitions once per tick, after this write, instead of
+// per-write here.
 async function applyMergeToStationForTick(station, region, polledAt) {
-  const previousFuelStatuses = station.lastFuelStatuses;
   const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
 
   station.lastStatus = mergedStatus;
@@ -147,8 +150,6 @@ async function applyMergeToStationForTick(station, region, polledAt) {
     },
     { upsert: true }
   );
-
-  return telegramNotifier.computeTransitions(previousFuelStatuses, mergedFuelStatuses);
 }
 
 /**
@@ -159,17 +160,32 @@ async function applyMergeToStationForTick(station, region, polledAt) {
  * landed - so a station matched to both gdebenz and sberazs picks up both
  * sources' latest readings in its one merge, instead of merging twice with
  * whichever source happened to be read first missing the other's update.
+ *
+ * Deliberately doesn't compute/return transitions itself (unlike the old
+ * per-source applyMergeToStation call this replaced) - ingestService.ingestRegion
+ * does that once per tick, comparing each touched station's status from
+ * *before this entire tick's writes* against its final status *after* both
+ * the tbank write and this remerge. Comparing in two hops instead (previous
+ * vs tbank-raw, then tbank-raw vs merged - what this function's writes would
+ * otherwise be compared against on their own) silently drops real
+ * available -> not_available transitions whenever tbank's own raw reading is
+ * 'no_data' in between (common for a station whose live signal now comes
+ * from a secondary source rather than tbank itself): 'no_data' isn't
+ * 'available' so the first hop doesn't count as a drop, and it isn't
+ * 'not_available' either so computeTransitions' strict
+ * previous==='available' requirement for a "пропало" event never sees the
+ * true previous 'available' state on the hop that actually lands on
+ * 'not_available'. A single previous-tick-final vs this-tick-final
+ * comparison doesn't have that blind spot.
  */
 async function remergeStationsForTick(stationIds, region, polledAt) {
   const uniqueIds = [...new Set(stationIds.map(String))];
-  const stationEvents = [];
   for (const id of uniqueIds) {
     const station = await Station.findById(id);
     if (!station) continue; // matched station deleted since this source's poll ran
-    const transitions = await applyMergeToStationForTick(station, region, polledAt);
-    if (transitions.length) stationEvents.push({ station, transitions });
+    await applyMergeToStationForTick(station, region, polledAt);
   }
-  return stationEvents;
+  return uniqueIds;
 }
 
 /**
