@@ -5,6 +5,7 @@ const StationSnapshot = require('../models/StationSnapshot');
 const telegramNotifier = require('./telegramNotifier');
 const { ingestSecondarySourceRegion, remergeStationsForTick } = require('./secondarySourceIngestService');
 const { listSources } = require('./sourceRegistry');
+const { recordPollAttempt } = require('./pollLogService');
 const logger = require('../utils/logger');
 
 async function storeStation(parsed, region, polledAt) {
@@ -119,6 +120,7 @@ async function ingestRegion(region) {
     region.lastPollError = null;
     region.lastPollStationCount = stored;
     await region.save();
+    await recordPollAttempt({ region, sourceKey: 'tbank', status: 'ok', error: null, stationCount: stored });
 
     // Best-effort, same reasoning as the Telegram notify below: a secondary
     // source (see sourceRegistry.js) being down/slow/changed-shape must
@@ -209,6 +211,7 @@ async function ingestRegion(region) {
     region.lastPollStatus = 'error';
     region.lastPollError = err.message;
     await region.save();
+    await recordPollAttempt({ region, sourceKey: 'tbank', status: 'error', error: err.message, stationCount: 0 });
     logger.error(`Region "${region.name}": poll failed:`, err.message);
     throw err;
   }

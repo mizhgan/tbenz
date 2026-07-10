@@ -12,6 +12,9 @@ export const regionsApi = {
     http.get(`/regions/${id}/snapshot-times`, { params: { from, to } }).then((r) => r.data),
   snapshotAt: (id, at) =>
     http.get(`/regions/${id}/snapshot`, { params: at ? { at } : {} }).then((r) => r.data),
+  pollStats: (id) => http.get(`/regions/${id}/poll-stats`).then((r) => r.data),
+  pollLogs: (id, sourceKey, limit) =>
+    http.get(`/regions/${id}/poll-logs`, { params: { sourceKey, limit } }).then((r) => r.data),
 };
 
 export const stationsApi = {

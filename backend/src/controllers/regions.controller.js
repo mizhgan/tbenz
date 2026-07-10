@@ -4,7 +4,9 @@ const { HttpError } = require('../middleware/errorHandler');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
+const SourcePollLog = require('../models/SourcePollLog');
 const metricsService = require('../services/metricsService');
+const pollLogService = require('../services/pollLogService');
 const scheduler = require('../services/scheduler');
 const { ingestRegion } = require('../services/ingestService');
 const { minPollIntervalMinutes } = require('../config/env');
@@ -105,6 +107,7 @@ const deleteRegion = asyncHandler(async (req, res) => {
 
   scheduler.unscheduleRegion(region._id);
   await StationSnapshot.deleteMany({ region: region._id });
+  await SourcePollLog.deleteMany({ region: region._id });
   await Station.updateMany({ regions: region._id }, { $pull: { regions: region._id } });
   await region.deleteOne();
 
@@ -116,6 +119,27 @@ const pollRegionNow = asyncHandler(async (req, res) => {
   if (!region) throw new HttpError(404, 'Region not found');
   const result = await ingestRegion(region);
   res.json({ ok: true, ...result });
+});
+
+// 24h attempt/error counts per source (tbank + every registered secondary
+// source) - see pollLogService.js's doc comment for why this needs its own
+// log instead of reading Region.lastPollStatus/sourcePollStatus, which only
+// ever holds the single latest attempt.
+const getPollStats = asyncHandler(async (req, res) => {
+  const region = await Region.findById(req.params.id);
+  if (!region) throw new HttpError(404, 'Region not found');
+  const stats = await pollLogService.getPollStats(region._id);
+  res.json(stats);
+});
+
+const getPollLogs = asyncHandler(async (req, res) => {
+  const region = await Region.findById(req.params.id);
+  if (!region) throw new HttpError(404, 'Region not found');
+  const sourceKey = req.query.sourceKey;
+  if (!sourceKey) throw new HttpError(400, 'sourceKey is required');
+  const limit = Number(req.query.limit) || 50;
+  const logs = await pollLogService.getRecentLogs(region._id, sourceKey, { limit });
+  res.json(logs);
 });
 
 const getHistoryRange = asyncHandler(async (req, res) => {
@@ -166,4 +190,6 @@ module.exports = {
   getHistoryRange,
   getSnapshotTimes,
   getRegionSnapshot,
+  getPollStats,
+  getPollLogs,
 };

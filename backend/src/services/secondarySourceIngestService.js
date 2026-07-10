@@ -3,6 +3,7 @@ const StationSnapshot = require('../models/StationSnapshot');
 const { mergeStationFuelStatuses, mergeStationOverallStatus } = require('./mergeStatusService');
 const { getSource } = require('./sourceRegistry');
 const telegramNotifier = require('./telegramNotifier');
+const { recordPollAttempt } = require('./pollLogService');
 const logger = require('../utils/logger');
 
 // Dual-write helper for Region.sourcePollStatus (see the field's doc comment
@@ -233,6 +234,7 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
 
     setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'ok', error: null, stationCount: stored });
     await region.save();
+    await recordPollAttempt({ region, sourceKey: sourceConfig.key, status: 'ok', error: null, stationCount: stored });
 
     if (skipped > 0) {
       logger.warn(`Region "${region.name}" (${sourceConfig.key}): skipped ${skipped} station(s) with unrecognized shape`);
@@ -242,6 +244,7 @@ async function ingestSecondarySourceRegion(sourceConfig, region) {
   } catch (err) {
     setSourcePollStatus(region, sourceConfig.key, { lastPolledAt: polledAt, status: 'error', error: err.message, stationCount: 0 });
     await region.save();
+    await recordPollAttempt({ region, sourceKey: sourceConfig.key, status: 'error', error: err.message, stationCount: 0 });
     logger.error(`Region "${region.name}": ${sourceConfig.key} poll failed:`, err.message);
     throw err;
   }

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { regionsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
 import RegionForm from '../components/RegionForm.vue';
+import PollLogModal from '../components/PollLogModal.vue';
 
 const router = useRouter();
 const regions = ref([]);
@@ -13,6 +14,13 @@ const errorMessage = ref('');
 const showForm = ref(false);
 const editingRegion = ref(null);
 const pollingIds = ref(new Set());
+// regionId -> array of { sourceKey, attempts24h, errors24h, emptyOk24h,
+// lastPolledAt, lastStatus, lastError, lastStationCount } - see backend's
+// pollLogService.js. Loaded alongside regions, not embedded in the region
+// document itself, since it's a rolling operational stat (SourcePollLog),
+// not part of Region.
+const pollStatsByRegion = ref(new Map());
+const logModal = ref(null);
 
 let refreshTimer = null;
 
@@ -26,9 +34,9 @@ async function loadRegions() {
   }
 }
 
-// tbank's own poll status has dedicated columns below (it's the primary
-// source every region always has); every other registered source (see
-// backend's sourceRegistry.js) only shows up in region.sourcePollStatus,
+// tbank's own poll status has dedicated fields directly on Region (it's the
+// primary source every region always has); every other registered source
+// (see backend's sourceRegistry.js) only shows up in region.sourcePollStatus,
 // which otherwise has no label attached to it beyond a bare sourceKey.
 async function loadSources() {
   try {
@@ -39,7 +47,51 @@ async function loadSources() {
 }
 
 function sourceLabel(key) {
+  if (key === 'tbank') return 'tbank';
   return sources.value.find((s) => s.key === key)?.label || key;
+}
+
+// One row per source (tbank + every entry in region.sourcePollStatus),
+// combining each source's own "current state" fields with its 24h
+// attempt/error stats (loaded separately, see loadPollStats) - lets the
+// template render tbank and every secondary source through the same list
+// instead of duplicating markup for tbank's dedicated fields.
+function sourceRows(region) {
+  const statsByKey = new Map((pollStatsByRegion.value.get(region._id) || []).map((s) => [s.sourceKey, s]));
+  const rows = [
+    {
+      sourceKey: 'tbank',
+      status: region.lastPollStatus,
+      lastPolledAt: region.lastPolledAt,
+      stationCount: region.lastPollStationCount,
+      error: region.lastPollError,
+    },
+    ...(region.sourcePollStatus || []).map((s) => ({
+      sourceKey: s.sourceKey,
+      status: s.status,
+      lastPolledAt: s.lastPolledAt,
+      stationCount: s.stationCount,
+      error: s.error,
+    })),
+  ];
+  return rows.map((r) => ({ ...r, label: sourceLabel(r.sourceKey), stats: statsByKey.get(r.sourceKey) || null }));
+}
+
+async function loadPollStats() {
+  const entries = await Promise.all(
+    regions.value.map(async (r) => {
+      try {
+        return [r._id, await regionsApi.pollStats(r._id)];
+      } catch (err) {
+        return [r._id, []];
+      }
+    })
+  );
+  pollStatsByRegion.value = new Map(entries);
+}
+
+function openLog(region, sourceKey, label) {
+  logModal.value = { regionId: region._id, sourceKey, label };
 }
 
 function openCreateForm() {
@@ -81,6 +133,7 @@ async function handlePollNow(region) {
   try {
     await regionsApi.pollNow(region._id);
     await loadRegions();
+    await loadPollStats();
   } catch (err) {
     errorMessage.value = err.response?.data?.error || 'Не удалось запросить данные';
   } finally {
@@ -97,10 +150,15 @@ function formatDate(value) {
   return new Date(value).toLocaleString('ru-RU');
 }
 
+async function refreshAll() {
+  await loadRegions();
+  await loadPollStats();
+}
+
 onMounted(() => {
   loadSources();
-  loadRegions();
-  refreshTimer = setInterval(loadRegions, 15000);
+  refreshAll();
+  refreshTimer = setInterval(refreshAll, 15000);
 });
 
 onBeforeUnmount(() => {
@@ -127,41 +185,48 @@ onBeforeUnmount(() => {
               <th>Название</th>
               <th>Границы (bbox)</th>
               <th>Интервал</th>
-              <th>Статус (tbank)</th>
-              <th>Последний опрос</th>
-              <th>Станций (tbank)</th>
-              <th>Другие источники</th>
+              <th>Источники опроса</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="region in regions" :key="region._id">
-              <td>{{ region.name }}</td>
+              <td>
+                {{ region.name }}
+                <div>
+                  <span class="badge" :class="region.active ? 'ok' : 'never'">
+                    {{ region.active ? 'активен' : 'выключен' }}
+                  </span>
+                </div>
+              </td>
               <td class="mono">
                 {{ region.minLat.toFixed(4) }}, {{ region.minLon.toFixed(4) }} →
                 {{ region.maxLat.toFixed(4) }}, {{ region.maxLon.toFixed(4) }}
               </td>
               <td>{{ region.pollIntervalMinutes }} мин</td>
               <td>
-                <span class="badge" :class="region.active ? 'ok' : 'never'">
-                  {{ region.active ? 'активен' : 'выключен' }}
-                </span>
-                <span
-                  v-if="region.lastPollStatus !== 'never'"
-                  class="badge"
-                  :class="region.lastPollStatus"
-                >
-                  {{ region.lastPollStatus === 'ok' ? 'ok' : 'ошибка' }}
-                </span>
-              </td>
-              <td>{{ formatDate(region.lastPolledAt) }}</td>
-              <td>{{ region.lastPollStationCount }}</td>
-              <td>
-                <div v-if="!region.sourcePollStatus?.length" class="hint">—</div>
-                <div v-for="s in region.sourcePollStatus" :key="s.sourceKey" class="source-status-row">
-                  <span class="hint">{{ sourceLabel(s.sourceKey) }}:</span>
-                  <span class="badge" :class="s.status">{{ s.status === 'ok' ? 'ok' : s.status === 'error' ? 'ошибка' : 'никогда' }}</span>
-                  <span class="hint">{{ s.stationCount }} · {{ formatDate(s.lastPolledAt) }}</span>
+                <div v-for="row in sourceRows(region)" :key="row.sourceKey" class="source-status-row">
+                  <div class="source-status-line">
+                    <span class="hint">{{ row.label }}:</span>
+                    <span class="badge" :class="row.status">
+                      {{ row.status === 'ok' ? 'ok' : row.status === 'error' ? 'ошибка' : 'никогда' }}
+                    </span>
+                    <span v-if="row.status === 'ok' && row.stationCount === 0" class="badge warn">0 станций</span>
+                    <span class="hint">{{ row.stationCount }} ст. · {{ formatDate(row.lastPolledAt) }}</span>
+                    <button type="button" class="link-btn log-link" @click="openLog(region, row.sourceKey, row.label)">
+                      журнал
+                    </button>
+                  </div>
+                  <div v-if="row.stats" class="hint small">
+                    24ч: {{ row.stats.attempts24h }} опрос{{ row.stats.attempts24h === 1 ? '' : 'ов' }},
+                    {{ row.stats.errors24h }} ошиб{{ row.stats.errors24h === 1 ? 'ка' : 'ок' }}
+                    <span v-if="row.stats.emptyOk24h" class="warn-text">
+                      , {{ row.stats.emptyOk24h }}× вернул 0 станций без ошибки
+                    </span>
+                  </div>
+                  <div v-if="row.error" class="hint small error-text-inline" :title="row.error">
+                    ⚠ {{ row.error }}
+                  </div>
                 </div>
               </td>
               <td class="actions">
@@ -187,6 +252,14 @@ onBeforeUnmount(() => {
       :initial="editingRegion"
       @submit="handleSubmit"
       @cancel="showForm = false"
+    />
+
+    <PollLogModal
+      v-if="logModal"
+      :region-id="logModal.regionId"
+      :source-key="logModal.sourceKey"
+      :source-label="logModal.label"
+      @close="logModal = null"
     />
   </div>
 </template>
@@ -220,14 +293,47 @@ onBeforeUnmount(() => {
 }
 
 .source-status-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 12px;
-  white-space: nowrap;
 }
 
 .source-status-row:not(:last-child) {
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.source-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.hint.small {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.warn-text {
+  color: #b45309;
+}
+
+.error-text-inline {
+  color: #991b1b;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-link {
+  font-size: 11px;
+  color: #2563eb;
+  padding: 0;
+}
+
+.badge.warn {
+  background: #fef3c7;
+  color: #b45309;
 }
 </style>
