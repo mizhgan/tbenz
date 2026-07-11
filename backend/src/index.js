@@ -14,6 +14,7 @@ const scheduler = require('./services/scheduler');
 const telegramBot = require('./services/telegramBot');
 const telegramDigestScheduler = require('./services/telegramDigestScheduler');
 const telegramPredictiveScheduler = require('./services/telegramPredictiveScheduler');
+const browserFetchService = require('./services/browserFetchService');
 const logger = require('./utils/logger');
 
 async function main() {
@@ -71,5 +72,5 @@ process.on('SIGTERM', () => {
   telegramDigestScheduler.stop();
   telegramPredictiveScheduler.stop();
   telegramBot.stop();
-  process.exit(0);
+  browserFetchService.closeBrowser().finally(() => process.exit(0));
 });

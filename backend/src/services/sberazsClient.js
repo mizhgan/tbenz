@@ -2,59 +2,35 @@ const axios = require('axios');
 const { sberazsApiBaseUrl, proxyRequestTimeoutMs } = require('../config/env');
 const Proxy = require('../models/Proxy');
 const proxyService = require('./proxyService');
+const browserFetchService = require('./browserFetchService');
 const logger = require('../utils/logger');
 
-// Same browser User-Agent trick as gdebenzClient.js - verified live: a
-// default axios/curl User-Agent gets served an anti-bot JS-challenge page
-// (redirect + cookie-setting script) instead of JSON; a browser-shaped one
-// goes straight through with no cookies/challenge needed at all. Kept even
-// though it turned out not to be sufficient on its own (see fetchStations'
-// doc comment below) - it still helps, just not always.
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
-
 const MAX_PROXY_ATTEMPTS = 5;
-
-function buildClient(agent) {
-  return axios.create({
-    baseURL: sberazsApiBaseUrl,
-    timeout: proxyRequestTimeoutMs,
-    httpAgent: agent || undefined,
-    httpsAgent: agent || undefined,
-    proxy: agent ? false : undefined,
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': USER_AGENT,
-    },
-  });
-}
 
 function bboxParams({ minLat, maxLat, minLon, maxLon }) {
   return { bbox: `${minLon},${minLat},${maxLon},${maxLat}` };
 }
 
+function buildUrl(bbox) {
+  return axios.getUri({ baseURL: sberazsApiBaseUrl, url: '', params: bboxParams(bbox) });
+}
+
 // See tbankClient.js's buildRequestUrl for why this is exposed on its own
 // rather than only ever derived from a successful response.
 function buildRequestUrl(bbox) {
-  return buildClient(null).getUri({ url: '', params: bboxParams(bbox) });
+  return buildUrl(bbox);
 }
 
-// A block/rate-limit here shows up as a 200 OK carrying an HTML challenge
-// page, not an HTTP error - axios never throws for it, so left unchecked
-// every attempt would look like a "success" that happens to return an empty
-// station list (see extractStationsArray's `typeof payload !== 'object'`
-// fallback), indistinguishable from a region that genuinely has none.
-// sberazs's real payload is always a JSON object (see sberazsParser.js's doc
-// comment); a string body is the one signal available that this attempt was
-// actually blocked, so it's promoted to a thrown error here - which, for a
-// proxied attempt, is exactly what makes the retry loop below move on to a
-// different proxy instead of quietly accepting the challenge page as data.
-async function requestOnce(agent, params) {
-  const response = await buildClient(agent).get('', { params });
-  if (typeof response.data === 'string') {
-    throw new Error('sberazs returned a non-JSON response (likely an anti-bot block/challenge page)');
-  }
-  return response.data;
+// A plain HTTP client (even with a browser-shaped User-Agent, with or
+// without a proxy - both tried and confirmed blocked identically) always
+// gets served sberazs.ru's anti-bot JS-challenge page instead of the real
+// response - see browserFetchService.js's doc comment for what that
+// challenge actually does and why a real (headless) browser is the fix,
+// not a smarter HTTP client.
+async function requestOnce(proxy, bbox) {
+  const url = buildUrl(bbox);
+  const proxyOption = proxy ? proxyService.buildPlaywrightProxyOption(proxy) : undefined;
+  return browserFetchService.fetchJsonThroughBrowser(url, { proxy: proxyOption, timeoutMs: proxyRequestTimeoutMs });
 }
 
 /**
@@ -65,24 +41,35 @@ async function requestOnce(agent, params) {
  * separate lat1/lon1/lat2/lon2 params.
  *
  * Routes through the same admin-configured proxy pool as tbankClient.js
- * when any proxy is active (added after observing this source get blocked
- * even with a browser User-Agent - see requestOnce above); with no active
- * proxies configured, requests go out directly, same as before this
- * existed. Records outcomes under its own 'sberazs' sourceKey (see
- * proxyService.recordSuccess/recordFailure) rather than tbank's - confirmed
- * live that this source gets blocked identically through every proxy *and*
- * direct, so proxy rotation alone doesn't actually fix it; letting those
- * failures count against tbank's own consecutiveFailures would have risked
- * auto-disabling a proxy that's perfectly healthy for tbank, for a block
- * rotating IPs can't route around anyway.
+ * when any proxy is active, via a headless browser instead of a plain HTTP
+ * client (see requestOnce above and browserFetchService.js). Records
+ * outcomes under its own 'sberazs' sourceKey (see
+ * proxyService.recordSuccess/recordFailure) rather than tbank's - this
+ * source's anti-bot block has nothing to do with which IP it's coming from
+ * (confirmed live: identical through every proxy and direct), so letting
+ * those failures count against tbank's own consecutiveFailures would have
+ * risked auto-disabling a proxy that's perfectly healthy for tbank, for a
+ * block rotating IPs can't route around anyway.
+ *
+ * Falls back to a direct (no-proxy) attempt if every proxy attempt fails,
+ * not just when none are configured - confirmed live that this app's
+ * SOCKS5-with-credentials proxies (its only proxy type in practice) simply
+ * can't be used at all through a headless browser (Chromium has no support
+ * for authenticating to a SOCKS5 proxy, a hard limitation, not a config
+ * problem or a transient failure worth retrying against). Since a direct
+ * browser fetch is what actually gets past sberazs's block in the first
+ * place (proxying was never what solved this specific check - see above),
+ * this fallback is what keeps sberazs working at all for as long as the
+ * configured pool is exclusively that proxy type, without having to rip out
+ * proxy support entirely on the chance a compatible (HTTP/HTTPS, or
+ * unauthenticated SOCKS5) proxy gets added later.
  */
 async function fetchStations(bbox) {
-  const params = bboxParams(bbox);
   const requestUrl = buildRequestUrl(bbox);
   const activeProxyCount = await Proxy.countDocuments({ active: true });
 
   if (activeProxyCount === 0) {
-    const data = await requestOnce(null, params);
+    const data = await requestOnce(null, bbox);
     return { data, requestUrl };
   }
 
@@ -96,8 +83,7 @@ async function fetchStations(bbox) {
     triedIds.push(proxy._id);
 
     try {
-      const agent = proxyService.buildAgent(proxy);
-      const data = await requestOnce(agent, params);
+      const data = await requestOnce(proxy, bbox);
       await proxyService.recordSuccess(proxy._id, 'sberazs');
       return { data, requestUrl };
     } catch (err) {
@@ -107,7 +93,12 @@ async function fetchStations(bbox) {
     }
   }
 
-  throw lastErr || new Error('No active proxies were available to complete the request');
+  try {
+    const data = await requestOnce(null, bbox);
+    return { data, requestUrl };
+  } catch (directErr) {
+    throw lastErr || directErr;
+  }
 }
 
 module.exports = { fetchStations, buildRequestUrl };

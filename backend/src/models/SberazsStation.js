@@ -25,6 +25,20 @@ const sberazsStationSchema = new Schema(
     // available/stale/unknown) - see the parser's own doc comment.
     status: { type: String, default: 'no_data' },
     fuelTypes: [{ type: String }],
+    // Genuine per-fuel-type readings, when this station's `fuels[]` entries
+    // carry their own `availabilityStatus` (not every station does yet -
+    // see sberazsParser.js's parseFuelStatuses). Kept separate from the
+    // station-level status/fuelTypes above rather than replacing them: a
+    // station without per-fuel data still falls back to the old
+    // status-projected-onto-fuelTypes behavior (see
+    // mergeStatusService.mergeStationFuelStatuses).
+    fuelStatuses: [
+      {
+        _id: false,
+        fuelType: { type: String },
+        status: { type: String },
+      },
+    ],
     // sberazs's own crowd-vote layer (positiveVotes/negativeVotes/confidence,
     // see crowdState in the raw payload) - currently unpopulated across the
     // whole dataset, so not folded into `status` yet; kept in lastRaw only,

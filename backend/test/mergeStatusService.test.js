@@ -5,7 +5,13 @@
 // trust weight, rather than trusting the rewrite "by inspection".
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { combineTwo, mergeFuelStatuses, mergeOverallStatus, resolveVotes } = require('../src/services/mergeStatusService');
+const {
+  combineTwo,
+  mergeFuelStatuses,
+  mergeOverallStatus,
+  mergeStationFuelStatuses,
+  resolveVotes,
+} = require('../src/services/mergeStatusService');
 
 test('combineTwo: no_data/undefined defers entirely to the other side', () => {
   assert.equal(combineTwo('no_data', 'available'), 'available');
@@ -143,4 +149,65 @@ test('mergeFuelStatuses: a fuel type gdebenz mentions that tbank never reported 
   const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
   assert.equal(byType['98'], 'available');
   assert.equal(byType['92'], 'not_available');
+});
+
+// sberazs's own per-fuel-type readings (see sberazsParser.js's
+// parseFuelStatuses / sourceRegistry.js's fuelStatusWeight) - a genuinely
+// better signal than the old blanket station-status projection, so it takes
+// priority per fuel type when present instead of being projected.
+test('mergeStationFuelStatuses: a fuelStatuses entry is used directly, not projected', () => {
+  const merged = mergeStationFuelStatuses(
+    [{ fuelType: '92', status: 'no_data' }],
+    [
+      {
+        status: 'available', // station-level - would otherwise project onto every listed type
+        fuelTypes: ['92', '95'],
+        weight: 0, // sberazs's blanket weight - see sourceRegistry.js
+        fuelStatuses: [{ fuelType: '92', status: 'not_available' }], // contradicts the blanket status
+        fuelStatusWeight: 1,
+      },
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  // '92' has its own per-fuel reading (not_available, at weight 1) - wins
+  // outright over tbank's no_data, ignoring the station-level "available"
+  // entirely for this type.
+  assert.equal(byType['92'], 'not_available');
+  // '95' has no per-fuel entry - falls back to projecting the station-level
+  // status at the blanket weight (0), so it still can't assert anything on
+  // its own.
+  assert.equal(byType['95'], 'no_data');
+});
+
+test('mergeStationFuelStatuses: an explicit per-fuel "unknown" (no_data) suppresses projection instead of inheriting the station-level status', () => {
+  const merged = mergeStationFuelStatuses(
+    [],
+    [
+      {
+        status: 'available',
+        fuelTypes: ['92', '95'],
+        weight: 0,
+        fuelStatuses: [{ fuelType: '95', status: 'no_data' }],
+        fuelStatusWeight: 1,
+      },
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  // '95' explicitly has no per-fuel opinion (mapped from sberazs's own
+  // "unknown") - stays no_data, doesn't fall back to the station-level
+  // "available" the way an un-upgraded station's blank fuels[] entry would.
+  assert.equal(byType['95'], 'no_data');
+  // '92' has no fuelStatuses entry at all for this source - old projection
+  // path still applies, but at the blanket (0) weight, so it can't confirm
+  // anything on its own either.
+  assert.equal(byType['92'], 'no_data');
+});
+
+test('mergeStationFuelStatuses: gdebenz-shaped readings (no fuelStatuses at all) are unaffected by the new per-type path', () => {
+  const merged = mergeStationFuelStatuses(
+    [{ fuelType: '92', status: 'available' }],
+    [{ status: 'not_available', fuelTypes: [], weight: 1 }]
+  );
+  // Same truth table as the pre-existing "not_available applies uniformly" test.
+  assert.deepEqual(merged, [{ fuelType: '92', status: 'maybe_available' }]);
 });

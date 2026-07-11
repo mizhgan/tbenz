@@ -83,24 +83,38 @@ function projectStationStatusOntoFuelType(status, fuelTypes, fuelType) {
 
 /**
  * Merges tbank's per-fuel-type statuses with any number of matched
- * secondary sources' station-level readings into one merged per-fuel-type
- * list - the N-source generalization of mergeFuelStatuses below.
- * `secondaryReadings` is `[{status, fuelTypes, weight}]`, one entry per
- * currently-linked secondary source (see Station.sourceLinks), not just the
- * one that happened to poll most recently.
+ * secondary sources' readings into one merged per-fuel-type list - the
+ * N-source generalization of mergeFuelStatuses below. `secondaryReadings` is
+ * `[{status, fuelTypes, weight, fuelStatuses?, fuelStatusWeight?}]`, one
+ * entry per currently-linked secondary source (see Station.sourceLinks),
+ * not just the one that happened to poll most recently.
+ *
+ * `fuelStatuses` (optional, e.g. sberazs once it has per-fuel data - see
+ * sberazsParser.js) is a strictly better signal than the station-level
+ * projection below: when present for a given fuel type, it's used directly
+ * (at `fuelStatusWeight`, falling back to the reading's own `weight` if
+ * unset) instead of projectStationStatusOntoFuelType. A source with no
+ * fuelStatuses at all (gdebenz, or an un-upgraded sberazs station) is
+ * untouched by this - same projection behavior as before.
  */
 function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
   const byType = new Map((tbankFuelStatuses || []).map((f) => [f.fuelType, f.status]));
   const allTypes = new Set(byType.keys());
   for (const r of secondaryReadings) {
     for (const fuelType of r.fuelTypes || []) allTypes.add(fuelType);
+    for (const f of r.fuelStatuses || []) allTypes.add(f.fuelType);
   }
 
   const merged = [];
   for (const fuelType of allTypes) {
     const votes = [{ status: byType.get(fuelType), weight: 1 }];
     for (const r of secondaryReadings) {
-      votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
+      const perFuelEntry = (r.fuelStatuses || []).find((f) => f.fuelType === fuelType);
+      if (perFuelEntry) {
+        votes.push({ status: perFuelEntry.status, weight: r.fuelStatusWeight ?? r.weight });
+      } else {
+        votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
+      }
     }
     merged.push({ fuelType, status: resolveVotes(votes).status });
   }

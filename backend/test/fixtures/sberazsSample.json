@@ -1,0 +1,58 @@
+{
+    "apiVersion": 1,
+    "dataVersion": "data:c7fb9dd63f3ef4e817271ed8af9b19b5505379ad98f2132fc5f5cb73e449a05e",
+    "snapshotVersion": "05e7eea5569a8b7ef9f82095e7d81b868cf760ed76102bcb77bf4687c88cb7c4",
+    "version": "data:c7fb9dd63f3ef4e817271ed8af9b19b5505379ad98f2132fc5f5cb73e449a05e",
+    "stationCount": 3,
+    "hiddenStationCount": 0,
+    "lastSuccessfulPullAt": "2026-07-11T15:16:01.437Z",
+    "lastErrorPresent": false,
+    "stations": [
+        {
+            "id": "8163302605630595",
+            "branchId": "8163302605630595",
+            "name": "Лукойл",
+            "address": "Кировская область, Киров, улица Щорса, 111",
+            "postcode": "610035",
+            "location": { "lat": 58.577936, "lon": 49.583864, "address": "Кировская область, Киров, улица Щорса, 111" },
+            "availabilityStatus": "available",
+            "lastPaymentAt": "2026-07-11T18:07:59+03:00",
+            "updatedAt": "2026-07-11T15:14:01.437Z",
+            "operationsCount": 103,
+            "fuels": [
+                { "type": "ai92", "available": true, "availabilityStatus": "available", "limitLiters": 30 },
+                { "type": "ai95", "available": true, "availabilityStatus": "available", "limitLiters": 30 },
+                { "type": "ai100", "availabilityStatus": "unknown" },
+                { "type": "diesel", "available": false, "availabilityStatus": "stale" }
+            ],
+            "externalIds": { "twoGisBranchId": "8163302605630595" },
+            "crowdState": { "stationId": "8163302605630595", "status": "insufficient_data", "confidence": 0, "positiveVotes": 0, "negativeVotes": 0, "effectivePositiveWeight": 0, "effectiveNegativeWeight": 0 }
+        },
+        {
+            "id": "70000001007147556",
+            "branchId": "70000001007147556",
+            "name": "У таксопарка",
+            "address": "Кировская область, Киров, улица Северное Кольцо, 16Б",
+            "postcode": "610006",
+            "location": { "lat": 58.623656, "lon": 49.660426, "address": "Кировская область, Киров, улица Северное Кольцо, 16Б" },
+            "availabilityStatus": "unknown",
+            "updatedAt": "2026-07-11T15:14:01.437Z",
+            "fuels": [ { "type": "ai92" }, { "type": "ai95" } ],
+            "externalIds": { "twoGisBranchId": "70000001007147556" },
+            "crowdState": { "stationId": "70000001007147556", "status": "insufficient_data", "confidence": 0, "positiveVotes": 0, "negativeVotes": 0, "effectivePositiveWeight": 0, "effectiveNegativeWeight": 0 }
+        },
+        {
+            "id": "70000001112785532",
+            "branchId": "70000001112785532",
+            "name": "Татнефть, АЗС",
+            "address": "Кировская область, Киров, Солнечная улица, 9",
+            "postcode": "610033",
+            "location": { "lat": 58.59779, "lon": 49.62365, "address": "Кировская область, Киров, Солнечная улица, 9" },
+            "availabilityStatus": "unknown",
+            "updatedAt": "2026-07-11T15:14:01.437Z",
+            "fuels": [],
+            "externalIds": { "twoGisBranchId": "70000001112785532" },
+            "crowdState": { "stationId": "70000001112785532", "status": "insufficient_data", "confidence": 0, "positiveVotes": 0, "negativeVotes": 0, "effectivePositiveWeight": 0, "effectiveNegativeWeight": 0 }
+        }
+    ]
+}

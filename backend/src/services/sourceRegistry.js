@@ -65,7 +65,19 @@ const SOURCES = [
     // that one - it still shows up as its own tile/row in the admin UI for
     // a human to weigh, it just never moves the canonical merged status
     // metrics/reports/Telegram/bot read.
+    //
+    // This applies to the blanket station-level reading only. Once a
+    // station's own `fuels[]` entries carry a genuine per-fuel-type
+    // availabilityStatus (see sberazsParser.js's parseFuelStatuses /
+    // SberazsStation.fuelStatuses), that specific fuel type's objection
+    // above no longer holds - it's the same kind of payment-derived,
+    // fuel-specific evidence tbank itself provides, not a "some card
+    // payment happened somewhere on site" guess. fuelStatusWeight is what
+    // mergeStationFuelStatuses votes with for those entries instead of
+    // `weight` - deliberately equal to tbank/gdebenz's trust, a separate,
+    // explicit call from raising the blanket `weight` above (which stays 0).
     weight: 0,
+    fuelStatusWeight: 1.0,
     get enabled() {
       return sberazsEnabled;
     },

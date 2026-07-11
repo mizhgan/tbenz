@@ -15,21 +15,37 @@
  *       "crowdState": { "status": "insufficient_data", "confidence": 0,
  *         "positiveVotes": 0, "negativeVotes": 0 } }, ...] }
  *
- * Two structural differences from tbank's payload (stationParser.js) that
- * shape everything downstream:
- *   - Status is per-STATION like gdebenz, not per-fuel-type: `fuels` only
- *     lists which types this station carries at all, not their individual
- *     availability - mergeStatusService.js projects the one station-level
- *     status onto every listed fuel type the same way it already does for
- *     gdebenz (see mergeStationFuelStatuses).
- *   - Across the entire dataset seen so far, `availabilityStatus` only ever
- *     takes three values - available/stale/unknown - with NO equivalent of
- *     a confirmed "not available" reading. This source can therefore only
- *     ever confirm availability or abstain in the merge; it can never
- *     independently contradict tbank the way gdebenz's "no" can. `stale`
- *     (seen recently but no fresh payment confirming it since) maps to
- *     maybe_available - weaker evidence than a fresh confirmation, but
- *     still more than "no data at all".
+ * Structural differences from tbank's payload (stationParser.js) that shape
+ * everything downstream:
+ *   - Status was originally only per-STATION, like gdebenz: `fuels` just
+ *     listed which types a station carries at all, with no per-type
+ *     availability - mergeStatusService.js projects that one station-level
+ *     status onto every listed fuel type, same as it does for gdebenz (see
+ *     mergeStationFuelStatuses). Some stations' `fuels` entries still look
+ *     like this today (bare `{"type": "ai92"}`, no status of their own).
+ *   - Other stations now carry genuine per-fuel-type data instead: each
+ *     `fuels[]` entry can have its own `availabilityStatus` (and `available`
+ *     boolean/`limitLiters`), e.g. `{"type": "ai92", "available": true,
+ *     "availabilityStatus": "available", "limitLiters": 30}` next to
+ *     `{"type": "diesel", "available": false, "availabilityStatus":
+ *     "stale"}` on the very same station - real evidence this source can
+ *     confirm or abstain on per fuel type, not just as one blanket claim
+ *     for the whole station. `parseFuels` below keeps both: `fuelTypes`
+ *     (every listed type, for the old station-level projection fallback)
+ *     and `fuelStatuses` (only entries that actually carry their own
+ *     `availabilityStatus` key - even "unknown" counts, since that's sberazs
+ *     explicitly saying it has no per-fuel opinion on that type, which
+ *     should NOT fall back to the station-level status being projected onto
+ *     it). See mergeStatusService.mergeStationFuelStatuses for how a
+ *     fuelStatuses entry takes priority over projection when present.
+ *   - Across the entire dataset seen so far, `availabilityStatus` (station-
+ *     level or per-fuel) only ever takes three values - available/stale/
+ *     unknown - with NO equivalent of a confirmed "not available" reading.
+ *     This source can therefore only ever confirm availability or abstain
+ *     in the merge; it can never independently contradict tbank the way
+ *     gdebenz's "no" can. `stale` (seen recently but no fresh payment
+ *     confirming it since) maps to maybe_available - weaker evidence than a
+ *     fresh confirmation, but still more than "no data at all".
  *   - `crowdState` (positiveVotes/negativeVotes/confidence) is a second,
  *     independent crowd-vote signal bundled in the same payload - currently
  *     `insufficient_data`/all-zero for every station seen, so not mapped
@@ -79,6 +95,21 @@ function parseFuels(fuels) {
   return fuels.map((f) => mapFuelType(f?.type)).filter(Boolean);
 }
 
+// Only entries that actually carry their own `availabilityStatus` key -
+// bare `{"type": "ai92"}` (no key at all) has nothing to report and is
+// left out, not defaulted to "unknown", so the merge can tell "sberazs said
+// it doesn't know about this fuel type" (should suppress the old
+// station-level projection) apart from "sberazs hasn't upgraded this
+// station's data yet" (should still fall back to it) - see this file's own
+// doc comment and mergeStatusService.mergeStationFuelStatuses.
+function parseFuelStatuses(fuels) {
+  if (!Array.isArray(fuels)) return [];
+  return fuels
+    .filter((f) => f && typeof f === 'object' && f.availabilityStatus !== undefined)
+    .map((f) => ({ fuelType: mapFuelType(f.type), status: mapStatus(f.availabilityStatus) }))
+    .filter((f) => f.fuelType);
+}
+
 function extractStationsArray(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== 'object') return [];
@@ -103,6 +134,7 @@ function parseStation(raw) {
     lon,
     status: mapStatus(raw.availabilityStatus),
     fuelTypes: parseFuels(raw.fuels),
+    fuelStatuses: parseFuelStatuses(raw.fuels),
     conflict: null,
     raw,
   };

@@ -21,6 +21,22 @@ function buildAgent(proxy) {
   return new HttpProxyAgent(url);
 }
 
+// Playwright's context `proxy` option wants a plain {server, username,
+// password} shape, not a Node http.Agent (buildAgent above is specific to
+// axios/Node's own http(s) stack and can't be reused here) - same
+// credentials, different transport (see browserFetchService.js, used by
+// sberazsClient.js). Credentials go in their own fields rather than the
+// server URL - Playwright reads them separately and Chromium's proxy auth
+// prompt only responds to that form.
+function buildPlaywrightProxyOption(proxy) {
+  const scheme = proxy.type === 'socks5' ? 'socks5' : proxy.type;
+  return {
+    server: `${scheme}://${proxy.host}:${proxy.port}`,
+    username: proxy.username || undefined,
+    password: proxy.password || undefined,
+  };
+}
+
 async function pickRandomActiveProxy(excludeIds = []) {
   const excluded = excludeIds.map(String);
   const candidates = await Proxy.find({ active: true, _id: { $nin: excluded } });
@@ -140,6 +156,7 @@ async function testProxy(proxy) {
 
 module.exports = {
   buildAgent,
+  buildPlaywrightProxyOption,
   pickRandomActiveProxy,
   recordSuccess,
   recordFailure,

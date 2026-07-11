@@ -40,6 +40,12 @@ async function storeSecondaryStation(sourceConfig, parsed, region, polledAt) {
         lastSeenAt: polledAt,
         status: parsed.status,
         fuelTypes: parsed.fuelTypes,
+        // Only sberazs's parser produces this today (see its doc comment) -
+        // gdebenz's parsed shape simply has no fuelStatuses key, so this is
+        // undefined for it, and Mongoose's default strict schema mode drops
+        // an unknown path silently on save rather than erroring (GdebenzStation
+        // has no fuelStatuses field in its own schema).
+        fuelStatuses: parsed.fuelStatuses,
         conflict: parsed.conflict,
         lastRaw: parsed.raw,
       },
@@ -89,7 +95,13 @@ async function computeMergedStatusForStation(station) {
     if (!sourceConfig) continue; // an unregistered/removed source's stale link - ignore, don't crash the merge
     const doc = await sourceConfig.model.findById(link.refId).lean();
     if (!doc) continue;
-    secondaryReadings.push({ status: readingStatus(doc), fuelTypes: doc.fuelTypes, weight: sourceConfig.weight });
+    secondaryReadings.push({
+      status: readingStatus(doc),
+      fuelTypes: doc.fuelTypes,
+      weight: sourceConfig.weight,
+      fuelStatuses: doc.fuelStatuses,
+      fuelStatusWeight: sourceConfig.fuelStatusWeight,
+    });
   }
 
   return {
