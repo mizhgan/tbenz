@@ -295,6 +295,8 @@ onMounted(loadSourcesAndAll);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 16px;
 }
 
@@ -362,6 +364,7 @@ onMounted(loadSourcesAndAll);
 .filters {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
@@ -370,7 +373,12 @@ onMounted(loadSourcesAndAll);
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 13px;
-  min-width: 220px;
+  /* flex-basis instead of a hard min-width floor: still opens at ~220px
+     when there's room, but can shrink (or wrap fully onto its own row,
+     see .filters' flex-wrap above) on a narrow phone instead of forcing
+     the whole page into a horizontal scroll. */
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .checkbox-label {
