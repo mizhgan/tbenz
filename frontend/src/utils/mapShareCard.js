@@ -8,6 +8,15 @@ const FOOTER_HEIGHT = 80;
 // drawn height keeps a very tall/narrow map container (an unusual window
 // shape) from producing an oddly elongated card.
 const MAX_MAP_HEIGHT = 560;
+// The map image gets scaled down from whatever size it was captured at
+// on-screen to fit this exact width (see layoutCard's ctx.drawImage below)
+// - exported so the caller (MapView.vue's generateShareCard) can draw its
+// station markers at a radius pre-inflated to compensate, instead of the
+// same fixed on-screen radius shrinking along with everything else on a
+// wide desktop capture (markers in a dense cluster blurred into one
+// indistinct blob at the card's fixed output size - see mapShareCard's
+// git history for the specific report this fixed).
+export const MAP_CONTENT_WIDTH = WIDTH - PADDING * 2;
 
 const STATUS_TILES = [
   { key: 'available', label: 'Доступно', color: '#16a34a' },

@@ -8,7 +8,7 @@ import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
 import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
 import { formatPct, availabilityColor } from '../utils/colorScale';
-import { renderMapShareCard } from '../utils/mapShareCard';
+import { renderMapShareCard, MAP_CONTENT_WIDTH } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
 import {
   canShareFile,
@@ -660,16 +660,27 @@ async function generateShareCard() {
     const ctx = frameCanvas.getContext('2d');
     ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
 
+    // The share card scales this whole canvas down to a fixed content width
+    // (see mapShareCard.js) - on a wide desktop window that shrinks a
+    // fixed on-screen dot radius into an indistinct smear wherever
+    // stations cluster (e.g. a city center). Inflating the radius here by
+    // the inverse of that eventual scale keeps the *final* dot size
+    // consistent (~8px radius) regardless of how wide the map happened to
+    // be captured at.
+    const shareCardScale = MAP_CONTENT_WIDTH / size.x;
+    const dotRadius = 8 / shareCardScale;
+    const dotStroke = 2 / shareCardScale;
+
     const visibleStations = stations.value.filter(
       (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
     );
     for (const s of visibleStations) {
       const pt = map.latLngToContainerPoint([s.lat, s.lon]);
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+      ctx.arc(pt.x, pt.y, dotRadius, 0, Math.PI * 2);
       ctx.fillStyle = statusMeta(effectiveStatus(s)).color;
       ctx.fill();
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = dotStroke;
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();
     }
