@@ -9,18 +9,15 @@ const fuelColors = useFuelColorsStore();
 const loading = ref(true);
 const errorMessage = ref('');
 const discoveredTypes = ref([]);
-const extraTypes = ref([]);
-const newTypeInput = ref('');
-const newTypeError = ref('');
 
-// Union of fuel types actually seen in each region's current snapshot,
+// Union of fuel types actually seen in each region's current snapshot and
 // anything the user already has a saved color for (so a customization
 // doesn't disappear from view just because that fuel type isn't in the
-// latest poll), and anything manually added this session.
+// latest poll) - no way to manually add an arbitrary type on top of that:
+// these colors only ever apply to fuel types that actually show up
+// somewhere, so adding one with nothing to color would do nothing.
 const allTypes = computed(() =>
-  sortFuelTypes(
-    Array.from(new Set([...discoveredTypes.value, ...fuelColors.customizedTypes, ...extraTypes.value]))
-  )
+  sortFuelTypes(Array.from(new Set([...discoveredTypes.value, ...fuelColors.customizedTypes])))
 );
 
 async function loadDiscoveredTypes() {
@@ -61,21 +58,6 @@ function handleResetAll() {
   fuelColors.resetAll();
 }
 
-function handleAddType() {
-  newTypeError.value = '';
-  const type = newTypeInput.value.trim();
-  if (!type) {
-    newTypeError.value = 'Укажите вид топлива';
-    return;
-  }
-  if (allTypes.value.includes(type)) {
-    newTypeError.value = 'Этот вид топлива уже в списке';
-    return;
-  }
-  extraTypes.value.push(type);
-  newTypeInput.value = '';
-}
-
 onMounted(loadDiscoveredTypes);
 </script>
 
@@ -98,8 +80,7 @@ onMounted(loadDiscoveredTypes);
       <p v-if="loading">Загрузка видов топлива...</p>
       <template v-else>
         <p v-if="!allTypes.length" class="hint">
-          Пока не удалось найти ни одного вида топлива в данных районов. Можно
-          добавить вид топлива вручную ниже.
+          Пока не удалось найти ни одного вида топлива в данных районов.
         </p>
         <table v-else>
           <thead>
@@ -135,17 +116,6 @@ onMounted(loadDiscoveredTypes);
             </tr>
           </tbody>
         </table>
-
-        <div class="add-type-row">
-          <input
-            v-model="newTypeInput"
-            type="text"
-            placeholder="Например, ДТ или 100"
-            @keyup.enter="handleAddType"
-          />
-          <button class="btn secondary" @click="handleAddType">Добавить вид топлива</button>
-        </div>
-        <p v-if="newTypeError" class="error-text">{{ newTypeError }}</p>
 
         <div class="reset-all-row">
           <button class="btn danger" :disabled="!fuelColors.customizedTypes.length" @click="handleResetAll">
@@ -201,20 +171,6 @@ onMounted(loadDiscoveredTypes);
 .actions {
   display: flex;
   gap: 6px;
-}
-
-.add-type-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  max-width: 420px;
-}
-
-.add-type-row input {
-  flex: 1;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid #ccd2d9;
 }
 
 .reset-all-row {

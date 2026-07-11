@@ -67,6 +67,10 @@ const routes = [
     path: '/settings',
     name: 'settings',
     component: () => import('../views/SettingsView.vue'),
+    // Everything on this page is local-only (fuel chart colors, stored in
+    // this browser's localStorage - see store/fuelColors.js) - nothing here
+    // reads or writes anything that needs an account.
+    meta: { public: true },
   },
   {
     path: '/:pathMatch(.*)*',
