@@ -82,40 +82,42 @@ onMounted(loadDiscoveredTypes);
         <p v-if="!allTypes.length" class="hint">
           Пока не удалось найти ни одного вида топлива в данных районов.
         </p>
-        <table v-else>
-          <thead>
-            <tr>
-              <th>Вид топлива</th>
-              <th>Цвет</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="ft in allTypes" :key="ft">
-              <td>{{ fuelTypeLabel(ft) }}</td>
-              <td>
-                <div class="color-cell">
-                  <input
-                    type="color"
-                    :value="fuelColors.colorFor(ft)"
-                    @input="handleColorInput(ft, $event)"
-                  />
-                  <span class="mono">{{ fuelColors.colorFor(ft) }}</span>
-                  <span v-if="!fuelColors.isCustom(ft)" class="badge never">по умолчанию</span>
-                </div>
-              </td>
-              <td class="actions">
-                <button
-                  class="btn secondary"
-                  :disabled="!fuelColors.isCustom(ft)"
-                  @click="handleReset(ft)"
-                >
-                  Сбросить
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Вид топлива</th>
+                <th>Цвет</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="ft in allTypes" :key="ft">
+                <td>{{ fuelTypeLabel(ft) }}</td>
+                <td>
+                  <div class="color-cell">
+                    <input
+                      type="color"
+                      :value="fuelColors.colorFor(ft)"
+                      @input="handleColorInput(ft, $event)"
+                    />
+                    <span class="mono">{{ fuelColors.colorFor(ft) }}</span>
+                    <span v-if="!fuelColors.isCustom(ft)" class="badge never">по умолчанию</span>
+                  </div>
+                </td>
+                <td class="actions">
+                  <button
+                    class="btn secondary"
+                    :disabled="!fuelColors.isCustom(ft)"
+                    @click="handleReset(ft)"
+                  >
+                    Сбросить
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <div class="reset-all-row">
           <button class="btn danger" :disabled="!fuelColors.customizedTypes.length" @click="handleResetAll">
@@ -145,6 +147,15 @@ onMounted(loadDiscoveredTypes);
   font-size: 13px;
   max-width: 720px;
   margin-bottom: 16px;
+}
+
+/* The color swatch + hex code + badge + "Сбросить" button don't shrink
+   below their natural width - on a narrow phone the table ends up wider
+   than the screen. Scrolling it inside this wrapper keeps that overflow
+   contained instead of pushing the whole page (including the topbar)
+   sideways. */
+.table-scroll {
+  overflow-x: auto;
 }
 
 .mono {
