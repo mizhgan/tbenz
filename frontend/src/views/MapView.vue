@@ -7,7 +7,7 @@ import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
 import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
-import { formatPct } from '../utils/colorScale';
+import { formatPct, availabilityColor } from '../utils/colorScale';
 import { renderMapShareCard } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
 import {
@@ -146,6 +146,20 @@ function setAllBrands(visible) {
     brandFilters[brand] = visible;
   }
   renderMarkers();
+}
+
+// The status checkboxes already sit next to the toggle (see .quick-status-
+// filters) and stay visible with the drawer closed - but fuel-type and
+// brand filters only live inside the drawer, so closing it after picking
+// either used to leave no sign anything was filtered at all. This drives a
+// small badge next to the toggle for exactly those two (see the template).
+const hasActiveExtraFilters = computed(
+  () => selectedFuelTypes.value.length > 0 || Object.values(brandFilters).some((visible) => visible === false)
+);
+
+function resetExtraFilters() {
+  selectedFuelTypes.value = [];
+  setAllBrands(true);
 }
 
 // The dropdown panel is teleported to <body> and positioned by fixed
@@ -814,24 +828,42 @@ onBeforeUnmount(() => {
             <span class="dot" :style="{ background: statusMeta(key).color }"></span>
           </label>
         </div>
+
+        <!-- Fuel-type/brand filters (picked inside the drawer) have no
+             other always-visible trace once it's closed - this is that
+             trace, and a one-click way out of it. -->
+        <button
+          v-if="hasActiveExtraFilters"
+          type="button"
+          class="extra-filter-badge"
+          title="Выбраны виды топлива и/или сети - нажмите, чтобы сбросить"
+          @click="resetExtraFilters"
+        >
+          Фильтр применён ✕
+        </button>
       </div>
 
       <!-- Compact glanceable summary that stays visible even with the
            drawer closed - the one piece of the old control bar worth never
-           fully hiding, see currentSummary's own doc comment. -->
+           fully hiding, see currentSummary's own doc comment. Color scales
+           with the actual percentage (red -> yellow -> green, see
+           availabilityColor) instead of always being the "available"
+           status's own green - a badge that's always green regardless of
+           whether it's showing 13% or 90% isn't actually telling you
+           anything at a glance. -->
       <Transition name="fade">
         <div
           v-if="currentSummary.total"
           class="status-badge"
-          :style="{ borderTopColor: statusMeta('available').color }"
+          :style="{ borderTopColor: availabilityColor(currentSummary.availablePct) }"
         >
           <span class="status-badge-pct-wrap">
             <span v-if="loadingStations" class="status-badge-spinner"></span>
-            <strong :style="{ color: statusMeta('available').color }">
+            <strong :style="{ color: availabilityColor(currentSummary.availablePct) }">
               {{ formatPct(currentSummary.availablePct) }}
             </strong>
           </span>
-          <span class="hint small">{{ currentSummary.total }} ст.</span>
+          <span class="hint small">{{ filteredStations.length }} из {{ currentSummary.total }}</span>
         </div>
       </Transition>
 
@@ -1048,10 +1080,22 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 12px;
   left: 12px;
+  /* Wide enough to wrap its children onto a second row instead of
+     overflowing once the extra-filter badge appears, without claiming the
+     whole strip for itself - pointer-events: none plus opting each actual
+     child back in below is what stops this now-wider (but still visually
+     empty on the right) box from swallowing clicks meant for the map. */
+  right: 12px;
   z-index: 460;
   display: flex;
   align-items: stretch;
+  flex-wrap: wrap;
   gap: 8px;
+  pointer-events: none;
+}
+
+.toggle-bar > * {
+  pointer-events: auto;
 }
 
 .drawer-toggle {
@@ -1112,6 +1156,29 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+/* Only sign, with the drawer closed, that a fuel-type/brand filter is
+   narrowing what's shown - see hasActiveExtraFilters. Doubles as the
+   reset control, so it's a <button>, not a static label. */
+.extra-filter-badge {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.extra-filter-badge:hover {
+  background: #ffedd5;
+}
+
 /* Narrow phones: toggle-bar + status-badge (both absolutely positioned,
    independent of each other) can together exceed the viewport width and
    overlap - tighten spacing rather than hide anything, so all the same
@@ -1128,6 +1195,11 @@ onBeforeUnmount(() => {
   .quick-status-filters {
     gap: 6px;
     padding: 0 8px;
+  }
+
+  .extra-filter-badge {
+    padding: 0 10px;
+    font-size: 12px;
   }
 }
 
