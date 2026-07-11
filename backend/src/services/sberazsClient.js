@@ -41,44 +41,50 @@ async function requestOnce(proxy, bbox) {
  * separate lat1/lon1/lat2/lon2 params.
  *
  * Routes through the same admin-configured proxy pool as tbankClient.js
- * when any proxy is active, via a headless browser instead of a plain HTTP
- * client (see requestOnce above and browserFetchService.js). Records
- * outcomes under its own 'sberazs' sourceKey (see
- * proxyService.recordSuccess/recordFailure) rather than tbank's - this
- * source's anti-bot block has nothing to do with which IP it's coming from
- * (confirmed live: identical through every proxy and direct), so letting
- * those failures count against tbank's own consecutiveFailures would have
- * risked auto-disabling a proxy that's perfectly healthy for tbank, for a
- * block rotating IPs can't route around anyway.
+ * when a *browser-compatible* proxy is active, via a headless browser
+ * instead of a plain HTTP client (see requestOnce above and
+ * browserFetchService.js). Records outcomes under its own 'sberazs'
+ * sourceKey (see proxyService.recordSuccess/recordFailure) rather than
+ * tbank's - this source's anti-bot block has nothing to do with which IP
+ * it's coming from (confirmed live: identical through every proxy and
+ * direct), so letting those failures count against tbank's own
+ * consecutiveFailures would have risked auto-disabling a proxy that's
+ * perfectly healthy for tbank, for a block rotating IPs can't route around
+ * anyway.
  *
- * Falls back to a direct (no-proxy) attempt if every proxy attempt fails,
- * not just when none are configured - confirmed live that this app's
- * SOCKS5-with-credentials proxies (its only proxy type in practice) simply
- * can't be used at all through a headless browser (Chromium has no support
- * for authenticating to a SOCKS5 proxy, a hard limitation, not a config
- * problem or a transient failure worth retrying against). Since a direct
- * browser fetch is what actually gets past sberazs's block in the first
- * place (proxying was never what solved this specific check - see above),
- * this fallback is what keeps sberazs working at all for as long as the
- * configured pool is exclusively that proxy type, without having to rip out
- * proxy support entirely on the chance a compatible (HTTP/HTTPS, or
- * unauthenticated SOCKS5) proxy gets added later.
+ * Only ever picks from proxyService.isBrowserCompatible proxies (http/
+ * https, or SOCKS5 *without* credentials) - Chromium can't authenticate to
+ * a SOCKS5 proxy at all, confirmed live that this app's entire pool is
+ * SOCKS5-with-credentials in practice, which used to mean every single
+ * attempt failed the exact same way before falling through to direct
+ * anyway. Skipping incompatible proxies up front instead of discovering
+ * that per-attempt means a pool that's 100% incompatible goes straight to
+ * a direct fetch with no wasted attempts/warnings at all, while a pool
+ * that's *partially* compatible still gets real proxy rotation for the
+ * types that work.
+ *
+ * Falls back to a direct (no-proxy) attempt if every compatible-proxy
+ * attempt fails too (or none are compatible/configured) - a direct browser
+ * fetch is what actually gets past sberazs's block in the first place
+ * (proxying was never what solved this specific check), so this fallback
+ * is what keeps sberazs working regardless of what's in the pool.
  */
 async function fetchStations(bbox) {
   const requestUrl = buildRequestUrl(bbox);
-  const activeProxyCount = await Proxy.countDocuments({ active: true });
+  const activeProxies = await Proxy.find({ active: true });
+  const compatibleCount = activeProxies.filter(proxyService.isBrowserCompatible).length;
 
-  if (activeProxyCount === 0) {
+  if (compatibleCount === 0) {
     const data = await requestOnce(null, bbox);
     return { data, requestUrl };
   }
 
   const triedIds = [];
   let lastErr;
-  const attempts = Math.min(activeProxyCount, MAX_PROXY_ATTEMPTS);
+  const attempts = Math.min(compatibleCount, MAX_PROXY_ATTEMPTS);
 
   for (let i = 0; i < attempts; i += 1) {
-    const proxy = await proxyService.pickRandomActiveProxy(triedIds);
+    const proxy = await proxyService.pickRandomActiveProxy(triedIds, { browserCompatible: true });
     if (!proxy) break;
     triedIds.push(proxy._id);
 

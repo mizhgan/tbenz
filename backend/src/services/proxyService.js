@@ -37,9 +37,20 @@ function buildPlaywrightProxyOption(proxy) {
   };
 }
 
-async function pickRandomActiveProxy(excludeIds = []) {
+// Chromium (via Playwright) can't authenticate to a SOCKS5 proxy at all -
+// a hard limitation of Chromium itself, confirmed live (see
+// sberazsClient.js/browserFetchService.js), not a per-proxy problem worth
+// retrying against. A source that fetches through a headless browser
+// should only ever be offered a proxy type it can actually use - http/
+// https (with or without credentials) or an unauthenticated SOCKS5.
+function isBrowserCompatible(proxy) {
+  return proxy.type !== 'socks5' || !proxy.username;
+}
+
+async function pickRandomActiveProxy(excludeIds = [], { browserCompatible = false } = {}) {
   const excluded = excludeIds.map(String);
-  const candidates = await Proxy.find({ active: true, _id: { $nin: excluded } });
+  let candidates = await Proxy.find({ active: true, _id: { $nin: excluded } });
+  if (browserCompatible) candidates = candidates.filter(isBrowserCompatible);
   if (!candidates.length) return null;
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
@@ -157,6 +168,7 @@ async function testProxy(proxy) {
 module.exports = {
   buildAgent,
   buildPlaywrightProxyOption,
+  isBrowserCompatible,
   pickRandomActiveProxy,
   recordSuccess,
   recordFailure,
