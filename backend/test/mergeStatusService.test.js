@@ -211,3 +211,66 @@ test('mergeStationFuelStatuses: gdebenz-shaped readings (no fuelStatuses at all)
   // Same truth table as the pre-existing "not_available applies uniformly" test.
   assert.deepEqual(merged, [{ fuelType: '92', status: 'maybe_available' }]);
 });
+
+// Real case found live: tbank's statusByFuelType always carries a fixed
+// "92"/"95" baseline for every station regardless of what it actually
+// sells - a propane-only АГЗС matched to sberazs (whose fuelTypes is a
+// genuine equipment list, isEquipmentList: true - see sourceRegistry.js)
+// showed tbank claiming maybe_available on 92/95 with sberazs's own
+// fuelTypes only ever listing "propane". See mergeStationFuelStatuses' doc
+// comment for why this drops tbank's vote instead of flipping it to
+// not_available.
+test('mergeStationFuelStatuses: tbank\'s vote is dropped for a type an equipment-list source explicitly excludes', () => {
+  const merged = mergeStationFuelStatuses(
+    [
+      { fuelType: '92', status: 'maybe_available' },
+      { fuelType: '95', status: 'maybe_available' },
+    ],
+    [{ status: 'available', fuelTypes: ['propane'], weight: 0, isEquipmentList: true }]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  // tbank's only vote for 92/95 is dropped (not in sberazs's equipment
+  // list) and nothing else has an opinion -> no_data, not maybe_available.
+  assert.equal(byType['92'], 'no_data');
+  assert.equal(byType['95'], 'no_data');
+  // propane itself is untouched - it's in the equipment list, and
+  // sberazs's own weight-0 blanket vote still doesn't assert anything
+  // (separate, pre-existing rule - see resolveVotes' totalWeight<=0 guard).
+  assert.equal(byType['propane'], 'no_data');
+});
+
+test('mergeStationFuelStatuses: a fuel type IN the equipment list keeps trusting tbank normally', () => {
+  const merged = mergeStationFuelStatuses(
+    [{ fuelType: '92', status: 'available' }],
+    [{ status: 'available', fuelTypes: ['92', 'propane'], weight: 0, isEquipmentList: true }]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['92'], 'available'); // corroborated by the equipment list - untouched
+});
+
+test('mergeStationFuelStatuses: a non-equipment-list source (gdebenz) never suppresses tbank, even with an empty/partial fuelTypes', () => {
+  const merged = mergeStationFuelStatuses(
+    [
+      { fuelType: '92', status: 'available' },
+      { fuelType: '95', status: 'available' },
+    ],
+    [{ status: 'not_available', fuelTypes: ['ДТ'], weight: 1 }] // gdebenz - fuels_now, not equipment
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  // gdebenz's own not_available still projects uniformly per the existing
+  // rule (a real vote, at weight 1) - but tbank's 92/95 votes are never
+  // *dropped* the way the equipment-list case above drops them; the
+  // maybe_available result here comes from a real disagreement (available
+  // vs not_available), not from tbank being silently excluded.
+  assert.equal(byType['92'], 'maybe_available');
+  assert.equal(byType['95'], 'maybe_available');
+});
+
+test('mergeStationFuelStatuses: no equipment-list evidence at all leaves tbank fully trusted (today\'s existing behavior)', () => {
+  const merged = mergeStationFuelStatuses(
+    [{ fuelType: '92', status: 'available' }],
+    [{ status: 'not_available', fuelTypes: [], weight: 1 }] // gdebenz, not flagged as equipment
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['92'], 'maybe_available'); // unchanged from the pre-existing test above
+});

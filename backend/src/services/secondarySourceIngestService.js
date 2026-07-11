@@ -101,6 +101,7 @@ async function computeMergedStatusForStation(station) {
       weight: sourceConfig.weight,
       fuelStatuses: doc.fuelStatuses,
       fuelStatusWeight: sourceConfig.fuelStatusWeight,
+      isEquipmentList: sourceConfig.isEquipmentList,
     });
   }
 

@@ -85,8 +85,8 @@ function projectStationStatusOntoFuelType(status, fuelTypes, fuelType) {
  * Merges tbank's per-fuel-type statuses with any number of matched
  * secondary sources' readings into one merged per-fuel-type list - the
  * N-source generalization of mergeFuelStatuses below. `secondaryReadings` is
- * `[{status, fuelTypes, weight, fuelStatuses?, fuelStatusWeight?}]`, one
- * entry per currently-linked secondary source (see Station.sourceLinks),
+ * `[{status, fuelTypes, weight, fuelStatuses?, fuelStatusWeight?, isEquipmentList?}]`,
+ * one entry per currently-linked secondary source (see Station.sourceLinks),
  * not just the one that happened to poll most recently.
  *
  * `fuelStatuses` (optional, e.g. sberazs once it has per-fuel data - see
@@ -96,6 +96,23 @@ function projectStationStatusOntoFuelType(status, fuelTypes, fuelType) {
  * unset) instead of projectStationStatusOntoFuelType. A source with no
  * fuelStatuses at all (gdebenz, or an un-upgraded sberazs station) is
  * untouched by this - same projection behavior as before.
+ *
+ * `isEquipmentList` (optional, true for sberazs - see sourceRegistry.js)
+ * marks a reading whose `fuelTypes` names the station's actual physical
+ * pumps, not (like gdebenz's `fuels_now`) just what's currently available -
+ * an empty list from a *non*-equipment source means "nothing available
+ * right now", but an equipment source explicitly leaving a type off the
+ * list means "this station doesn't have that pump at all". Confirmed live:
+ * tbank's statusByFuelType always carries a fixed baseline of "92"/"95" for
+ * every station regardless of what it actually sells (its own API sample
+ * in stationParser.js's doc comment already shows this), which occasionally
+ * leaks a stray maybe_available/available onto a propane- or diesel-only
+ * station that has no such pump at all. tbank's vote for a fuel type no
+ * equipment-list source corroborates is dropped entirely here (not flipped
+ * to not_available - the equipment lists seen aren't guaranteed
+ * exhaustive, so "no evidence" is the honest result, not "confirmed
+ * absent") whenever at least one equipment-list reading has real data to
+ * check against.
  */
 function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
   const byType = new Map((tbankFuelStatuses || []).map((f) => [f.fuelType, f.status]));
@@ -105,9 +122,16 @@ function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
     for (const f of r.fuelStatuses || []) allTypes.add(f.fuelType);
   }
 
+  const knownEquipment = new Set();
+  for (const r of secondaryReadings) {
+    if (!r.isEquipmentList) continue;
+    for (const fuelType of r.fuelTypes || []) knownEquipment.add(fuelType);
+  }
+
   const merged = [];
   for (const fuelType of allTypes) {
-    const votes = [{ status: byType.get(fuelType), weight: 1 }];
+    const tbankUncorroborated = knownEquipment.size > 0 && !knownEquipment.has(fuelType);
+    const votes = [{ status: tbankUncorroborated ? undefined : byType.get(fuelType), weight: 1 }];
     for (const r of secondaryReadings) {
       const perFuelEntry = (r.fuelStatuses || []).find((f) => f.fuelType === fuelType);
       if (perFuelEntry) {

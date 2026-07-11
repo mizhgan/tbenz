@@ -78,6 +78,17 @@ const SOURCES = [
     // explicit call from raising the blanket `weight` above (which stays 0).
     weight: 0,
     fuelStatusWeight: 1.0,
+    // `fuelTypes` here really is the station's physical pumps (see the
+    // weight comment above), unlike gdebenz's fuels_now - the one thing
+    // this source *is* reliable evidence for is "does this station even
+    // have that pump", regardless of the weight-0 station-level status.
+    // mergeStatusService.mergeStationFuelStatuses uses this to stop
+    // trusting tbank's per-fuel claim for a type sberazs's equipment list
+    // explicitly excludes (confirmed live: tbank's statusByFuelType always
+    // carries a fixed "92"/"95" baseline, which occasionally shows
+    // available/maybe_available on stations - propane/methane-only AGZS,
+    // for instance - that plainly don't have those pumps at all).
+    isEquipmentList: true,
     get enabled() {
       return sberazsEnabled;
     },
