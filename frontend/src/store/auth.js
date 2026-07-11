@@ -10,7 +10,13 @@ export const useAuthStore = defineStore('auth', {
   }),
   getters: {
     isAuthenticated: (state) => Boolean(state.token),
-    isAdmin: (state) => state.role === 'admin',
+    // Must also require a token: role is cached in localStorage across
+    // sessions, but only 'token' gets cleared when it's rejected (see
+    // http.js's interceptor) - without this, a visitor whose session
+    // expired (or was invalidated by a JWT_SECRET rotation) keeps seeing
+    // every admin nav link and can navigate past the router's adminOnly
+    // guard, even though they're genuinely logged out.
+    isAdmin: (state) => Boolean(state.token) && state.role === 'admin',
   },
   actions: {
     async login(username, password) {

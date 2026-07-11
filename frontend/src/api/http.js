@@ -21,7 +21,15 @@ http.interceptors.response.use(
     // otherwise let the caller handle/ignore the error in place.
     const hadToken = Boolean(localStorage.getItem('token'));
     if (error.response && error.response.status === 401 && hadToken) {
+      // Clear the whole cached session, not just the token - userId/
+      // username/role are read independently (e.g. auth.isAdmin) and
+      // leaving them behind after the token's gone is exactly how a
+      // logged-out visitor could still look admin-ish to the rest of the
+      // app.
       localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('username');
+      localStorage.removeItem('role');
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
