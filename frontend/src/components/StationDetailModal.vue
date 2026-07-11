@@ -15,7 +15,7 @@ import StationHistoryChart from './StationHistoryChart.vue';
 const props = defineProps({
   station: { type: Object, required: true },
   regionId: { type: String, required: true },
-  selectedFuelType: { type: String, default: '' },
+  selectedFuelTypes: { type: Array, default: () => [] },
 });
 const emit = defineEmits(['close', 'changed']);
 
@@ -302,7 +302,7 @@ onBeforeUnmount(() => {
           <li
             v-for="f in station.fuelStatuses"
             :key="f.fuelType"
-            :class="{ 'fuel-list-active': f.fuelType === selectedFuelType }"
+            :class="{ 'fuel-list-active': selectedFuelTypes.includes(f.fuelType) }"
           >
             <strong>{{ fuelTypeLabel(f.fuelType) }}</strong>
             <span class="badge-dot" :style="{ background: statusMeta(f.status).color }"></span>

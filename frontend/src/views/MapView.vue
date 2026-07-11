@@ -6,7 +6,7 @@ import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
-import { statusMeta, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
+import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
 import { formatPct } from '../utils/colorScale';
 import { renderMapShareCard } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
@@ -67,10 +67,11 @@ function brandOf(station) {
   return station.name || UNKNOWN_BRAND;
 }
 
-// '' means "any fuel type" - filter/color markers by the station's overall
-// status. Otherwise, both the checkboxes above and marker colors switch to
-// that specific fuel type's status instead of the aggregate one.
-const selectedFuelType = ref('');
+// Empty array means "any fuel type" - filter/color markers by the
+// station's overall status. Otherwise, both the checkboxes above and
+// marker colors switch to the best status among the picked fuel types
+// (see effectiveStatus) instead of the aggregate one.
+const selectedFuelTypes = ref([]);
 
 const availableFuelTypes = computed(() => {
   const set = new Set();
@@ -80,11 +81,23 @@ const availableFuelTypes = computed(() => {
   return sortFuelTypes(Array.from(set));
 });
 
+// With several fuel types picked, a station's effective status is the best
+// (see STATUS_ORDER) among just those types - "is at least one of these
+// available here" is the useful question on a map, not "are all of them".
 function effectiveStatus(station) {
-  if (!selectedFuelType.value) return station.status;
-  const entry = (station.fuelStatuses || []).find((f) => f.fuelType === selectedFuelType.value);
-  return entry ? entry.status : 'no_data';
+  if (!selectedFuelTypes.value.length) return station.status;
+  const entries = (station.fuelStatuses || []).filter((f) => selectedFuelTypes.value.includes(f.fuelType));
+  if (!entries.length) return 'no_data';
+  let best = entries[0].status;
+  for (const entry of entries) {
+    if (statusOrdinal(entry.status) > statusOrdinal(best)) best = entry.status;
+  }
+  return best;
 }
+
+const selectedFuelTypesLabel = computed(() =>
+  selectedFuelTypes.value.map(fuelTypeLabel).join(', ')
+);
 
 // Current-state summary for the selected region - always over every loaded
 // station, not just the ones visible under the status/brand checkboxes
@@ -291,7 +304,7 @@ function escapeHtml(str) {
 // via the popupopen handler in renderMarkers(), not a @click binding.
 function buildPopupHtml(s) {
   const meta = statusMeta(effectiveStatus(s));
-  const fuelSuffix = selectedFuelType.value ? ` (${escapeHtml(fuelTypeLabel(selectedFuelType.value))})` : '';
+  const fuelSuffix = selectedFuelTypes.value.length ? ` (${escapeHtml(selectedFuelTypesLabel.value)})` : '';
   const fuelRows = (s.fuelStatuses || [])
     .map((f) => {
       const fm = statusMeta(f.status);
@@ -359,7 +372,7 @@ function renderMarkers() {
       fillOpacity: 0.85,
       weight: 2,
     });
-    const fuelSuffix = selectedFuelType.value ? ` (${escapeHtml(fuelTypeLabel(selectedFuelType.value))})` : '';
+    const fuelSuffix = selectedFuelTypes.value.length ? ` (${escapeHtml(selectedFuelTypesLabel.value)})` : '';
     marker.bindTooltip(`${escapeHtml(s.name || 'АЗС')} — ${meta.label}${fuelSuffix}`);
     marker.bindPopup(() => buildPopupHtml(s), { maxWidth: 260, minWidth: 220 });
     // The button inside the popup isn't part of Vue's render tree (it's raw
@@ -403,7 +416,7 @@ async function handleRegionChange() {
   // unrelated, stale selection.
   for (const key of Object.keys(brandFilters)) delete brandFilters[key];
   brandSearch.value = '';
-  selectedFuelType.value = '';
+  selectedFuelTypes.value = [];
   await loadRange();
   await loadSnapshot();
 }
@@ -866,15 +879,13 @@ onBeforeUnmount(() => {
               <button class="btn secondary" @click="openShareCard">🖼 Картинка для шаринга</button>
 
               <div class="filter-block">
-                <select
-                  v-if="availableFuelTypes.length"
-                  v-model="selectedFuelType"
-                  class="fuel-type-select"
-                  @change="handleFilterChange"
-                >
-                  <option value="">Общий статус (все виды топлива)</option>
-                  <option v-for="ft in availableFuelTypes" :key="ft" :value="ft">{{ fuelTypeLabel(ft) }}</option>
-                </select>
+                <template v-if="availableFuelTypes.length">
+                  <span class="filter-label">Виды топлива (не выбрано — общий статус):</span>
+                  <label v-for="ft in availableFuelTypes" :key="ft" class="filter-checkbox">
+                    <input type="checkbox" v-model="selectedFuelTypes" :value="ft" @change="handleFilterChange" />
+                    {{ fuelTypeLabel(ft) }}
+                  </label>
+                </template>
 
                 <span class="filter-label">Показывать:</span>
                 <label v-for="key in STATUS_KEYS" :key="key" class="filter-checkbox">
@@ -912,7 +923,7 @@ onBeforeUnmount(() => {
           <Transition name="fade">
             <div v-if="currentSummary.total" class="current-state-inline">
               <span class="current-state-label">
-                Сейчас{{ selectedFuelType ? ` · ${fuelTypeLabel(selectedFuelType)}` : '' }}:
+                Сейчас{{ selectedFuelTypes.length ? ` · ${selectedFuelTypesLabel}` : '' }}:
               </span>
               <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
                 {{ formatPct(currentSummary.availablePct) }}
@@ -974,7 +985,7 @@ onBeforeUnmount(() => {
       v-if="showDetailModal && selectedStation"
       :station="selectedStation"
       :region-id="selectedRegionId"
-      :selected-fuel-type="selectedFuelType"
+      :selected-fuel-types="selectedFuelTypes"
       @close="closeDetailModal"
       @changed="loadSnapshot"
     />
@@ -1428,15 +1439,6 @@ onBeforeUnmount(() => {
 .filter-label {
   font-size: 13px;
   color: #667;
-}
-
-.fuel-type-select {
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid #ccd2d9;
-  font-size: 13px;
-  color: #445;
 }
 
 .filter-checkbox {
