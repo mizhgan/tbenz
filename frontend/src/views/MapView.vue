@@ -852,15 +852,21 @@ onBeforeUnmount(() => {
            whether it's showing 13% or 90% isn't actually telling you
            anything at a glance. -->
       <Transition name="fade">
-        <div v-if="currentSummary.total" class="status-badge">
-          <div
-            class="status-badge-bar"
-            :class="{ 'status-badge-bar--loading': loadingStations }"
-            :style="{ background: availabilityColor(currentSummary.availablePct) }"
-          ></div>
-          <strong :style="{ color: availabilityColor(currentSummary.availablePct) }">
-            {{ formatPct(currentSummary.availablePct) }}
-          </strong>
+        <div
+          v-if="currentSummary.total"
+          class="status-badge"
+          :style="{ borderTopColor: availabilityColor(currentSummary.availablePct) }"
+        >
+          <span class="status-badge-pct-row">
+            <span
+              v-if="loadingStations"
+              class="status-badge-spinner"
+              :style="{ borderTopColor: availabilityColor(currentSummary.availablePct) }"
+            ></span>
+            <strong :style="{ color: availabilityColor(currentSummary.availablePct) }">
+              {{ formatPct(currentSummary.availablePct) }}
+            </strong>
+          </span>
           <span class="hint small">{{ filteredStations.length }} из {{ currentSummary.total }}</span>
         </div>
       </Transition>
@@ -1213,14 +1219,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 1px;
   min-width: 64px;
-  /* Top padding accounts for .status-badge-bar below sitting on top,
-     outside document flow (absolutely positioned) rather than as a real
-     border - same 9px (6px content padding + 3px bar) the old border-top
-     took up, so the percentage doesn't jump when loading starts/ends. */
-  padding: 9px 14px 8px;
+  padding: 6px 14px 8px;
   background: #fff;
   border-radius: 8px;
-  overflow: hidden;
+  border-top: 3px solid;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
 
@@ -1229,36 +1231,25 @@ onBeforeUnmount(() => {
   line-height: 1.3;
 }
 
-/* Availability-colored strip along the top edge - a real element instead
-   of a CSS border specifically so it can carry its own shimmer animation
-   while loading (see --loading below) without needing a border-radius:50%
-   ring wrapped around non-square text, which rendered as a stray oval
-   instead of a circle (the previous approach here). */
-.status-badge-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+/* Loading state: a small spinner of its own (fixed 12x12 square, not
+   wrapped around the percentage text) sitting to the left of it - two
+   earlier attempts here (a ring around the text, a shimmer on the top
+   border) both turned out to be too subtle or visually broken to actually
+   read as "this is refreshing" at a glance; a plain small spinner next to
+   the number is the one everyone already recognizes. */
+.status-badge-pct-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
-.status-badge-bar--loading {
-  /* Base .status-badge-bar is already position:absolute, which alone is
-     enough to anchor the ::after pseudo-element's inset:0 below - adding
-     position:relative here too (redundant-looking, but same specificity
-     and later in the cascade) silently overrode it back to a normal-flow
-     flex item with no width to speak of. Overflow is the only thing this
-     modifier actually needs to add. */
-  overflow: hidden;
-}
-
-.status-badge-bar--loading::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
-  animation: skeleton-shimmer 1.1s ease-in-out infinite;
+.status-badge-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+  animation: spinner-rotate 0.7s linear infinite;
 }
 
 .drawer-backdrop {
