@@ -30,19 +30,28 @@
  *
  * `last_transaction_at` recency check: verified live against a real region's
  * worth of data (Kirov, 77 stations) that "available"/"probably_unavailable"/
- * "unavailable" are genuinely transaction-recency-derived - "available"
- * never appeared more than ~3.4 days stale, while "probably_unavailable"
- * ranged up to 27 days stale (median ~6 days) - alfabank keeps asserting its
- * weak-negative hedge indefinitely rather than ever giving up and reporting
- * "unknown" once a pump's own transaction history goes cold. Trusting a
- * three-week-old "probably_unavailable" at the same weight as a fresh tbank/
- * gdebenz reading would let stale noise quietly outvote current evidence
- * (see combineTwo's doc comment on why this app prefers admitting "we don't
- * know" over guessing) - staleFuelStatus below downgrades any of these three
- * labels to no_data once last_transaction_at is missing or older than
- * STALE_AFTER_MS, dropping them out of the merge vote entirely (resolveVotes
- * skips readings whose status isn't a recognized available/maybe_available/
- * not_available). "closed" is deliberately exempt - confirmed live it's a
+ * "unavailable" are genuinely transaction-recency-derived. Two different
+ * questions came up while tuning STALE_AFTER_MS, worth separating:
+ *  - "probably_unavailable" ranges up to 27 days stale (median ~6 days,
+ *    never under 17 hours) - alfabank keeps asserting this weak-negative
+ *    hedge indefinitely rather than ever giving up and reporting "unknown"
+ *    once a pump's own transaction history goes cold. A three-week-old
+ *    "probably_unavailable" at full weight would let stale noise quietly
+ *    outvote a fresh tbank/gdebenz reading (see combineTwo's doc comment on
+ *    why this app prefers admitting "we don't know" over guessing).
+ *  - "available" is a stronger claim to weaken deliberately: median age
+ *    ~8.4 hours, so a "must be fresh within a few hours" bar (considered and
+ *    explicitly rejected - would have zeroed out 81-88% of all "available"
+ *    readings at a 2-4h cutoff) would leave the source silent on most
+ *    stations most of the time. 12 hours is the compromise actually chosen:
+ *    keeps ~58% of "available" readings trusted (a purchase this morning is
+ *    still meaningful evidence for "probably still available", unlike one
+ *    from days ago) while still meaningfully discounting anything that
+ *    isn't from roughly the current day.
+ * Either way, once stale, mapStatus downgrades the reading to no_data,
+ * dropping it out of the merge vote entirely (resolveVotes skips readings
+ * whose status isn't a recognized available/maybe_available/not_available).
+ * "closed" is deliberately exempt from all of this - confirmed live it's a
  * station-level flag applied uniformly across all 4 categories at once (not
  * a per-fuel staleness artifact) for stations alfabank considers shut,
  * frequently even with no last_transaction_at ever recorded for that pump;
@@ -65,12 +74,11 @@ const STATUS_MAP = {
 };
 
 // See this file's doc comment above for why exactly these three (not
-// "closed"/"unknown") get staleness-checked, and why 7 days: generous
-// enough to never touch a real "available" reading (never seen stale past
-// ~3.4 days), while catching the long tail of "probably_unavailable" claims
-// that are really just "no data for weeks" wearing a weak-negative label.
+// "closed"/"unknown") get staleness-checked, and for the 12h figure itself -
+// a deliberate compromise, not a "never touches real data" safe margin the
+// way the originally-considered 7 days was.
 const RECENCY_DEPENDENT_STATUSES = new Set(['available', 'probably_unavailable', 'unavailable']);
-const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
 
 function isStale(lastTransactionAt) {
   if (!lastTransactionAt) return true;

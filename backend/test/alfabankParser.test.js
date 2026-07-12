@@ -7,11 +7,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { parseStation, extractStationsArray } = require('../src/services/alfabankParser');
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const isoDaysAgo = (days) => new Date(Date.now() - days * DAY_MS).toISOString();
+const HOUR_MS = 60 * 60 * 1000;
+const isoHoursAgo = (hours) => new Date(Date.now() - hours * HOUR_MS).toISOString();
 
-function fuel(category, status, daysAgo) {
-  return { category, status, last_transaction_at: daysAgo === null ? undefined : isoDaysAgo(daysAgo), price: null };
+function fuel(category, status, hoursAgo) {
+  return { category, status, last_transaction_at: hoursAgo === null ? undefined : isoHoursAgo(hoursAgo), price: null };
 }
 
 function station(overrides) {
@@ -29,19 +29,24 @@ test('extractStationsArray reads a flat array with no wrapper object', () => {
   assert.deepEqual(extractStationsArray({ stations: [] }), []); // no wrapper support needed - never seen live
 });
 
-test('parseStation: a fresh "available" reading passes through as available', () => {
-  const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 0.5)] }));
+test('parseStation: a fresh (<12h) "available" reading passes through as available', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 2)] }));
   assert.equal(parsed.fuelStatuses[0].status, 'available');
   assert.equal(parsed.status, 'available'); // single-fuel overall vote mirrors it
 });
 
-test('parseStation: a stale (>7d) "probably_unavailable" is downgraded to no_data, not maybe_available', () => {
-  const parsed = parseStation(station({ fuels: [fuel('AI92', 'probably_unavailable', 27)] }));
+test('parseStation: a stale (>12h) "available" reading is downgraded to no_data', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 20)] }));
   assert.equal(parsed.fuelStatuses[0].status, 'no_data');
 });
 
-test('parseStation: a fresh (<7d) "probably_unavailable" still reads as maybe_available', () => {
-  const parsed = parseStation(station({ fuels: [fuel('AI92', 'probably_unavailable', 2)] }));
+test('parseStation: a stale (>12h) "probably_unavailable" is downgraded to no_data, not maybe_available', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'probably_unavailable', 27 * 24)] }));
+  assert.equal(parsed.fuelStatuses[0].status, 'no_data');
+});
+
+test('parseStation: a fresh (<12h) "probably_unavailable" still reads as maybe_available', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'probably_unavailable', 6)] }));
   assert.equal(parsed.fuelStatuses[0].status, 'maybe_available');
 });
 
@@ -55,7 +60,7 @@ test('parseStation: "closed" is not_available regardless of last_transaction_at 
     station({
       fuels: [
         fuel('AI92', 'closed', null),
-        fuel('AI95', 'closed', 60),
+        fuel('AI95', 'closed', 60 * 24),
         fuel('AI98_100', 'closed', null),
         fuel('DIESEL', 'closed', null),
       ],
@@ -72,10 +77,10 @@ test('parseStation: fuel type/name mapping - AI92/AI95/AI98_100 -> bare numbers,
   const parsed = parseStation(
     station({
       fuels: [
-        fuel('AI92', 'available', 0.1),
-        fuel('AI95', 'available', 0.1),
-        fuel('AI98_100', 'available', 0.1),
-        fuel('DIESEL', 'available', 0.1),
+        fuel('AI92', 'available', 1),
+        fuel('AI95', 'available', 1),
+        fuel('AI98_100', 'available', 1),
+        fuel('DIESEL', 'available', 1),
       ],
     })
   );
