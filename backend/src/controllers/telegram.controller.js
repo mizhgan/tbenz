@@ -28,6 +28,8 @@ function serializeChat(chat) {
         }
       : null,
     alertMapStatuses: chat.alertMapStatuses,
+    promo: { enabled: chat.promo.enabled, time: chat.promo.time },
+    lastPromoPostAt: chat.lastPromoPostAt,
     lastHourlyDigestAt: chat.lastHourlyDigestAt,
     lastDailyDigestAt: chat.lastDailyDigestAt,
     createdAt: chat.createdAt,
@@ -99,6 +101,19 @@ function validateUpdate(body) {
     }
     out.alertMapStatuses = body.alertMapStatuses;
   }
+  if (body.promo !== undefined) {
+    if (typeof body.promo !== 'object' || body.promo === null) {
+      throw new HttpError(400, 'promo must be an object');
+    }
+    out.promo = {};
+    if (body.promo.enabled !== undefined) out.promo.enabled = Boolean(body.promo.enabled);
+    if (body.promo.time !== undefined) {
+      if (typeof body.promo.time !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.promo.time)) {
+        throw new HttpError(400, 'promo.time must be "HH:mm"');
+      }
+      out.promo.time = body.promo.time;
+    }
+  }
 
   return out;
 }
@@ -111,6 +126,10 @@ const updateChat = asyncHandler(async (req, res) => {
   if (data.events) {
     chat.events = { ...chat.events.toObject(), ...data.events };
     delete data.events;
+  }
+  if (data.promo) {
+    chat.promo = { ...chat.promo.toObject(), ...data.promo };
+    delete data.promo;
   }
   Object.assign(chat, data);
   await chat.save();

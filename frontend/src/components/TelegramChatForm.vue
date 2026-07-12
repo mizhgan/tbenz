@@ -76,6 +76,15 @@ function toggleMapStatus(key) {
   else selectedMapStatuses.add(key);
 }
 
+// Once-a-day promotional post at a specific clock time (Europe/Moscow -
+// see TelegramChat.js's own doc comment) - reuses this chat's own
+// alertMapBbox/alertMapStatuses above for its image instead of a second
+// "which area" picker just for this.
+const promo = reactive({
+  enabled: props.initial.promo?.enabled ?? false,
+  time: props.initial.promo?.time || '19:00',
+});
+
 const searchQuery = ref('');
 const searchResults = ref([]);
 const searching = ref(false);
@@ -149,6 +158,7 @@ function handleSubmit() {
     watchlist: watchlist.map((s) => s.id),
     alertMapBbox,
     alertMapStatuses: MAP_STATUS_KEYS.filter((k) => selectedMapStatuses.has(k)),
+    promo: { enabled: promo.enabled, time: promo.time },
   };
   emit('submit', payload);
 }
@@ -281,6 +291,24 @@ function handleSubmit() {
               <span class="status-dot" :style="{ background: statusMeta(key).color }"></span>
               {{ statusMeta(key).label }}
             </label>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>Ежедневный пост-приглашение</label>
+          <p class="hint">
+            Раз в день в выбранное время публикует пост со ссылками на сайт и бота (текст каждый
+            раз немного разный, суть та же). Картинка берётся из настройки выше (область на карте)
+            — если она не задана, пост уходит только текстом. Для привлечения новых подписчиков,
+            не для оповещений о статусе топлива.
+          </p>
+          <label class="filter-checkbox">
+            <input type="checkbox" v-model="promo.enabled" />
+            Публиковать ежедневный пост
+          </label>
+          <div class="form-row">
+            <label for="promoTime">Время (по Москве)</label>
+            <input id="promoTime" v-model="promo.time" type="time" />
           </div>
         </div>
 

@@ -81,6 +81,28 @@ const telegramChatSchema = new Schema(
     // every station in the picked area, not just the ones drawn as dots
     // (see telegramAlertMapImage.js's doc comment on why).
     alertMapStatuses: { type: [String], default: () => [...AVAILABILITY_STATUSES] },
+
+    // Once-a-day promotional post (site/bot links, rotating copy - see
+    // telegramPromoContent.js) at a specific admin-chosen clock time,
+    // independent of any event-driven alert - meant to slowly attract new
+    // subscribers to a public channel, not to inform existing ones about
+    // fuel status. Off by default. `time` is "HH:mm" in Europe/Moscow
+    // (same convention as telegramNotifier.js's RU_DATE_TZ formatting) -
+    // a specific time of day, not a rolling "once every 24h since last
+    // send" like lastHourlyDigestAt/lastDailyDigestAt above, since the
+    // whole point is showing up predictably (e.g. evening commute) rather
+    // than whenever a rolling window happens to land. Reuses this same
+    // chat's own alertMapBbox/alertMapStatuses for the attached image
+    // (see telegramNotifier.sendPromoPost) instead of a separate image
+    // setting - if alertMapBbox isn't set, the post just goes out as text.
+    promo: {
+      enabled: { type: Boolean, default: false },
+      time: { type: String, default: '19:00' },
+    },
+    // Calendar date (not just "24h since last") the promo post last
+    // actually went out, compared against promo.time each scheduler tick
+    // - see telegramPromoScheduler.js.
+    lastPromoPostAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

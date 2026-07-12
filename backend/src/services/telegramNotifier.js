@@ -5,6 +5,7 @@ const telegramDigestData = require('./telegramDigestData');
 const telegramDigestImage = require('./telegramDigestImage');
 const telegramAlertMapImage = require('./telegramAlertMapImage');
 const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
+const telegramPromoContent = require('./telegramPromoContent');
 const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
 
@@ -408,10 +409,51 @@ async function notifyPredictiveAlerts(region) {
   });
 }
 
+/**
+ * Sends one chat's once-a-day promotional post (see
+ * TelegramChat.js's `promo` field / telegramPromoScheduler.js, which calls
+ * this once it decides a chat is actually due) - rotating marketing copy
+ * (telegramPromoContent.js) plus, if this chat already has an
+ * alertMapBbox configured, the same map+stats image its fuel alerts use
+ * (reusing that setting rather than adding a second "which area" picker
+ * just for this). No alertMapBbox means no image, not a failure - the
+ * post still goes out as text. Returns whether anything was actually
+ * sent, so the scheduler can decide whether to record this as "done for
+ * today".
+ */
+async function sendPromoPost(chat) {
+  const text = telegramPromoContent.randomPromoText();
+
+  if (chat.alertMapBbox) {
+    try {
+      const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
+      const stations = await Station.find({
+        lat: { $gte: minLat, $lte: maxLat },
+        lon: { $gte: minLon, $lte: maxLon },
+      })
+        .select('lat lon lastStatus')
+        .lean();
+      const buffer = await telegramAlertMapImage.renderAlertMapImage({
+        bbox: chat.alertMapBbox,
+        stations,
+        visibleStatuses: chat.alertMapStatuses,
+      });
+      const sent = await telegramBot.sendPhoto(chat, buffer, text);
+      if (sent) return true;
+      logger.warn(`Telegram promo photo send failed for chat ${chat.chatId}, falling back to text`);
+    } catch (err) {
+      logger.error(`Telegram promo image failed for chat ${chat.chatId}, falling back to text:`, err.message);
+    }
+  }
+
+  return telegramBot.sendMessage(chat, text);
+}
+
 module.exports = {
   computeTransitions,
   notifyRegionChanges,
   sendDigest,
   notifyPredictiveAlerts,
+  sendPromoPost,
   escapeHtml,
 };
