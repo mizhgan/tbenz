@@ -2,30 +2,31 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { coreStatus } = require('../src/services/telegramPredictiveAlerts');
 
-test('coreStatus: best-of among 92/95/ДТ, ignoring non-core types', () => {
+test('coreStatus: best-of among 92/95 (gasoline only), ignoring diesel/gas', () => {
   assert.equal(
     coreStatus([
       { fuelType: '92', status: 'not_available' },
       { fuelType: '95', status: 'available' },
-      { fuelType: 'ДТ', status: 'no_data' },
-      { fuelType: 'propane', status: 'available' }, // ignored - not core-3
+      { fuelType: 'ДТ', status: 'not_available' }, // ignored - diesel is not core
+      { fuelType: 'propane', status: 'available' }, // ignored - not core either
     ]),
     'available'
   );
 });
 
-test('coreStatus: not_available only wins when nothing better is present', () => {
+test('coreStatus: not_available wins when nothing better is present among 92/95', () => {
   assert.equal(
     coreStatus([
       { fuelType: '92', status: 'not_available' },
       { fuelType: '95', status: 'not_available' },
-      { fuelType: 'ДТ', status: 'no_data' },
+      { fuelType: 'ДТ', status: 'available' }, // ignored - diesel being available doesn't help
     ]),
-    'no_data'
+    'not_available'
   );
 });
 
-test('coreStatus: a station with no core-3 reading at all is no_data (propane-only AGZS)', () => {
+test('coreStatus: a station with no 92/95 reading at all is no_data (diesel/propane-only station)', () => {
+  assert.equal(coreStatus([{ fuelType: 'ДТ', status: 'available' }]), 'no_data');
   assert.equal(coreStatus([{ fuelType: 'propane', status: 'available' }]), 'no_data');
 });
 

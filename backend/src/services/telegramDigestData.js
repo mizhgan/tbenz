@@ -55,7 +55,7 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
   ]);
 
   // Pools each station's own reading for metricsService.CORE_FUEL_TYPES
-  // (92/95/ДТ), same as MapView.vue's badge and every other metric in this
+  // (92/95), same as MapView.vue's badge and every other metric in this
   // digest (periodPct/prevPeriodPct/series below all come from
   // metricsService functions that already pool this way) - not each
   // station's one blanket overall status, which read materially more

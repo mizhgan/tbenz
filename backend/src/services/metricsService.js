@@ -41,15 +41,18 @@ function withKnownPct(row) {
   };
 }
 
-// The three fuel types nearly every station carries (92/95/diesel) - unlike
-// premium grades (98/100) or gas conversions (propane/methane), which only a
-// minority of stations even have. Same set MapView.vue's currentSummary
-// pools client-side for the map badge - see that file's doc comment for why
-// this reads differently (and more usefully for "will my fuel actually be
-// there") than a snapshot's one blanket overall `status`: verified live,
-// ~52% blanket vs ~42% pooled this way region-wide, with 92 alone as low as
-// ~33%.
-const CORE_FUEL_TYPES = ['92', '95', 'ДТ'];
+// Gasoline only (92/95) - not diesel or gas conversions (propane/methane).
+// Deliberate, explicit call: gasoline is where this region's real shortage
+// is - verified live, 92 at ~25%, 95 at ~29.5%, pooled ~27.3%, against
+// diesel's own ~38.7% over the same stations/period. Folding diesel into the
+// "main" availability metric would have quietly diluted the number away
+// from the fuel drivers are actually struggling to find, in the direction
+// that makes things look better than they are. Same set MapView.vue's
+// currentSummary pools client-side for the map badge (and now defaults its
+// fuel-type filter to) - see that file's doc comment for the fuller history
+// of why this reads differently from a snapshot's one blanket overall
+// `status` at all.
+const CORE_FUEL_TYPES = ['92', '95'];
 
 const CORE_STATUS_RANK = { not_available: 0, no_data: 1, maybe_available: 2, available: 3 };
 
@@ -63,8 +66,8 @@ const CORE_STATUS_RANK = { not_available: 0, no_data: 1, maybe_available: 2, ava
  * (telegramPredictiveAlerts.js), and deciding whether two sources actually
  * disagree for the map popup's "⚠ расходятся" warning (MapView.vue) instead
  * of comparing their blanket overall statuses, which could differ purely
- * over a non-core fuel type (propane) neither claim says anything useful
- * about for this purpose.
+ * over a non-core fuel type (diesel, propane, ...) neither claim says
+ * anything useful about for this purpose.
  */
 function deriveCoreStatus(fuelStatuses) {
   const relevant = (fuelStatuses || []).filter((f) => CORE_FUEL_TYPES.includes(f.fuelType));
@@ -76,15 +79,15 @@ function deriveCoreStatus(fuelStatuses) {
 }
 
 // Inserted right after a pipeline's own $match stage (see every use below):
-// unwinds each snapshot into up to 3 rows, one per core fuel type it has a
-// reading for, so STATUS_COUNTS_GROUP counts each fuel-type reading as its
-// own vote instead of one blanket per-snapshot vote. A snapshot with no
-// reading for any of the 3 (fuelStatuses empty, or only non-core types)
-// contributes zero rows here rather than one "no_data" row - deliberately:
-// see STATUS_COUNTS_GROUP's own total/noData, which would otherwise treat
-// "this station only sells propane" the same as "we don't know 92/95/ДТ's
-// status", diluting noDataPct for something that isn't actually missing
-// data.
+// unwinds each snapshot into up to 2 rows, one per core fuel type (92/95) it
+// has a reading for, so STATUS_COUNTS_GROUP counts each fuel-type reading as
+// its own vote instead of one blanket per-snapshot vote. A snapshot with no
+// reading for either (fuelStatuses empty, or only non-core types - diesel,
+// propane, methane) contributes zero rows here rather than one "no_data"
+// row - deliberately: see STATUS_COUNTS_GROUP's own total/noData, which
+// would otherwise treat "this station only sells diesel" the same as "we
+// don't know 92/95's status", diluting noDataPct for something that isn't
+// actually missing data.
 const CORE_FUEL_UNWIND_STAGES = [
   {
     $addFields: {

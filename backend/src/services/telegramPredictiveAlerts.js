@@ -17,7 +17,7 @@ const COOLDOWN_MS = 3 * 60 * 60 * 1000;
 // alerting purposes, instead of its blanket overall `status` - a station
 // could be blanket "available" purely off a non-core fuel type (propane) or
 // a secondary source's own station-level opinion, while having nothing
-// useful to say about 92/95/ДТ specifically; alerting off that would be
+// useful to say about 92/95 specifically; alerting off that would be
 // misleading. See metricsService.deriveCoreStatus's own doc comment - kept
 // as a local alias (not just called inline) so this file's own tests don't
 // need to know it now lives in metricsService.js.
@@ -113,7 +113,7 @@ async function scanForRecoveries(downStations, cooldownById, now) {
  * Scans every currently-known station in a region for a forecast-based
  * heads-up worth sending before the actual transition happens: "likely to
  * run out soon" (currently up) or "likely back soon" (currently down) -
- * "up"/"down" meaning coreStatus (92/95/ДТ), not the station's blanket
+ * "up"/"down" meaning coreStatus (92/95), not the station's blanket
  * overall status. Whole-region, not limited to a watchlist - kept affordable
  * by bulk-aggregating the (typically much larger) up-station set in one
  * query and only doing per-station work for the (typically much smaller)

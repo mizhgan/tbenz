@@ -377,7 +377,7 @@ onMounted(async () => {
       <div class="card kpi">
         <div class="kpi-value">{{ formatPct(summary.overallAvailablePct) }}</div>
         <div class="kpi-label">Общая доступность</div>
-        <div class="kpi-sublabel">АИ-92, АИ-95, ДТ</div>
+        <div class="kpi-sublabel">АИ-92, АИ-95</div>
       </div>
       <div class="card kpi">
         <div class="kpi-value">{{ summary.stationCount }}</div>
@@ -432,7 +432,7 @@ onMounted(async () => {
 
     <div class="card section">
       <div class="section-header">
-        <h2>Динамика доступности</h2>
+        <h2>Динамика доступности <span class="hint small">(АИ-92, АИ-95)</span></h2>
         <span class="direction-badge" :style="{ color: DIRECTION_META[forecastDirection].color }">
           {{ DIRECTION_META[forecastDirection].icon }} {{ DIRECTION_META[forecastDirection].label }}
         </span>
@@ -477,14 +477,14 @@ onMounted(async () => {
         />
       </div>
       <div class="card section">
-        <h2>Сравнение по сетям</h2>
+        <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
         <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
         <BrandsChart :brands="brands" />
       </div>
     </div>
 
     <div class="card section">
-      <h2>Доступность по дню недели и часу</h2>
+      <h2>Доступность по дню недели и часу <span class="hint small">(АИ-92, АИ-95)</span></h2>
       <p v-if="sectionErrors.heatmap" class="error-text">{{ sectionErrors.heatmap }}</p>
       <AvailabilityHeatmap :cells="heatmapCells" />
     </div>

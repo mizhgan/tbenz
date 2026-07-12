@@ -407,6 +407,7 @@ onBeforeUnmount(() => {
               {{ formatPct(reliability.availablePct) }}
             </span>
             <span class="reliability-label">Доступность</span>
+            <span class="reliability-sublabel">АИ-92, АИ-95</span>
           </div>
           <div class="reliability-tile">
             <span class="reliability-value">{{ formatPct(reliability.noDataPct) }}</span>
@@ -631,6 +632,11 @@ onBeforeUnmount(() => {
 .reliability-label {
   font-size: 11px;
   color: #667;
+}
+
+.reliability-sublabel {
+  font-size: 10px;
+  color: #94a3b8;
 }
 
 .modal-actions {

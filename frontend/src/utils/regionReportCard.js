@@ -192,15 +192,24 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuck
   // KPI row - one row of 4 tiles rather than stationCard's 2x2 grid, since
   // a report card only has one set of tiles to show (no separate "reliability"
   // sub-section competing for space).
+  // sublabel (only the availability tile has one) - the metric quietly
+  // narrowed to gasoline only (see metricsService.js's own doc comment on
+  // CORE_FUEL_TYPES); called out here so the number doesn't read as an
+  // unexplained change from what a report card used to show.
   const kpis = [
-    { value: formatPct(summary.overallAvailablePct), label: 'Доступность', color: availabilityColor(summary.overallAvailablePct) },
+    {
+      value: formatPct(summary.overallAvailablePct),
+      label: 'Доступность',
+      sublabel: 'АИ-92, АИ-95',
+      color: availabilityColor(summary.overallAvailablePct),
+    },
     { value: String(summary.stationCount), label: 'Станций', color: '#0f172a' },
     { value: String(summary.totalOutages), label: 'Отключений', color: '#0f172a' },
     { value: formatMinutes(summary.avgRecoveryMinutes), label: 'Ср. восстановление', color: '#0f172a' },
   ];
   const kpiGap = 20;
   const kpiWidth = (contentWidth - kpiGap * 3) / 4;
-  const kpiHeight = 110;
+  const kpiHeight = 128;
   if (draw) {
     kpis.forEach((tile, i) => {
       const tx = PADDING + i * (kpiWidth + kpiGap);
@@ -216,6 +225,12 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuck
       ctx.fillStyle = '#64748b';
       ctx.font = '19px -apple-system, "Segoe UI", Roboto, sans-serif';
       ctx.fillText(tile.label, tx + kpiWidth / 2, y + 84);
+
+      if (tile.sublabel) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '15px -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(tile.sublabel, tx + kpiWidth / 2, y + 106);
+      }
       ctx.textAlign = 'left';
     });
   }

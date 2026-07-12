@@ -31,14 +31,14 @@ function isoWeekdayAndHour(date, tz) {
  * the bulk predictive-alert scan (many stations at once) and by
  * getStationHourlyProfile (a single-element array).
  *
- * Pools each snapshot's own reading for CORE_FUEL_TYPES (92/95/ДТ), same as
+ * Pools each snapshot's own reading for CORE_FUEL_TYPES (92/95), same as
  * metricsService.js's reliability/trend/heatmap numbers this modal's
  * "Надёжность" tile already shows next to this forecast - not each
  * snapshot's one blanket overall `status`, which would otherwise make the
  * forecast disagree with the tile right above it. A station with no core-3
  * reading at all (pure propane/methane AGZS) drops out entirely (empty
  * profile, overallAvailablePct null) rather than forecasting off data that
- * was never about 92/95/ДТ.
+ * was never about 92/95.
  */
 async function getBulkHourlyProfiles(stationIds, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
   const from = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);

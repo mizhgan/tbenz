@@ -37,7 +37,7 @@ const telegramChatSchema = new Schema(
     },
     // Empty means "no filter" (matches everything) for brands. For
     // fuelTypes, empty instead defaults to metricsService.CORE_FUEL_TYPES
-    // (92/95/ДТ) - see telegramNotifier.js's chatMatchesFilters - not
+    // (92/95) - see telegramNotifier.js's chatMatchesFilters - not
     // literally every fuel type a station happens to report.
     fuelTypes: [{ type: String }],
     brands: [{ type: String }],

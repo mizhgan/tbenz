@@ -43,7 +43,7 @@ function chatMatchesFilters(chat, station, fuelType) {
   // used to mean "every fuel type this station reports" - including
   // propane/98/100, which most subscribers don't drive on and don't care to
   // be pinged about. Defaults to CORE_FUEL_TYPES instead (see
-  // metricsService.js's own doc comment), same "unconfigured = 92/95/ДТ"
+  // metricsService.js's own doc comment), same "unconfigured = 92/95"
   // default already applied to the map badge/reports/digest/predictive
   // alerts - not "no filter" anymore.
   const allowedFuelTypes = chat.fuelTypes.length ? chat.fuelTypes : CORE_FUEL_TYPES;
@@ -192,7 +192,7 @@ async function sendAlertMapPost(chat, region, header, blocks) {
       lat: { $gte: minLat, $lte: maxLat },
       lon: { $gte: minLon, $lte: maxLon },
     })
-      .select('lat lon lastStatus')
+      .select('lat lon lastStatus lastFuelStatuses')
       .lean();
     const buffer = await telegramAlertMapImage.renderAlertMapImage({
       bbox: chat.alertMapBbox,
@@ -360,7 +360,7 @@ function formatDropAlertBlock({ station, predictedAt, availablePct }) {
   return [
     `⚠️ <b>${escapeHtml(station.name || 'АЗС')}</b>`,
     station.address ? escapeHtml(station.address) : null,
-    `Вероятность наличия АИ-92, АИ-95 или ДТ к ${timeOnlyFmt.format(predictedAt)} падает до ~${availablePct.toFixed(0)}% (по истории для этого времени)`,
+    `Вероятность наличия АИ-92 или АИ-95 к ${timeOnlyFmt.format(predictedAt)} падает до ~${availablePct.toFixed(0)}% (по истории для этого времени)`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -441,7 +441,7 @@ async function sendPromoPost(chat) {
         lat: { $gte: minLat, $lte: maxLat },
         lon: { $gte: minLon, $lte: maxLon },
       })
-        .select('lat lon lastStatus')
+        .select('lat lon lastStatus lastFuelStatuses')
         .lean();
       const buffer = await telegramAlertMapImage.renderAlertMapImage({
         bbox: chat.alertMapBbox,

@@ -19,6 +19,7 @@
  */
 const sharp = require('sharp');
 const browserFetchService = require('./browserFetchService');
+const { deriveCoreStatus } = require('./metricsService');
 const logger = require('../utils/logger');
 
 const MAP_WIDTH = 640;
@@ -146,10 +147,16 @@ function pctColorFor(pct) {
 // Same "available + maybe_available over available + maybe_available +
 // not_available" definition MapView.vue's currentSummary and
 // telegramDigestImage's card use - no_data is excluded from the
-// denominator (it's "we don't know", not "it's not there").
+// denominator (it's "we don't know", not "it's not there"). Each station's
+// own coreStatus (best-of among gasoline - see metricsService.deriveCoreStatus)
+// is what's counted here, not lastStatus (blanket overall status) - same
+// "gasoline is the real shortage, not diesel/gas" call as everywhere else.
 async function renderStatsStrip(stations) {
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
-  for (const s of stations) counts[s.lastStatus] = (counts[s.lastStatus] || 0) + 1;
+  for (const s of stations) {
+    const st = deriveCoreStatus(s.lastFuelStatuses);
+    counts[st] = (counts[st] || 0) + 1;
+  }
   const known = counts.available + counts.maybe_available + counts.not_available;
   const pct = known > 0 ? Math.round(((counts.available + counts.maybe_available) / known) * 100) : null;
   const pctText = pct === null ? '—' : `${pct}%`;
@@ -170,7 +177,7 @@ async function renderStatsStrip(stations) {
     <svg xmlns="http://www.w3.org/2000/svg" width="${MAP_WIDTH}" height="${STRIP_HEIGHT}">
       <rect width="${MAP_WIDTH}" height="${STRIP_HEIGHT}" fill="${COLOR_BG}"/>
       <text x="${PAD}" y="${STRIP_HEIGHT / 2 + 12}" font-family="${FONT}" font-size="36" font-weight="bold" fill="${color}">${pctText}</text>
-      <text x="${PAD}" y="${STRIP_HEIGHT - 12}" font-family="${FONT}" font-size="11" fill="${COLOR_SUBTEXT}">доступно сейчас</text>
+      <text x="${PAD}" y="${STRIP_HEIGHT - 12}" font-family="${FONT}" font-size="11" fill="${COLOR_SUBTEXT}">доступно сейчас · АИ-92, АИ-95</text>
       ${chips}
       <text x="${MAP_WIDTH - PAD}" y="${STRIP_HEIGHT - 10}" font-family="${FONT}" font-size="10" fill="${COLOR_MUTED}" text-anchor="end">tbenz.in</text>
     </svg>
@@ -181,9 +188,10 @@ async function renderStatsStrip(stations) {
 /**
  * Renders the full alert map image: Leaflet screenshot of `bbox` (with a
  * colored dot per station in `stations`, keyed by each station's own
- * `lastStatus`) stacked above a stats strip summarizing those same
- * stations' current status breakdown. Returns a PNG Buffer, ready for
- * telegramBot.sendPhoto.
+ * coreStatus - best-of among gasoline, see metricsService.deriveCoreStatus,
+ * not the blanket `lastStatus`) stacked above a stats strip summarizing
+ * those same stations' current status breakdown. Returns a PNG Buffer,
+ * ready for telegramBot.sendPhoto.
  *
  * `visibleStatuses` (optional Set/array of status keys) only thins out
  * which stations get a *dot* - e.g. a chat that's mostly not_available
@@ -198,8 +206,9 @@ async function renderAlertMapImage({ bbox, stations, visibleStatuses }) {
   const allowed = visibleStatuses ? new Set(visibleStatuses) : null;
   const points = stations
     .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
-    .filter((s) => !allowed || allowed.has(s.lastStatus))
-    .map((s) => ({ lat: s.lat, lon: s.lon, color: STATUS_COLORS[s.lastStatus] || STATUS_COLORS.no_data }));
+    .map((s) => ({ ...s, coreStatus: deriveCoreStatus(s.lastFuelStatuses) }))
+    .filter((s) => !allowed || allowed.has(s.coreStatus))
+    .map((s) => ({ lat: s.lat, lon: s.lon, color: STATUS_COLORS[s.coreStatus] || STATUS_COLORS.no_data }));
 
   const [mapBuffer, statsBuffer] = await Promise.all([captureMapImage(bbox, points), renderStatsStrip(stations)]);
 

@@ -32,7 +32,7 @@ function formatDateTime(ms) {
 // Same two-pass measure-then-draw approach as stationCard.js/regionReportCard.js
 // - `draw` false only measures (so the canvas can be sized to fit the actual
 // content), true actually paints.
-function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availablePct, generatedAt }, draw) {
+function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availablePct, fuelLabel, generatedAt }, draw) {
   const contentWidth = WIDTH - PADDING * 2;
   let y = PADDING + 20;
 
@@ -84,11 +84,11 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availabl
   ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
   if (draw) {
     ctx.fillStyle = '#64748b';
-    ctx.fillText('доступность сейчас', PADDING + 210, y + 30);
+    ctx.fillText(`доступность сейчас · ${fuelLabel || 'АИ-92, АИ-95'}`, PADDING + 210, y + 30);
     // stationCount, not a sum of `counts` - `counts` now counts per-fuel-type
-    // readings (up to 3 per station, see MapView.vue's currentSummary) when
-    // no specific fuel type is picked, so summing it would overcount how
-    // many actual stations that covers.
+    // readings (one per active fuel type per station, see MapView.vue's
+    // currentSummary/activeFuelTypes) when no specific fuel type is picked,
+    // so summing it would overcount how many actual stations that covers.
     ctx.fillText(`из ${stationCount} станций`, PADDING + 210, y + 54);
   }
   y += 90;
@@ -183,8 +183,8 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availabl
  * two-pass approach as stationCard.js/regionReportCard.js, resolves with a
  * PNG Blob.
  */
-export function renderMapShareCard({ regionName, mapCanvas, counts, stationCount, availablePct, generatedAt }) {
-  const payload = { regionName, mapCanvas, counts, stationCount, availablePct, generatedAt };
+export function renderMapShareCard({ regionName, mapCanvas, counts, stationCount, availablePct, fuelLabel, generatedAt }) {
+  const payload = { regionName, mapCanvas, counts, stationCount, availablePct, fuelLabel, generatedAt };
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');

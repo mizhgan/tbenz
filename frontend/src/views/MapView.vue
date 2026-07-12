@@ -67,11 +67,26 @@ function brandOf(station) {
   return station.name || UNKNOWN_BRAND;
 }
 
-// Empty array means "any fuel type" - filter/color markers by the
-// station's overall status. Otherwise, both the checkboxes above and
-// marker colors switch to the best status among the picked fuel types
-// (see effectiveStatus) instead of the aggregate one.
-const selectedFuelTypes = ref([]);
+// Gasoline only, not diesel or gas conversions - deliberate, explicit call:
+// gasoline is where this region's real shortage is (verified live: 92 at
+// ~25%, 95 at ~29.5%, against diesel's own ~38.7% over the same stations/
+// period - folding diesel in would have quietly diluted the number away
+// from the fuel drivers are actually struggling to find). Same list as the
+// backend's metricsService.CORE_FUEL_TYPES, which everything else (reports,
+// digest, forecast, predictive/status alerts, the "⚠ расходятся" warning)
+// already pools by - kept as its own local constant rather than fetched,
+// since it drives the *default* filter selection below, not a server call.
+const CORE_FUEL_TYPES = ['92', '95'];
+
+// Defaults to gasoline checked, not empty - this is the actual filter (see
+// the "Виды топлива" checkboxes in the drawer), not just a fallback: an
+// unchecked filter that silently did nothing until touched would be a
+// broken-feeling control. The user can still pick a different fuel type (or
+// several) explicitly; unchecking everything falls back to this same
+// default rather than reverting to "no filter, show blanket status" (see
+// activeFuelTypes below) - there's deliberately no way back to a
+// diesel/propane-diluted view from this UI anymore.
+const selectedFuelTypes = ref([...CORE_FUEL_TYPES]);
 
 const availableFuelTypes = computed(() => {
   const set = new Set();
@@ -81,12 +96,20 @@ const availableFuelTypes = computed(() => {
   return sortFuelTypes(Array.from(set));
 });
 
-// With several fuel types picked, a station's effective status is the best
-// (see STATUS_ORDER) among just those types - "is at least one of these
-// available here" is the useful question on a map, not "are all of them".
+// The fuel type(s) actually driving both marker colors and the aggregate %
+// right now - the user's explicit picks, or CORE_FUEL_TYPES if they've
+// cleared every checkbox.
+const activeFuelTypes = computed(() => (selectedFuelTypes.value.length ? selectedFuelTypes.value : CORE_FUEL_TYPES));
+
+// A station's effective status is the best (see STATUS_ORDER) among
+// activeFuelTypes - "is at least one of these available here" is the useful
+// question for a single-color map dot, not "are all of them". Always
+// fuel-type-scoped now (gasoline by default) rather than falling back to
+// the station's blanket overall status - that blanket reading used to drive
+// every dot on the map regardless of which specific fuel a driver needed.
 function effectiveStatus(station) {
-  if (!selectedFuelTypes.value.length) return station.status;
-  const entries = (station.fuelStatuses || []).filter((f) => selectedFuelTypes.value.includes(f.fuelType));
+  const types = activeFuelTypes.value;
+  const entries = (station.fuelStatuses || []).filter((f) => types.includes(f.fuelType));
   if (!entries.length) return 'no_data';
   let best = entries[0].status;
   for (const entry of entries) {
@@ -95,63 +118,32 @@ function effectiveStatus(station) {
   return best;
 }
 
-const selectedFuelTypesLabel = computed(() =>
-  selectedFuelTypes.value.map(fuelTypeLabel).join(', ')
-);
-
-// What the status-badge's percentage is actually about right now - shown
-// next to it so a number that used to mean "share of stations open at all"
-// and now means "share of core-fuel readings available" doesn't read as an
-// unexplained change (see currentSummary's own doc comment).
-const badgeFuelLabel = computed(() =>
-  selectedFuelTypes.value.length ? selectedFuelTypesLabel.value : CORE_FUEL_TYPES.map(fuelTypeLabel).join(', ')
-);
-
-// The three fuel types most drivers actually ask for - unlike premium
-// grades (98/100) or gas conversions (propane/methane), which only a
-// minority of stations even carry, these three are close to universal (see
-// availableFuelTypes coverage checked live: 92/95 on ~100% of stations,
-// ДТ on ~78%).
-const CORE_FUEL_TYPES = ['92', '95', 'ДТ'];
+// What the status-badge's percentage (and the marker colors) are actually
+// about right now - shown next to the badge so it never reads as an
+// unexplained number.
+const badgeFuelLabel = computed(() => activeFuelTypes.value.map(fuelTypeLabel).join(', '));
 
 // Current-state summary for the selected region - always over every loaded
 // station, not just the ones visible under the status/brand checkboxes
 // (those are for decluttering markers, not for changing what "the region's
 // current state" actually is).
 //
-// Default case (no fuel type picked in the filter drawer): pools each
-// station's own reading for CORE_FUEL_TYPES, each counted as its own data
-// point, rather than each station's one blanket overall status (what this
-// used to do unconditionally, via effectiveStatus/station.status). Verified
-// live that these disagree materially - a per-station blanket ~52% vs ~42%
-// pooled this way, with 92 alone as low as ~33% - because a station's
-// blanket status is usually driven by whichever fuel/source made it green,
-// not necessarily the specific type a given driver needs; "52% of stations
-// are open for business" and "42% chance your specific fuel is actually
-// there" are different, both true, claims, and the second is the one a
-// driver checking this badge is actually asking. Marker dot colors are
-// unaffected by this (still effectiveStatus/station.status) - this only
-// changes the aggregate %/counts shown in the badge, the drawer's inline
-// summary, and the share card.
-//
-// Explicit-selection case (user picked specific fuel type(s) in the filter):
-// unchanged - pools by effectiveStatus (best-of among just those types), so
-// picking propane still means the badge is about propane, not silently
-// staying pinned to 92/95/ДТ regardless of what was picked.
+// Pools each station's own reading for activeFuelTypes, each counted as its
+// own data point, rather than each station's one blanket overall status
+// (what this used to do before fuel-type-scoping existed at all). A
+// station's blanket status is usually driven by whichever fuel/source made
+// it green, not necessarily the specific type a given driver needs - "52%
+// of stations are open for business" and "27% chance your gasoline is
+// actually there" are different, both potentially true, claims, and the
+// second is the one a driver checking this badge is actually asking.
 const currentSummary = computed(() => {
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
-  if (selectedFuelTypes.value.length) {
-    for (const s of stations.value) {
-      const st = effectiveStatus(s);
+  const types = activeFuelTypes.value;
+  for (const s of stations.value) {
+    const byType = Object.fromEntries((s.fuelStatuses || []).map((f) => [f.fuelType, f.status]));
+    for (const type of types) {
+      const st = byType[type] || 'no_data';
       counts[st] = (counts[st] || 0) + 1;
-    }
-  } else {
-    for (const s of stations.value) {
-      const byType = Object.fromEntries((s.fuelStatuses || []).map((f) => [f.fuelType, f.status]));
-      for (const type of CORE_FUEL_TYPES) {
-        const st = byType[type] || 'no_data';
-        counts[st] = (counts[st] || 0) + 1;
-      }
     }
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
@@ -196,12 +188,24 @@ function setAllBrands(visible) {
 // brand filters only live inside the drawer, so closing it after picking
 // either used to leave no sign anything was filtered at all. This drives a
 // small badge next to the toggle for exactly those two (see the template).
+//
+// Compares against CORE_FUEL_TYPES (the default selection, gasoline), not
+// against "empty" - selectedFuelTypes now starts non-empty (see its own
+// comment above), so a bare length check would have shown this badge
+// permanently from the very first load, even though nothing was actually
+// changed from the default.
+function sameFuelTypeSet(a, b) {
+  return a.length === b.length && new Set(b).size === new Set([...a, ...b]).size;
+}
+
 const hasActiveExtraFilters = computed(
-  () => selectedFuelTypes.value.length > 0 || Object.values(brandFilters).some((visible) => visible === false)
+  () =>
+    !sameFuelTypeSet(selectedFuelTypes.value, CORE_FUEL_TYPES) ||
+    Object.values(brandFilters).some((visible) => visible === false)
 );
 
 function resetExtraFilters() {
-  selectedFuelTypes.value = [];
+  selectedFuelTypes.value = [...CORE_FUEL_TYPES];
   setAllBrands(true);
 }
 
@@ -361,7 +365,7 @@ function escapeHtml(str) {
 // via the popupopen handler in renderMarkers(), not a @click binding.
 function buildPopupHtml(s) {
   const meta = statusMeta(effectiveStatus(s));
-  const fuelSuffix = selectedFuelTypes.value.length ? ` (${escapeHtml(selectedFuelTypesLabel.value)})` : '';
+  const fuelSuffix = ` (${escapeHtml(badgeFuelLabel.value)})`;
   const fuelRows = (s.fuelStatuses || [])
     .map((f) => {
       const fm = statusMeta(f.status);
@@ -395,13 +399,10 @@ function buildPopupHtml(s) {
 //
 // Chips still show each source's own blanket overall status (their literal
 // claim, for transparency) - but the "⚠ расходятся" warning compares each
-// source's coreStatus (best-of among 92/95/ДТ, see backend's
+// source's coreStatus (best-of among 92/95 gasoline, see backend's
 // metricsService.deriveCoreStatus) against tbank's own tbankCoreStatus
-// instead of blanket vs blanket. Verified live: comparing blanket statuses
-// flagged 166 of 249 matched source-links as "disagreeing" region-wide;
-// comparing core-fuel-type agreement instead drops that to 119 - a third of
-// the old warnings were purely about a non-core fuel type (propane, 98, 100)
-// neither side was actually making a claim about that matters here.
+// instead of blanket vs blanket - a source disagreeing purely over diesel/
+// propane/98/100 isn't a claim this warning is about.
 function sourcesSummaryHtml(s) {
   const sources = s.sources || [];
   if (!sources.length) {
@@ -422,7 +423,7 @@ function sourcesSummaryHtml(s) {
   return `
     <div class="popup-sources">
       ${chips.join('')}
-      ${disagree ? '<span class="popup-sources-warn">⚠ расходятся (АИ-92/95, ДТ)</span>' : ''}
+      ${disagree ? '<span class="popup-sources-warn">⚠ расходятся (АИ-92, АИ-95)</span>' : ''}
     </div>
   `;
 }
@@ -439,7 +440,7 @@ function renderMarkers() {
       fillOpacity: 0.85,
       weight: 2,
     });
-    const fuelSuffix = selectedFuelTypes.value.length ? ` (${escapeHtml(selectedFuelTypesLabel.value)})` : '';
+    const fuelSuffix = ` (${escapeHtml(badgeFuelLabel.value)})`;
     marker.bindTooltip(`${escapeHtml(s.name || 'АЗС')} — ${meta.label}${fuelSuffix}`);
     marker.bindPopup(() => buildPopupHtml(s), { maxWidth: 260, minWidth: 220 });
     // The button inside the popup isn't part of Vue's render tree (it's raw
@@ -483,7 +484,7 @@ async function handleRegionChange() {
   // unrelated, stale selection.
   for (const key of Object.keys(brandFilters)) delete brandFilters[key];
   brandSearch.value = '';
-  selectedFuelTypes.value = [];
+  selectedFuelTypes.value = [...CORE_FUEL_TYPES];
   await loadRange();
   await loadSnapshot();
 }
@@ -744,6 +745,7 @@ async function generateShareCard() {
       counts: currentSummary.value.counts,
       stationCount: currentSummary.value.total,
       availablePct: currentSummary.value.availablePct,
+      fuelLabel: badgeFuelLabel.value,
       generatedAt: Date.now(),
     });
     shareCardBlob = blob;
@@ -982,7 +984,7 @@ onBeforeUnmount(() => {
 
               <div class="filter-block">
                 <template v-if="availableFuelTypes.length">
-                  <span class="filter-label">Виды топлива (влияет на цвет точек на карте):</span>
+                  <span class="filter-label">Виды топлива (по умолчанию — бензин, влияет на цвет точек и процент):</span>
                   <label v-for="ft in availableFuelTypes" :key="ft" class="filter-checkbox">
                     <input type="checkbox" v-model="selectedFuelTypes" :value="ft" @change="handleFilterChange" />
                     {{ fuelTypeLabel(ft) }}

@@ -208,7 +208,7 @@ function handleSubmit() {
         </div>
 
         <div class="form-row">
-          <label for="fuelTypes">Виды топлива (через запятую, пусто — АИ-92, АИ-95, ДТ)</label>
+          <label for="fuelTypes">Виды топлива (через запятую, пусто — АИ-92, АИ-95)</label>
           <input id="fuelTypes" v-model="fuelTypesText" type="text" placeholder="92, 95, 98" />
         </div>
 
@@ -279,7 +279,8 @@ function handleSubmit() {
           <p class="hint" style="margin-top: 12px">
             Какие статусы отмечать точками на картинке — например, можно убрать «Нет», если
             станций без топлива слишком много и они перекрывают всё остальное. На сводку чисел под
-            картинкой это не влияет — там всегда полная картина.
+            картинкой это не влияет — там всегда полная картина (по АИ-92, АИ-95, без учёта этого
+            фильтра).
           </p>
           <div class="region-list">
             <label v-for="key in MAP_STATUS_KEYS" :key="key" class="filter-checkbox">

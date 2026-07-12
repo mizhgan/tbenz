@@ -200,7 +200,7 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
       <text x="${PAD}" y="66" font-family="${FONT}" font-size="13" fill="${COLOR_SUBTEXT}">${escapeXml(periodLabel)}</text>
 
       <text x="${PAD}" y="152" font-family="${FONT}" font-size="66" font-weight="bold" fill="${color}">${pctText}</text>
-      <text x="${PAD}" y="174" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">доступность сейчас · АИ-92/95, ДТ</text>
+      <text x="${PAD}" y="174" font-family="${FONT}" font-size="14" fill="${COLOR_SUBTEXT}">доступность сейчас · АИ-92, АИ-95</text>
       ${trendBadge(trendInfo, badgeX, badgeY)}
 
       ${statRow}

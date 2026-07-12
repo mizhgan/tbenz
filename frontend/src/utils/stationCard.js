@@ -159,7 +159,15 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
     y += 24;
 
     const tiles = [
-      { value: formatPct(reliability.availablePct), label: 'Доступность', color: availabilityColor(reliability.availablePct) },
+      {
+        value: formatPct(reliability.availablePct),
+        // The metric quietly narrowed to gasoline only (see
+        // metricsService.js's own doc comment on CORE_FUEL_TYPES) - called
+        // out here, unlike the other tiles' plain labels, so the number
+        // doesn't read as an unexplained change.
+        label: 'Доступность (АИ-92, АИ-95)',
+        color: availabilityColor(reliability.availablePct),
+      },
       { value: formatPct(reliability.noDataPct), label: 'Нет данных', color: '#0f172a' },
       { value: String(reliability.outageCount), label: 'Отключений', color: '#0f172a' },
       { value: formatMinutes(reliability.avgOutageMinutes), label: 'Ср. восстановление', color: '#0f172a' },

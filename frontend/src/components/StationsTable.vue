@@ -26,7 +26,9 @@ watch(
 
 const COLUMNS = [
   { key: 'name', label: 'Станция' },
-  { key: 'availablePct', label: 'Доступность' },
+  // Gasoline only (АИ-92/95), not diesel/gas - see metricsService.js's own
+  // doc comment on CORE_FUEL_TYPES.
+  { key: 'availablePct', label: 'Доступность (92/95)' },
   { key: 'noDataPct', label: 'Нет данных' },
   { key: 'outageCount', label: 'Отключений' },
   { key: 'avgOutageMinutes', label: 'Ср. восстановление' },
