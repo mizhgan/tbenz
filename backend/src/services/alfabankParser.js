@@ -27,6 +27,26 @@
  * combine *several sources'* readings - applied here to just this one
  * source's own readings, at equal weight, as the closest single-source
  * analog of "what would this source say about the station overall".
+ *
+ * `last_transaction_at` recency check: verified live against a real region's
+ * worth of data (Kirov, 77 stations) that "available"/"probably_unavailable"/
+ * "unavailable" are genuinely transaction-recency-derived - "available"
+ * never appeared more than ~3.4 days stale, while "probably_unavailable"
+ * ranged up to 27 days stale (median ~6 days) - alfabank keeps asserting its
+ * weak-negative hedge indefinitely rather than ever giving up and reporting
+ * "unknown" once a pump's own transaction history goes cold. Trusting a
+ * three-week-old "probably_unavailable" at the same weight as a fresh tbank/
+ * gdebenz reading would let stale noise quietly outvote current evidence
+ * (see combineTwo's doc comment on why this app prefers admitting "we don't
+ * know" over guessing) - staleFuelStatus below downgrades any of these three
+ * labels to no_data once last_transaction_at is missing or older than
+ * STALE_AFTER_MS, dropping them out of the merge vote entirely (resolveVotes
+ * skips readings whose status isn't a recognized available/maybe_available/
+ * not_available). "closed" is deliberately exempt - confirmed live it's a
+ * station-level flag applied uniformly across all 4 categories at once (not
+ * a per-fuel staleness artifact) for stations alfabank considers shut,
+ * frequently even with no last_transaction_at ever recorded for that pump;
+ * "unknown" already maps to no_data regardless.
  */
 const { normalizeFuelType } = require('../utils/fuelTypeNormalizer');
 const { resolveVotes } = require('./mergeStatusService');
@@ -44,8 +64,24 @@ const STATUS_MAP = {
   unknown: 'no_data',
 };
 
-function mapStatus(rawStatus) {
+// See this file's doc comment above for why exactly these three (not
+// "closed"/"unknown") get staleness-checked, and why 7 days: generous
+// enough to never touch a real "available" reading (never seen stale past
+// ~3.4 days), while catching the long tail of "probably_unavailable" claims
+// that are really just "no data for weeks" wearing a weak-negative label.
+const RECENCY_DEPENDENT_STATUSES = new Set(['available', 'probably_unavailable', 'unavailable']);
+const STALE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isStale(lastTransactionAt) {
+  if (!lastTransactionAt) return true;
+  const date = new Date(lastTransactionAt);
+  if (Number.isNaN(date.getTime())) return true;
+  return Date.now() - date.getTime() > STALE_AFTER_MS;
+}
+
+function mapStatus(rawStatus, lastTransactionAt) {
   if (rawStatus === null || rawStatus === undefined) return 'no_data';
+  if (RECENCY_DEPENDENT_STATUSES.has(rawStatus) && isStale(lastTransactionAt)) return 'no_data';
   return STATUS_MAP[rawStatus] || 'no_data';
 }
 
@@ -67,7 +103,7 @@ function mapFuelType(rawType) {
 function parseFuelStatuses(fuels) {
   if (!Array.isArray(fuels)) return [];
   return fuels
-    .map((f) => ({ fuelType: mapFuelType(f?.category), status: mapStatus(f?.status) }))
+    .map((f) => ({ fuelType: mapFuelType(f?.category), status: mapStatus(f?.status, f?.last_transaction_at) }))
     .filter((f) => f.fuelType);
 }
 
