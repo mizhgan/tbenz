@@ -86,6 +86,12 @@ function handleMouseMove(e) {
 
 onMounted(() => {
   map = L.map(mapContainer.value).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+  // Leaflet's own "Leaflet" link in the attribution control is just its
+  // default branding, not a license requirement - drop it, same as
+  // MapView.vue/StationDetailModal.vue/StationSourcesModal.vue already do.
+  // The OpenStreetMap attribution added by the tile layer below stays:
+  // it's required by OSM's tile usage policy for their free tiles.
+  map.attributionControl.setPrefix(false);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,

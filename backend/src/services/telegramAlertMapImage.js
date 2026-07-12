@@ -83,6 +83,10 @@ function buildMapHtml(points, bbox) {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
   const map = L.map('map', { zoomControl: false, attributionControl: true });
+  // Same as the site's own maps (MapView.vue etc.): drop Leaflet's own
+  // "Leaflet" branding link, keep the OpenStreetMap credit - required by
+  // OSM's tile usage policy for their free tiles, unlike the Leaflet prefix.
+  map.attributionControl.setPrefix(false);
   const tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
