@@ -1,7 +1,9 @@
 const TelegramChat = require('../models/TelegramChat');
+const Station = require('../models/Station');
 const telegramBot = require('./telegramBot');
 const telegramDigestData = require('./telegramDigestData');
 const telegramDigestImage = require('./telegramDigestImage');
+const telegramAlertMapImage = require('./telegramAlertMapImage');
 const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
 const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
@@ -112,6 +114,54 @@ function chunkMessages(header, blocks) {
   return messages;
 }
 
+function computeRelevantBlocks(chat, stationEvents) {
+  const blocks = [];
+  for (const { station, transitions } of stationEvents) {
+    const relevant = transitions.filter(
+      ({ eventKey, fuelType }) => chat.events[eventKey] && chatMatchesFilters(chat, station, fuelType)
+    );
+    if (relevant.length) blocks.push(formatStationBlock(station, relevant));
+  }
+  return blocks;
+}
+
+/**
+ * Sends the map+stats snapshot image (see telegramAlertMapImage.js) ahead
+ * of the text alert, for whichever of `chats` picked an alertMapBbox (see
+ * TelegramChat.js) *and* actually have something relevant in this batch -
+ * a chat with a bbox configured but nothing matching its own event/fuel/
+ * brand filters this tick shouldn't get an image with no accompanying
+ * text. Deliberately its own pass over `chats` rather than folded into
+ * sendToChats below: that helper only knows how to send text, and photo
+ * sends need their own buffer-rendering step per chat first anyway. Sent
+ * with no caption - the existing chunked text message immediately after
+ * (via sendToChats) already carries the per-station detail, so the image
+ * and text land as two consecutive posts rather than duplicating text
+ * into a Telegram photo caption (which is capped at 1024 chars, much
+ * tighter than a plain message's 4096).
+ */
+async function sendAlertMapImages(region, chats, stationEvents) {
+  const chatsWithBbox = chats.filter((chat) => chat.alertMapBbox);
+  for (const chat of chatsWithBbox) {
+    if (!computeRelevantBlocks(chat, stationEvents).length) continue;
+    try {
+      const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
+      const stations = await Station.find({
+        regions: region._id,
+        lat: { $gte: minLat, $lte: maxLat },
+        lon: { $gte: minLon, $lte: maxLon },
+      })
+        .select('lat lon lastStatus')
+        .lean();
+      const buffer = await telegramAlertMapImage.renderAlertMapImage({ bbox: chat.alertMapBbox, stations });
+      await telegramBot.sendPhoto(chat, buffer, null);
+    } catch (err) {
+      logger.error(`Telegram alert map image failed for chat ${chat.chatId}:`, err.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+}
+
 /**
  * Sends one batch of Telegram messages per chat covering every station
  * whose fuel availability changed in a single region poll, grouped by
@@ -138,14 +188,10 @@ async function notifyRegionChanges(region, stationEvents) {
   });
   if (!chats.length) return;
 
+  await sendAlertMapImages(region, chats, stationEvents);
+
   await telegramBot.sendToChats(chats, (chat) => {
-    const blocks = [];
-    for (const { station, transitions } of stationEvents) {
-      const relevant = transitions.filter(
-        ({ eventKey, fuelType }) => chat.events[eventKey] && chatMatchesFilters(chat, station, fuelType)
-      );
-      if (relevant.length) blocks.push(formatStationBlock(station, relevant));
-    }
+    const blocks = computeRelevantBlocks(chat, stationEvents);
     if (!blocks.length) return [];
 
     const header =

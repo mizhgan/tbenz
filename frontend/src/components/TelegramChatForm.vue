@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import { stationsApi } from '../api/regions';
+import RegionMapPicker from './RegionMapPicker.vue';
 
 const props = defineProps({
   initial: { type: Object, required: true },
@@ -31,6 +32,31 @@ const brandsText = ref(props.initial.brands.join(', '));
 const watchlist = reactive(
   props.initial.watchlist.map((s) => ({ id: String(s.id), name: s.name, address: s.address }))
 );
+
+// Sub-area (deliberately smaller than the region's own, usually much
+// larger, bbox) for the map snapshot attached to stationAvailable/
+// stationUnavailable alerts - see TelegramChat.js's alertMapBbox doc
+// comment for why this isn't just "the whole followed region". All four
+// null means "no image" (the default, and what an empty/cleared picker
+// submits) - handled the same way RegionForm.vue treats its own bbox,
+// just optional here instead of required.
+const bbox = reactive({
+  minLat: props.initial.alertMapBbox?.minLat ?? null,
+  maxLat: props.initial.alertMapBbox?.maxLat ?? null,
+  minLon: props.initial.alertMapBbox?.minLon ?? null,
+  maxLon: props.initial.alertMapBbox?.maxLon ?? null,
+});
+
+function onBboxPicked(picked) {
+  Object.assign(bbox, picked);
+}
+
+function clearBbox() {
+  bbox.minLat = null;
+  bbox.maxLat = null;
+  bbox.minLon = null;
+  bbox.maxLon = null;
+}
 
 const searchQuery = ref('');
 const searchResults = ref([]);
@@ -74,6 +100,22 @@ function removeStation(id) {
 
 function handleSubmit() {
   error.value = '';
+  const bboxValues = [bbox.minLat, bbox.maxLat, bbox.minLon, bbox.maxLon];
+  const bboxFilledCount = bboxValues.filter((v) => v !== null && v !== undefined && v !== '').length;
+  let alertMapBbox = null;
+  if (bboxFilledCount > 0) {
+    if (bboxFilledCount < 4 || bboxValues.some((v) => !Number.isFinite(Number(v)))) {
+      error.value = 'Для картинки карты в уведомлениях укажите все 4 координаты области (или очистите их все)';
+      return;
+    }
+    const [minLat, maxLat, minLon, maxLon] = bboxValues.map(Number);
+    if (minLat >= maxLat || minLon >= maxLon) {
+      error.value = 'Область для картинки: минимальные координаты должны быть меньше максимальных';
+      return;
+    }
+    alertMapBbox = { minLat, maxLat, minLon, maxLon };
+  }
+
   const payload = {
     status: status.value,
     regions: Array.from(selectedRegionIds),
@@ -87,6 +129,7 @@ function handleSubmit() {
       .map((s) => s.trim())
       .filter(Boolean),
     watchlist: watchlist.map((s) => s.id),
+    alertMapBbox,
   };
   emit('submit', payload);
 }
@@ -176,6 +219,35 @@ function handleSubmit() {
           <p v-else class="muted">Вотчлист пуст.</p>
         </div>
 
+        <div class="form-row">
+          <label>Картинка карты в уведомлениях о появлении/пропаже топлива</label>
+          <p class="hint">
+            Необязательно. Выберите на карте область, которую нужно показывать на картинке —
+            специально не весь район целиком, чтобы точки станций не были слишком мелкими. Если
+            область не задана, уведомления остаются текстовыми, как раньше.
+          </p>
+          <RegionMapPicker :model-value="bbox" @update:model-value="onBboxPicked" />
+          <div class="bbox-grid">
+            <div class="form-row">
+              <label>minLat</label>
+              <input v-model.number="bbox.minLat" type="number" step="any" />
+            </div>
+            <div class="form-row">
+              <label>maxLat</label>
+              <input v-model.number="bbox.maxLat" type="number" step="any" />
+            </div>
+            <div class="form-row">
+              <label>minLon</label>
+              <input v-model.number="bbox.minLon" type="number" step="any" />
+            </div>
+            <div class="form-row">
+              <label>maxLon</label>
+              <input v-model.number="bbox.maxLon" type="number" step="any" />
+            </div>
+          </div>
+          <button type="button" class="btn secondary" @click="clearBbox">Убрать картинку (не задавать область)</button>
+        </div>
+
         <p v-if="error" class="error-text">{{ error }}</p>
 
         <div class="modal-actions">
@@ -220,6 +292,13 @@ function handleSubmit() {
   padding: 8px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+}
+
+.bbox-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+  margin-top: 12px;
 }
 
 .filter-checkbox {

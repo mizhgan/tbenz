@@ -93,4 +93,4 @@ async function closeBrowser() {
   }
 }
 
-module.exports = { fetchJsonThroughBrowser, closeBrowser };
+module.exports = { getBrowser, fetchJsonThroughBrowser, closeBrowser };

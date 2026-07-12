@@ -19,6 +19,14 @@ function serializeChat(chat) {
     watchlist: chat.watchlist.map((s) =>
       s && s.name !== undefined ? { id: s._id, name: s.name, address: s.address } : { id: s, name: null }
     ),
+    alertMapBbox: chat.alertMapBbox
+      ? {
+          minLat: chat.alertMapBbox.minLat,
+          maxLat: chat.alertMapBbox.maxLat,
+          minLon: chat.alertMapBbox.minLon,
+          maxLon: chat.alertMapBbox.maxLon,
+        }
+      : null,
     lastHourlyDigestAt: chat.lastHourlyDigestAt,
     lastDailyDigestAt: chat.lastDailyDigestAt,
     createdAt: chat.createdAt,
@@ -68,6 +76,21 @@ function validateUpdate(body) {
   if (body.watchlist !== undefined) {
     if (!Array.isArray(body.watchlist)) throw new HttpError(400, 'watchlist must be an array');
     out.watchlist = body.watchlist;
+  }
+  if (body.alertMapBbox !== undefined) {
+    if (body.alertMapBbox === null) {
+      out.alertMapBbox = null;
+    } else {
+      const { minLat, maxLat, minLon, maxLon } = body.alertMapBbox || {};
+      const coords = [minLat, maxLat, minLon, maxLon];
+      if (typeof body.alertMapBbox !== 'object' || coords.some((c) => !Number.isFinite(c))) {
+        throw new HttpError(400, 'alertMapBbox must be null or {minLat, maxLat, minLon, maxLon} numbers');
+      }
+      if (minLat >= maxLat || minLon >= maxLon) {
+        throw new HttpError(400, 'alertMapBbox: min must be less than max for both lat and lon');
+      }
+      out.alertMapBbox = { minLat, maxLat, minLon, maxLon };
+    }
   }
 
   return out;

@@ -42,6 +42,28 @@ const telegramChatSchema = new Schema(
 
     lastHourlyDigestAt: { type: Date, default: null },
     lastDailyDigestAt: { type: Date, default: null },
+
+    // Optional, admin-picked sub-area (RegionMapPicker.vue, reused in
+    // TelegramChatForm.vue) for the map snapshot attached to
+    // stationAvailable/stationUnavailable alerts (see
+    // telegramNotifier.notifyRegionChanges / telegramAlertMapImage.js).
+    // Deliberately NOT the followed region's own (usually much larger)
+    // bbox - rendering every station across a whole region onto one small
+    // image makes markers too small/cramped to read at a glance; an admin
+    // picking a smaller, specific area keeps the image legible. null (the
+    // default) means no image is attached at all for this chat.
+    alertMapBbox: {
+      type: new Schema(
+        {
+          minLat: { type: Number, required: true },
+          maxLat: { type: Number, required: true },
+          minLon: { type: Number, required: true },
+          maxLon: { type: Number, required: true },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 );
