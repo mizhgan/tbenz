@@ -21,6 +21,13 @@ module.exports = {
   proxyFailureThreshold: Number(process.env.PROXY_FAILURE_THRESHOLD || 3),
   proxyRequestTimeoutMs: Number(process.env.PROXY_REQUEST_TIMEOUT_MS || 20000),
   proxyCheckUrl: process.env.PROXY_CHECK_URL || 'https://toplivo.tbank.ru/api/v1/stations',
+  // How often auto-disabled proxies get retested (see proxyHealthScheduler.js)
+  // - a proxy that tripped the failure threshold is often just temporarily
+  // down (rate-limited, restarted by the vendor, etc.), not permanently
+  // dead, so it's worth periodically finding out it's actually fine again
+  // instead of staying disabled until an admin happens to notice and
+  // re-enable it manually.
+  proxyRecheckIntervalMinutes: Number(process.env.PROXY_RECHECK_INTERVAL_MINUTES || 30),
   // Telegram bot is entirely optional - if unset, the feature is inert (no
   // bot process starts, admin panel just shows it as "not configured").
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || null,

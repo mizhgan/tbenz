@@ -14,6 +14,7 @@ const scheduler = require('./services/scheduler');
 const telegramBot = require('./services/telegramBot');
 const telegramDigestScheduler = require('./services/telegramDigestScheduler');
 const telegramPredictiveScheduler = require('./services/telegramPredictiveScheduler');
+const proxyHealthScheduler = require('./services/proxyHealthScheduler');
 const browserFetchService = require('./services/browserFetchService');
 const logger = require('./utils/logger');
 
@@ -24,6 +25,7 @@ async function main() {
   await telegramBot.start();
   telegramDigestScheduler.start();
   telegramPredictiveScheduler.start();
+  proxyHealthScheduler.start();
 
   const app = express();
   // Traffic arrives via nginx (see frontend/nginx.conf's proxy_set_header
@@ -71,6 +73,7 @@ process.on('SIGTERM', () => {
   scheduler.stopAll();
   telegramDigestScheduler.stop();
   telegramPredictiveScheduler.stop();
+  proxyHealthScheduler.stop();
   telegramBot.stop();
   browserFetchService.closeBrowser().finally(() => process.exit(0));
 });

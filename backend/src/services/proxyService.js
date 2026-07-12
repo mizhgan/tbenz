@@ -165,6 +165,44 @@ async function testProxy(proxy) {
   }
 }
 
+// Prefix set on Proxy.disabledReason by recordFailure's auto-disable path
+// above - the one reliable way to tell "this proxy got auto-disabled and
+// might just be temporarily down" apart from "an admin turned this off on
+// purpose" (an admin-initiated deactivation via updateProxy never sets
+// disabledReason at all - see proxies.controller.js).
+const AUTO_DISABLE_PREFIX = 'Автоматически отключен';
+
+/**
+ * Retests every currently auto-disabled proxy (see AUTO_DISABLE_PREFIX
+ * above) and re-activates whichever ones pass - a proxy that tripped the
+ * failure threshold is often only temporarily down (rate-limited, the
+ * vendor restarted it, etc.), and previously stayed disabled until an
+ * admin happened to notice and flip it back on by hand. Reuses testProxy
+ * exactly like the manual "Проверить" button, including writing the same
+ * lastCheck* fields, so a recovered proxy's admin-panel row looks no
+ * different from one an admin just checked themselves. Proxies an admin
+ * disabled on purpose (no disabledReason) are never touched here.
+ */
+async function recheckDisabledProxies() {
+  const candidates = await Proxy.find({ active: false, disabledReason: new RegExp(`^${AUTO_DISABLE_PREFIX}`) });
+  let recovered = 0;
+  for (const proxy of candidates) {
+    const result = await testProxy(proxy);
+    proxy.lastCheckedAt = new Date();
+    proxy.lastCheckStatus = result.ok ? 'ok' : 'error';
+    proxy.lastCheckLatencyMs = result.latencyMs;
+    proxy.lastCheckError = result.error;
+    if (result.ok) {
+      proxy.active = true;
+      proxy.consecutiveFailures = 0;
+      proxy.disabledReason = null;
+      recovered += 1;
+    }
+    await proxy.save();
+  }
+  return { checked: candidates.length, recovered };
+}
+
 module.exports = {
   buildAgent,
   buildPlaywrightProxyOption,
@@ -172,5 +210,6 @@ module.exports = {
   pickRandomActiveProxy,
   recordSuccess,
   recordFailure,
+  recheckDisabledProxies,
   testProxy,
 };
