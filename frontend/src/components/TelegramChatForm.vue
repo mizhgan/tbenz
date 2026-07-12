@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue';
 import { stationsApi } from '../api/regions';
 import RegionMapPicker from './RegionMapPicker.vue';
+import { statusMeta } from '../utils/fuelStatus';
 
 const props = defineProps({
   initial: { type: Object, required: true },
@@ -23,6 +24,9 @@ const EVENT_OPTIONS = [
   { key: 'predictiveDropAlert', label: 'Прогноз: скоро может пропасть' },
   { key: 'predictiveRecoveryAlert', label: 'Прогноз: скоро может появиться' },
 ];
+
+// Same 4 statuses/order as MapView.vue's own quick filters.
+const MAP_STATUS_KEYS = ['available', 'maybe_available', 'not_available', 'no_data'];
 
 const status = ref(props.initial.status);
 const selectedRegionIds = reactive(new Set(props.initial.regions.map((r) => String(r.id))));
@@ -56,6 +60,20 @@ function clearBbox() {
   bbox.maxLat = null;
   bbox.minLon = null;
   bbox.maxLon = null;
+}
+
+// Which statuses get a dot on the map image (see TelegramChat.js's own
+// doc comment) - defaults to all 4 (i.e. unfiltered) both for a brand new
+// chat and for one saved before this field existed, so nothing changes
+// until an admin deliberately narrows it. A Set, same pattern as
+// selectedRegionIds above.
+const selectedMapStatuses = reactive(
+  new Set(props.initial.alertMapStatuses?.length ? props.initial.alertMapStatuses : MAP_STATUS_KEYS)
+);
+
+function toggleMapStatus(key) {
+  if (selectedMapStatuses.has(key)) selectedMapStatuses.delete(key);
+  else selectedMapStatuses.add(key);
 }
 
 const searchQuery = ref('');
@@ -130,6 +148,7 @@ function handleSubmit() {
       .filter(Boolean),
     watchlist: watchlist.map((s) => s.id),
     alertMapBbox,
+    alertMapStatuses: MAP_STATUS_KEYS.filter((k) => selectedMapStatuses.has(k)),
   };
   emit('submit', payload);
 }
@@ -246,6 +265,23 @@ function handleSubmit() {
             </div>
           </div>
           <button type="button" class="btn secondary" @click="clearBbox">Убрать картинку (не задавать область)</button>
+
+          <p class="hint" style="margin-top: 12px">
+            Какие статусы отмечать точками на картинке — например, можно убрать «Нет», если
+            станций без топлива слишком много и они перекрывают всё остальное. На сводку чисел под
+            картинкой это не влияет — там всегда полная картина.
+          </p>
+          <div class="region-list">
+            <label v-for="key in MAP_STATUS_KEYS" :key="key" class="filter-checkbox">
+              <input
+                type="checkbox"
+                :checked="selectedMapStatuses.has(key)"
+                @change="toggleMapStatus(key)"
+              />
+              <span class="status-dot" :style="{ background: statusMeta(key).color }"></span>
+              {{ statusMeta(key).label }}
+            </label>
+          </div>
         </div>
 
         <p v-if="error" class="error-text">{{ error }}</p>
@@ -306,6 +342,14 @@ function handleSubmit() {
   align-items: center;
   gap: 8px;
   font-weight: normal;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .muted {

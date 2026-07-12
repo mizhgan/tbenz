@@ -125,40 +125,76 @@ function computeRelevantBlocks(chat, stationEvents) {
   return blocks;
 }
 
-/**
- * Sends the map+stats snapshot image (see telegramAlertMapImage.js) ahead
- * of the text alert, for whichever of `chats` picked an alertMapBbox (see
- * TelegramChat.js) *and* actually have something relevant in this batch -
- * a chat with a bbox configured but nothing matching its own event/fuel/
- * brand filters this tick shouldn't get an image with no accompanying
- * text. Deliberately its own pass over `chats` rather than folded into
- * sendToChats below: that helper only knows how to send text, and photo
- * sends need their own buffer-rendering step per chat first anyway. Sent
- * with no caption - the existing chunked text message immediately after
- * (via sendToChats) already carries the per-station detail, so the image
- * and text land as two consecutive posts rather than duplicating text
- * into a Telegram photo caption (which is capped at 1024 chars, much
- * tighter than a plain message's 4096).
- */
-async function sendAlertMapImages(region, chats, stationEvents) {
-  const chatsWithBbox = chats.filter((chat) => chat.alertMapBbox);
-  for (const chat of chatsWithBbox) {
-    if (!computeRelevantBlocks(chat, stationEvents).length) continue;
-    try {
-      const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
-      const stations = await Station.find({
-        regions: region._id,
-        lat: { $gte: minLat, $lte: maxLat },
-        lon: { $gte: minLon, $lte: maxLon },
-      })
-        .select('lat lon lastStatus')
-        .lean();
-      const buffer = await telegramAlertMapImage.renderAlertMapImage({ bbox: chat.alertMapBbox, stations });
-      await telegramBot.sendPhoto(chat, buffer, null);
-    } catch (err) {
-      logger.error(`Telegram alert map image failed for chat ${chat.chatId}:`, err.message);
-    }
+// Telegram photo captions are capped at 1024 chars, much tighter than a
+// plain message's 4096 (MAX_MESSAGE_LEN) - shared with sendDigest's own
+// buildCaption below, which has the same limit for the same reason.
+const MAX_CAPTION_LEN = 1024;
+
+// Same idea as chunkMessages, but for a photo caption: appends whole
+// blocks only (never mid-block, so a truncation can't cut an HTML tag in
+// half), and - unlike buildCaption below, which just drops whatever
+// doesn't fit - also reports back which blocks didn't make it in, so the
+// caller can send those as a follow-up text message instead of losing
+// them. A fuel-availability alert's whole point is the per-station
+// detail, so silently dropping the tail (fine for a digest, which is a
+// summary by nature) isn't acceptable here.
+function buildCaptionWithRemainder(title, blocks) {
+  let caption = title;
+  let includedCount = 0;
+  for (const block of blocks) {
+    const candidate = `${caption}\n\n${block}`;
+    if (candidate.length > MAX_CAPTION_LEN) break;
+    caption = candidate;
+    includedCount += 1;
+  }
+  return { caption, remainder: blocks.slice(includedCount) };
+}
+
+async function sendChunkedText(chat, header, blocks) {
+  if (!blocks.length) return;
+  for (const text of chunkMessages(header, blocks)) {
+    await telegramBot.sendMessage(chat, text);
     await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+}
+
+/**
+ * Sends the combined image+text post for one chat with an alertMapBbox
+ * configured (see TelegramChat.js) - the map+stats image
+ * (telegramAlertMapImage.js) with as much of the alert text as fits as
+ * its caption, so this lands as one post instead of an image followed by
+ * a separate message. Whatever doesn't fit in the 1024-char caption goes
+ * out right after as its own chunked text message(s) (see
+ * buildCaptionWithRemainder) - only actually happens on an unusually busy
+ * tick (many stations changing at once); the common case of one or two
+ * stations fits in a single caption with room to spare.
+ *
+ * Falls back to plain chunked text entirely (same as a chat with no
+ * bbox) if the image itself fails to render or send, so a rendering hiccup
+ * never costs a chat the alert altogether.
+ */
+async function sendAlertMapPost(chat, region, header, blocks) {
+  try {
+    const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
+    const stations = await Station.find({
+      regions: region._id,
+      lat: { $gte: minLat, $lte: maxLat },
+      lon: { $gte: minLon, $lte: maxLon },
+    })
+      .select('lat lon lastStatus')
+      .lean();
+    const buffer = await telegramAlertMapImage.renderAlertMapImage({
+      bbox: chat.alertMapBbox,
+      stations,
+      visibleStatuses: chat.alertMapStatuses,
+    });
+    const { caption, remainder } = buildCaptionWithRemainder(header, blocks);
+    const sent = await telegramBot.sendPhoto(chat, buffer, caption);
+    if (!sent) throw new Error('sendPhoto returned false');
+    await sendChunkedText(chat, header, remainder);
+  } catch (err) {
+    logger.error(`Telegram alert map image failed for chat ${chat.chatId}, falling back to text:`, err.message);
+    await sendChunkedText(chat, header, blocks);
   }
 }
 
@@ -188,18 +224,22 @@ async function notifyRegionChanges(region, stationEvents) {
   });
   if (!chats.length) return;
 
-  await sendAlertMapImages(region, chats, stationEvents);
-
-  await telegramBot.sendToChats(chats, (chat) => {
+  for (const chat of chats) {
     const blocks = computeRelevantBlocks(chat, stationEvents);
-    if (!blocks.length) return [];
+    if (!blocks.length) continue;
 
     const header =
       blocks.length === 1
         ? `Изменение топлива — ${escapeHtml(region.name)}`
         : `Изменения топлива (${blocks.length} ст.) — ${escapeHtml(region.name)}`;
-    return chunkMessages(header, blocks);
-  });
+
+    if (chat.alertMapBbox) {
+      await sendAlertMapPost(chat, region, header, blocks);
+    } else {
+      await sendChunkedText(chat, header, blocks);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
 }
 
 const RU_DATE_TZ = 'Europe/Moscow';
@@ -229,12 +269,13 @@ function formatRegionDigestText(data) {
   return lines.join('\n');
 }
 
-// Telegram photo/media-group captions are capped at 1024 chars (much
-// shorter than a plain message's 4096) - built by appending whole region
-// sections only, never mid-section, so a chat following many regions just
-// loses the tail end of sections rather than risking a truncation that
-// cuts an HTML tag in half (which would make Telegram reject the send).
-const MAX_CAPTION_LEN = 1024;
+// Builds a digest's photo/media-group caption (MAX_CAPTION_LEN defined
+// above) by appending whole region sections only, never mid-section, so a
+// chat following many regions just loses the tail end of sections rather
+// than risking a truncation that cuts an HTML tag in half (which would
+// make Telegram reject the send). Unlike buildCaptionWithRemainder above,
+// a dropped tail here is fine - a digest is a summary by nature, and
+// there's no follow-up message for the overflow.
 function buildCaption(title, sections) {
   let caption = title;
   for (const section of sections) {

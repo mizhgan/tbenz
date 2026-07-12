@@ -2,6 +2,9 @@ const { Schema, model } = require('mongoose');
 
 const STATUSES = ['pending', 'active', 'disabled'];
 const CHAT_TYPES = ['private', 'group', 'supergroup', 'channel'];
+// Same 4 statuses everywhere else in the app (fuelStatus.js's STATUS_META
+// on the frontend, mergeStatusService.js's vocabulary on the backend).
+const AVAILABILITY_STATUSES = ['available', 'maybe_available', 'not_available', 'no_data'];
 
 const telegramChatSchema = new Schema(
   {
@@ -64,6 +67,20 @@ const telegramChatSchema = new Schema(
       ),
       default: null,
     },
+    // Which statuses get a dot drawn on the alert map image - NOT the same
+    // as an "empty means no filter" array elsewhere on this schema (empty
+    // here would mean "show nothing", a real and sometimes-intended state,
+    // not "show everything"), so this always holds an explicit list.
+    // Defaults to all four (identical to the map having no filter at all)
+    // so an existing chat with alertMapBbox already set keeps seeing
+    // exactly what it saw before this field existed - narrowing it (e.g.
+    // dropping not_available, which tends to dominate the map and drown
+    // out the few available/maybe_available stations worth noticing) is
+    // an explicit admin choice, not a new default behavior. The stats
+    // strip under the map is unaffected by this - it always reflects
+    // every station in the picked area, not just the ones drawn as dots
+    // (see telegramAlertMapImage.js's doc comment on why).
+    alertMapStatuses: { type: [String], default: () => [...AVAILABILITY_STATUSES] },
   },
   { timestamps: true }
 );
@@ -71,5 +88,6 @@ const telegramChatSchema = new Schema(
 const TelegramChat = model('TelegramChat', telegramChatSchema);
 TelegramChat.STATUSES = STATUSES;
 TelegramChat.CHAT_TYPES = CHAT_TYPES;
+TelegramChat.AVAILABILITY_STATUSES = AVAILABILITY_STATUSES;
 
 module.exports = TelegramChat;

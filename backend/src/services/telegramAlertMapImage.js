@@ -180,10 +180,21 @@ async function renderStatsStrip(stations) {
  * `lastStatus`) stacked above a stats strip summarizing those same
  * stations' current status breakdown. Returns a PNG Buffer, ready for
  * telegramBot.sendPhoto.
+ *
+ * `visibleStatuses` (optional Set/array of status keys) only thins out
+ * which stations get a *dot* - e.g. a chat that's mostly not_available
+ * stations can drop that status from the map so the few
+ * available/maybe_available ones aren't lost in a sea of red. The stats
+ * strip deliberately always summarizes the *full* `stations` list
+ * regardless - showing "0 нет" under a map that hid 40 not_available
+ * dots would read as "there are none" instead of "we chose not to show
+ * them", which is a materially different (and wrong) claim about supply.
  */
-async function renderAlertMapImage({ bbox, stations }) {
+async function renderAlertMapImage({ bbox, stations, visibleStatuses }) {
+  const allowed = visibleStatuses ? new Set(visibleStatuses) : null;
   const points = stations
     .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
+    .filter((s) => !allowed || allowed.has(s.lastStatus))
     .map((s) => ({ lat: s.lat, lon: s.lon, color: STATUS_COLORS[s.lastStatus] || STATUS_COLORS.no_data }));
 
   const [mapBuffer, statsBuffer] = await Promise.all([captureMapImage(bbox, points), renderStatsStrip(stations)]);

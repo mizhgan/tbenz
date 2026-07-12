@@ -27,6 +27,7 @@ function serializeChat(chat) {
           maxLon: chat.alertMapBbox.maxLon,
         }
       : null,
+    alertMapStatuses: chat.alertMapStatuses,
     lastHourlyDigestAt: chat.lastHourlyDigestAt,
     lastDailyDigestAt: chat.lastDailyDigestAt,
     createdAt: chat.createdAt,
@@ -91,6 +92,12 @@ function validateUpdate(body) {
       }
       out.alertMapBbox = { minLat, maxLat, minLon, maxLon };
     }
+  }
+  if (body.alertMapStatuses !== undefined) {
+    if (!Array.isArray(body.alertMapStatuses) || body.alertMapStatuses.some((s) => !TelegramChat.AVAILABILITY_STATUSES.includes(s))) {
+      throw new HttpError(400, `alertMapStatuses must be an array of: ${TelegramChat.AVAILABILITY_STATUSES.join(', ')}`);
+    }
+    out.alertMapStatuses = body.alertMapStatuses;
   }
 
   return out;
