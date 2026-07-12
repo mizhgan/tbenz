@@ -81,6 +81,28 @@ async function start() {
     );
   });
 
+  // Main metric this bot/site reports on is deliberately just АИ-92/95
+  // (gasoline) - not diesel/gas, which stay visible per-station but don't
+  // drive the headline %/status/alerts anymore (see metricsService.js's own
+  // doc comment on CORE_FUEL_TYPES for why). Worth stating plainly here
+  // since it's not otherwise obvious from a bare "появилось"/"пропало"
+  // notification what fuel it's actually about.
+  bot.help(async (ctx) => {
+    const lines = [
+      '⛽ <b>Топливо — Мониторинг</b>',
+      '',
+      'Следим за доступностью топлива на АЗС Кировской области сразу по нескольким независимым источникам.',
+      '',
+      'Основная метрика (проценты, статусы, уведомления) — только <b>АИ-92 и АИ-95</b>: именно с бензином сейчас главные перебои в регионе. Дизель и газ по-прежнему видны в карточке каждой станции, просто не входят в общий процент.',
+      '',
+      '/settings — настроить рассылку (только в личных сообщениях)',
+      '/help — это сообщение',
+      '',
+      'Карта и отчёты: https://tbenz.in',
+    ];
+    await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+  });
+
   // Groups rarely get an explicit /start (e.g. the bot is just silently
   // added) - register on any first message we see from an unknown chat too.
   // Note: with Telegram's default group privacy mode, this only fires for
@@ -115,6 +137,16 @@ async function start() {
   bot.catch((err) => {
     logger.error('Telegram bot error:', err.message);
   });
+
+  // Purely cosmetic (the "/" command picker in Telegram's own UI) - best
+  // effort, never blocks/fails startup over it.
+  bot.telegram
+    .setMyCommands([
+      { command: 'start', description: 'Начать / статус регистрации чата' },
+      { command: 'settings', description: 'Настроить рассылку (в личных сообщениях)' },
+      { command: 'help', description: 'О боте' },
+    ])
+    .catch((err) => logger.warn(`Telegram: failed to set command list: ${err.message}`));
 
   // bot.launch() does not resolve until the bot stops - for long polling it
   // internally runs the receive loop for the entire lifetime of the process.

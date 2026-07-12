@@ -101,7 +101,13 @@ function eventsMenu(chat) {
     Markup.button.callback(`${chat.events[key] ? '✅' : '⬜️'} ${label}`, `settings:event:${key}`),
   ]);
   rows.push([Markup.button.callback('‹ Назад', 'settings:main')]);
-  const text = '🔔 <b>События</b>\n\nКакие уведомления присылать.';
+  // "Топливо появилось/пропало" only ever means АИ-92/95 (gasoline) for a
+  // self-service chat - unlike the admin web panel, this menu has no fuel-
+  // type filter control of its own to change that (see TelegramChatForm.vue's
+  // "Виды топлива" field), so it's worth spelling out here rather than
+  // leaving it as an unexplained silent default.
+  const text =
+    '🔔 <b>События</b>\n\nКакие уведомления присылать. «Появилось»/«пропало» — про АИ-92 и АИ-95, дизель и газ в эти события не входят.';
   return { text, extra: { parse_mode: 'HTML', ...Markup.inlineKeyboard(rows) } };
 }
 
