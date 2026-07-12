@@ -41,12 +41,46 @@ function withKnownPct(row) {
   };
 }
 
+// The three fuel types nearly every station carries (92/95/diesel) - unlike
+// premium grades (98/100) or gas conversions (propane/methane), which only a
+// minority of stations even have. Same set MapView.vue's currentSummary
+// pools client-side for the map badge - see that file's doc comment for why
+// this reads differently (and more usefully for "will my fuel actually be
+// there") than a snapshot's one blanket overall `status`: verified live,
+// ~52% blanket vs ~42% pooled this way region-wide, with 92 alone as low as
+// ~33%.
+const CORE_FUEL_TYPES = ['92', '95', 'ДТ'];
+
+// Inserted right after a pipeline's own $match stage (see every use below):
+// unwinds each snapshot into up to 3 rows, one per core fuel type it has a
+// reading for, so STATUS_COUNTS_GROUP counts each fuel-type reading as its
+// own vote instead of one blanket per-snapshot vote. A snapshot with no
+// reading for any of the 3 (fuelStatuses empty, or only non-core types)
+// contributes zero rows here rather than one "no_data" row - deliberately:
+// see STATUS_COUNTS_GROUP's own total/noData, which would otherwise treat
+// "this station only sells propane" the same as "we don't know 92/95/ДТ's
+// status", diluting noDataPct for something that isn't actually missing
+// data.
+const CORE_FUEL_UNWIND_STAGES = [
+  {
+    $addFields: {
+      coreFuelStatuses: {
+        $filter: {
+          input: { $ifNull: ['$fuelStatuses', []] },
+          cond: { $in: ['$$this.fuelType', CORE_FUEL_TYPES] },
+        },
+      },
+    },
+  },
+  { $unwind: '$coreFuelStatuses' },
+];
+
 const STATUS_COUNTS_GROUP = {
   total: { $sum: 1 },
-  available: { $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] } },
-  maybeAvailable: { $sum: { $cond: [{ $eq: ['$status', 'maybe_available'] }, 1, 0] } },
-  notAvailable: { $sum: { $cond: [{ $eq: ['$status', 'not_available'] }, 1, 0] } },
-  noData: { $sum: { $cond: [{ $eq: ['$status', 'no_data'] }, 1, 0] } },
+  available: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'available'] }, 1, 0] } },
+  maybeAvailable: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'maybe_available'] }, 1, 0] } },
+  notAvailable: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'not_available'] }, 1, 0] } },
+  noData: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'no_data'] }, 1, 0] } },
 };
 
 /**
@@ -177,6 +211,7 @@ async function getAvailabilityTrendUncached(regionId, { from, to, bucketHours = 
 
   const rows = await StationSnapshot.aggregate([
     { $match: match },
+    ...CORE_FUEL_UNWIND_STAGES,
     {
       $group: {
         _id: {
@@ -224,6 +259,7 @@ async function getAvailabilitySeries(regionId, { from, to, bucketCount = 12 }) {
 
   const rows = await StationSnapshot.aggregate([
     { $match: match },
+    ...CORE_FUEL_UNWIND_STAGES,
     {
       $group: {
         _id: { $dateTrunc: { date: '$polledAt', unit: 'minute', binSize: binSizeMinutes } },
@@ -287,10 +323,18 @@ async function getStationMetricsUncached(regionId, { from, to }) {
 
   const countRows = await StationSnapshot.aggregate([
     { $match: match },
+    ...CORE_FUEL_UNWIND_STAGES,
     { $group: { _id: '$station', ...STATUS_COUNTS_GROUP } },
   ]);
   if (!countRows.length) return [];
 
+  // Outage/recovery-time below is deliberately still based on each
+  // snapshot's one blanket overall `status`, not CORE_FUEL_TYPES - "how long
+  // was the station down" is a per-station timeline question (a discrete
+  // start/end streak), and there's no settled answer yet for what a
+  // per-fuel-type version of the same question would even mean (does 92
+  // going down while 95 stays up count as an outage?) - a separate design
+  // question from availablePct above, left alone for now.
   const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1 })
     .sort({ station: 1, polledAt: 1 })
     .lean();
@@ -375,6 +419,7 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
         parts: { $dateToParts: { date: '$polledAt', timezone: tz, iso8601: true } },
       },
     },
+    ...CORE_FUEL_UNWIND_STAGES,
     {
       $group: {
         _id: { weekday: '$parts.isoDayOfWeek', hour: '$parts.hour' },
@@ -405,4 +450,5 @@ module.exports = {
   getBrandMetrics,
   getHeatmap,
   computeOutages,
+  CORE_FUEL_TYPES,
 };

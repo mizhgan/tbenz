@@ -54,8 +54,20 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
     metricsService.getAvailabilitySeries(region._id, { from, to, bucketCount }),
   ]);
 
+  // Pools each station's own reading for metricsService.CORE_FUEL_TYPES
+  // (92/95/ДТ), same as MapView.vue's badge and every other metric in this
+  // digest (periodPct/prevPeriodPct/series below all come from
+  // metricsService functions that already pool this way) - not each
+  // station's one blanket overall status, which read materially more
+  // optimistic (see metricsService.js's own doc comment on why).
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
-  for (const s of current) counts[s.status] = (counts[s.status] || 0) + 1;
+  for (const s of current) {
+    const byType = Object.fromEntries((s.fuelStatuses || []).map((f) => [f.fuelType, f.status]));
+    for (const type of metricsService.CORE_FUEL_TYPES) {
+      const st = byType[type] || 'no_data';
+      counts[st] = (counts[st] || 0) + 1;
+    }
+  }
   const known = counts.available + counts.maybe_available + counts.not_available;
   const currentPct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
 

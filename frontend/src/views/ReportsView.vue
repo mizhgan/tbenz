@@ -377,6 +377,7 @@ onMounted(async () => {
       <div class="card kpi">
         <div class="kpi-value">{{ formatPct(summary.overallAvailablePct) }}</div>
         <div class="kpi-label">Общая доступность</div>
+        <div class="kpi-sublabel">АИ-92, АИ-95, ДТ</div>
       </div>
       <div class="card kpi">
         <div class="kpi-value">{{ summary.stationCount }}</div>
