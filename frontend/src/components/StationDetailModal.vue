@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import L from 'leaflet';
 import { metricsApi } from '../api/metrics';
 import { stationsApi } from '../api/regions';
-import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, formatRelativeAge } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
         <p v-if="sourcesLoading" class="hint">Загрузка...</p>
         <p v-else-if="sourcesError" class="error-text">{{ sourcesError }}</p>
         <template v-else-if="sourceDoc">
-          <div class="source-summary" :style="{ gridTemplateColumns: `repeat(${2 + sourceDoc.sources.length}, 1fr)` }">
+          <div class="source-summary">
             <div class="source-tile">
               <div class="source-label">tbank</div>
               <div class="source-value">
@@ -338,7 +338,7 @@ onBeforeUnmount(() => {
               <div class="hint small">Обновлено: {{ formatDateTime(s.lastSeenAt) }}</div>
             </div>
             <div v-if="!sourceDoc.sources.length" class="source-tile">
-              <div class="source-label">Второй источник</div>
+              <div class="source-label">Другие источники</div>
               <div class="hint small">не сопоставлено</div>
             </div>
             <div class="source-tile">
@@ -372,9 +372,12 @@ onBeforeUnmount(() => {
                     <span
                       v-if="row.bySource[s.key]"
                       class="badge-dot"
-                      :style="{ background: statusMeta(row.bySource[s.key]).color }"
+                      :style="{ background: statusMeta(row.bySource[s.key].status).color }"
                     ></span>
-                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key]).label : '—' }}
+                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key].status).label : '—' }}
+                    <div v-if="row.bySource[s.key]?.lastTransactionAt" class="hint small fuel-cell-age">
+                      {{ formatRelativeAge(row.bySource[s.key].lastTransactionAt) }}
+                    </div>
                   </td>
                   <td>
                     <span v-if="row.merged" class="badge-dot" :style="{ background: statusMeta(row.merged).color }"></span>
@@ -390,7 +393,7 @@ onBeforeUnmount(() => {
             </table>
           </div>
           <p v-if="!sourceDoc.sources.length" class="hint small">
-            У этой станции пока нет второго источника (gdebenz) для сверки.
+            У этой станции пока нет других источников для сверки.
           </p>
         </template>
 
@@ -567,7 +570,12 @@ onBeforeUnmount(() => {
 
 .source-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* auto-fit instead of a fixed N columns (used to be computed inline as
+     repeat(2 + sources.length, 1fr)) - with 4 registered sources today that
+     could mean 5 equal columns forced onto one row, unreadable on mobile
+     (~60px/column at a 350px viewport). Each tile keeps a sane minimum width
+     and wraps onto additional rows instead of shrinking indefinitely. */
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   margin: 8px 0 16px;
 }
@@ -633,6 +641,10 @@ onBeforeUnmount(() => {
 
 .hint.small {
   font-size: 11px;
+}
+
+.fuel-cell-age {
+  white-space: nowrap;
 }
 
 /* .card-preview/.card-actions moved to main.css - shared with the reports

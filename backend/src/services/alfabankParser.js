@@ -100,10 +100,24 @@ function mapFuelType(rawType) {
   return normalizeFuelType(FUEL_TYPE_MAP[rawType] || rawType);
 }
 
+function parseTransactionDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function parseFuelStatuses(fuels) {
   if (!Array.isArray(fuels)) return [];
   return fuels
-    .map((f) => ({ fuelType: mapFuelType(f?.category), status: mapStatus(f?.status, f?.last_transaction_at) }))
+    .map((f) => ({
+      fuelType: mapFuelType(f?.category),
+      status: mapStatus(f?.status, f?.last_transaction_at),
+      // Kept as-is even for a status just downgraded to no_data for being
+      // stale (see mapStatus) - "not trusted as current" and "we don't know
+      // when this was last seen" are worth showing separately (see
+      // AlfabankStation.js's doc comment on this field).
+      lastTransactionAt: parseTransactionDate(f?.last_transaction_at),
+    }))
     .filter((f) => f.fuelType);
 }
 

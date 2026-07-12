@@ -20,6 +20,29 @@ export function statusOrdinal(status) {
   return idx === -1 ? STATUS_ORDER.indexOf('no_data') : idx;
 }
 
+// Short "how long ago" label for a per-fuel-type reading's own
+// lastTransactionAt (see useSourceFuelRows.js) - a source like alfabank can
+// go days between transactions for a given fuel type, so "when" is exactly
+// the context that explains why a reading is available/maybe/no_data rather
+// than being a mystery number. Deliberately coarser than formatMinutes
+// (colorScale.js, built for outage durations of at most a few days) - ages
+// here comfortably span weeks.
+export function formatRelativeAge(dateLike) {
+  if (!dateLike) return null;
+  const date = new Date(dateLike);
+  const ms = Date.now() - date.getTime();
+  if (Number.isNaN(ms)) return null;
+  if (ms < 0) return 'только что';
+  const minutes = ms / 60000;
+  if (minutes < 1) return 'только что';
+  if (minutes < 60) return `${Math.round(minutes)} мин назад`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${Math.round(hours)} ч назад`;
+  const days = hours / 24;
+  if (days < 60) return `${Math.round(days)} дн назад`;
+  return date.toLocaleDateString('ru-RU');
+}
+
 // Fuel types are raw strings from the source ("92", "95", "98", ...);
 // octane ratings read better prefixed with "АИ-", but a non-numeric type
 // (e.g. diesel, however the source ends up encoding it) is shown as-is.

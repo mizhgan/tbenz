@@ -99,6 +99,15 @@ const getStation = asyncHandler(async (req, res) => {
       lon: doc.lon,
       status: doc.status,
       fuelTypes: doc.fuelTypes,
+      // Genuine per-fuel-type readings when this source has them (alfabank
+      // always, sberazs on upgraded stations - see mergeStatusService's
+      // mergeStationFuelStatuses, which already prefers this over projecting
+      // `status` onto `fuelTypes`) - undefined/[] for a source with none
+      // (gdebenz), same "no entry, not a null one" convention as `sources`
+      // itself. useSourceFuelRows.js is what actually consumes this to show
+      // the same per-type distinction here that the merge already computes
+      // from, instead of a coarser display-only re-derivation.
+      fuelStatuses: doc.fuelStatuses || [],
       conflict: doc.conflict,
       lastSeenAt: doc.lastSeenAt,
     });

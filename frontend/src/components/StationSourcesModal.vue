@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import L from 'leaflet';
 import { stationsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
-import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, formatRelativeAge } from '../utils/fuelStatus';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 
 const props = defineProps({
@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
           </p>
 
           <h4>Статус по источникам</h4>
-          <div class="source-summary" :style="{ gridTemplateColumns: `repeat(${2 + station.sources.length}, 1fr)` }">
+          <div class="source-summary">
             <div class="source-tile">
               <div class="source-label">tbank</div>
               <div class="source-value">
@@ -330,9 +330,12 @@ onBeforeUnmount(() => {
                     <span
                       v-if="row.bySource[s.key]"
                       class="badge-dot"
-                      :style="{ background: statusMeta(row.bySource[s.key]).color }"
+                      :style="{ background: statusMeta(row.bySource[s.key].status).color }"
                     ></span>
-                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key]).label : '—' }}
+                    {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key].status).label : '—' }}
+                    <div v-if="row.bySource[s.key]?.lastTransactionAt" class="hint small fuel-cell-age">
+                      {{ formatRelativeAge(row.bySource[s.key].lastTransactionAt) }}
+                    </div>
                   </td>
                   <td>
                     <span v-if="row.merged" class="badge-dot" :style="{ background: statusMeta(row.merged).color }"></span>
@@ -497,9 +500,17 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.fuel-cell-age {
+  white-space: nowrap;
+}
+
 .source-summary {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* auto-fit instead of a fixed N columns, same reasoning as
+     StationDetailModal.vue's own .source-summary - up to 5 tiles today
+     (tbank + up to 3 secondary sources + итог) shouldn't be forced onto one
+     unreadable row on mobile. */
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   margin: 8px 0 16px;
 }

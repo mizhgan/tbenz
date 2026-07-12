@@ -35,6 +35,12 @@ const alfabankStationSchema = new Schema(
         _id: false,
         fuelType: { type: String },
         status: { type: String },
+        // Kept even when it pushed `status` down to no_data for being stale
+        // (see alfabankParser.js) - "we don't trust this as current" and
+        // "we have no idea when this was last seen" are different things
+        // worth showing separately in the UI (StationDetailModal's per-source
+        // fuel table).
+        lastTransactionAt: { type: Date, default: null },
       },
     ],
     conflict: { type: String, default: null },
