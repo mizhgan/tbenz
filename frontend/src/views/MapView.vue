@@ -392,6 +392,16 @@ function buildPopupHtml(s) {
 // sourceRegistry.js) - the fuller per-source breakdown (fuel types, address,
 // conflict) only loads once "Подробная информация" is opened, inside
 // StationDetailModal itself.
+//
+// Chips still show each source's own blanket overall status (their literal
+// claim, for transparency) - but the "⚠ расходятся" warning compares each
+// source's coreStatus (best-of among 92/95/ДТ, see backend's
+// metricsService.deriveCoreStatus) against tbank's own tbankCoreStatus
+// instead of blanket vs blanket. Verified live: comparing blanket statuses
+// flagged 166 of 249 matched source-links as "disagreeing" region-wide;
+// comparing core-fuel-type agreement instead drops that to 119 - a third of
+// the old warnings were purely about a non-core fuel type (propane, 98, 100)
+// neither side was actually making a claim about that matters here.
 function sourcesSummaryHtml(s) {
   const sources = s.sources || [];
   if (!sources.length) {
@@ -407,12 +417,12 @@ function sourcesSummaryHtml(s) {
     chips.push(
       `<span class="popup-source-chip"><span class="popup-dot" style="background:${meta.color}"></span>${escapeHtml(source.key)}</span>`
     );
-    if (source.status !== s.tbankStatus) disagree = true;
+    if (source.coreStatus !== s.tbankCoreStatus) disagree = true;
   }
   return `
     <div class="popup-sources">
       ${chips.join('')}
-      ${disagree ? '<span class="popup-sources-warn">⚠ расходятся</span>' : ''}
+      ${disagree ? '<span class="popup-sources-warn">⚠ расходятся (АИ-92/95, ДТ)</span>' : ''}
     </div>
   `;
 }

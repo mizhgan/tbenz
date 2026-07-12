@@ -13,23 +13,15 @@ const RECOVERY_WINDOW_MS = 60 * 60 * 1000;
 // prediction would fire on every single scan interval.
 const COOLDOWN_MS = 3 * 60 * 60 * 1000;
 
-const STATUS_RANK = { not_available: 0, no_data: 1, maybe_available: 2, available: 3 };
-
-// Best-of among the station's own core-3 (92/95/ДТ) readings - "is at least
-// one of the fuels a driver actually wants available here right now", same
-// framing as MapView.vue's own effectiveStatus (best-of among selected fuel
-// types) and the rest of this app's core-fuel-type metrics (see
-// metricsService.js's own doc comment on CORE_FUEL_TYPES). Used below to
-// decide which bucket (up/down) a station falls into for alerting purposes,
-// instead of its blanket overall `status` - a station could be blanket
-// "available" purely off a non-core fuel type (propane) or a secondary
-// source's own station-level opinion, while having nothing useful to say
-// about 92/95/ДТ specifically; alerting off that would be misleading.
-function coreStatus(fuelStatuses) {
-  const relevant = (fuelStatuses || []).filter((f) => metricsService.CORE_FUEL_TYPES.includes(f.fuelType));
-  if (!relevant.length) return 'no_data';
-  return relevant.reduce((best, f) => (STATUS_RANK[f.status] > STATUS_RANK[best] ? f.status : best), relevant[0].status);
-}
+// Used below to decide which bucket (up/down) a station falls into for
+// alerting purposes, instead of its blanket overall `status` - a station
+// could be blanket "available" purely off a non-core fuel type (propane) or
+// a secondary source's own station-level opinion, while having nothing
+// useful to say about 92/95/ДТ specifically; alerting off that would be
+// misleading. See metricsService.deriveCoreStatus's own doc comment - kept
+// as a local alias (not just called inline) so this file's own tests don't
+// need to know it now lives in metricsService.js.
+const coreStatus = metricsService.deriveCoreStatus;
 
 function isCoolingDown(lastAlertAt, now) {
   return Boolean(lastAlertAt) && now.getTime() - new Date(lastAlertAt).getTime() < COOLDOWN_MS;

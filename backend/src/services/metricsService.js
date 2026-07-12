@@ -51,6 +51,30 @@ function withKnownPct(row) {
 // ~33%.
 const CORE_FUEL_TYPES = ['92', '95', 'ДТ'];
 
+const CORE_STATUS_RANK = { not_available: 0, no_data: 1, maybe_available: 2, available: 3 };
+
+/**
+ * Best-of among a station's (or one source's) own CORE_FUEL_TYPES readings -
+ * "is at least one of the fuels a driver actually wants available right
+ * now", same framing as MapView.vue's own effectiveStatus (best-of among
+ * selected fuel types). Used wherever a single categorical status needs to
+ * represent "this station/source, as far as the fuel types that matter" -
+ * classifying a station up/down for predictive alerts
+ * (telegramPredictiveAlerts.js), and deciding whether two sources actually
+ * disagree for the map popup's "⚠ расходятся" warning (MapView.vue) instead
+ * of comparing their blanket overall statuses, which could differ purely
+ * over a non-core fuel type (propane) neither claim says anything useful
+ * about for this purpose.
+ */
+function deriveCoreStatus(fuelStatuses) {
+  const relevant = (fuelStatuses || []).filter((f) => CORE_FUEL_TYPES.includes(f.fuelType));
+  if (!relevant.length) return 'no_data';
+  return relevant.reduce(
+    (best, f) => (CORE_STATUS_RANK[f.status] > CORE_STATUS_RANK[best] ? f.status : best),
+    relevant[0].status
+  );
+}
+
 // Inserted right after a pipeline's own $match stage (see every use below):
 // unwinds each snapshot into up to 3 rows, one per core fuel type it has a
 // reading for, so STATUS_COUNTS_GROUP counts each fuel-type reading as its
@@ -170,6 +194,16 @@ async function getCurrentSnapshotUncached(regionId, at) {
           },
         ],
       },
+      // Raw fuelStatuses per source (and tbank's own, below) - collapsed
+      // into a single coreStatus field and dropped again right after the
+      // aggregation returns (see the post-processing loop below), so the
+      // response actually sent to the browser doesn't grow, just gains one
+      // extra short string per source. Needed so the map popup's "⚠
+      // расходятся" warning can compare sources' CORE_FUEL_TYPES agreement
+      // instead of their blanket overall status (see deriveCoreStatus's doc
+      // comment) - a status this bare, hottest-endpoint response otherwise
+      // deliberately never carries at all.
+      tbankFuelStatuses: { $ifNull: ['$stationInfo.tbankLastFuelStatuses', []] },
       // Only sources this station is actually matched to (a registered but
       // unmatched source contributes no entry, not a null-status one).
       sources: {
@@ -177,6 +211,7 @@ async function getCurrentSnapshotUncached(regionId, at) {
           input: infoFields.map(({ key, field }) => ({
             key,
             status: { $ifNull: [`$${field}.status`, null] },
+            fuelStatuses: { $ifNull: [`$${field}.fuelStatuses`, []] },
           })),
           cond: { $ne: ['$$this.status', null] },
         },
@@ -184,7 +219,16 @@ async function getCurrentSnapshotUncached(regionId, at) {
     },
   });
 
-  return StationSnapshot.aggregate(pipeline);
+  const rows = await StationSnapshot.aggregate(pipeline);
+  for (const row of rows) {
+    row.tbankCoreStatus = deriveCoreStatus(row.tbankFuelStatuses);
+    delete row.tbankFuelStatuses;
+    for (const source of row.sources) {
+      source.coreStatus = deriveCoreStatus(source.fuelStatuses);
+      delete source.fuelStatuses;
+    }
+  }
+  return rows;
 }
 
 // This is the single hottest public endpoint (the map's live view polls it
@@ -451,4 +495,5 @@ module.exports = {
   getHeatmap,
   computeOutages,
   CORE_FUEL_TYPES,
+  deriveCoreStatus,
 };
