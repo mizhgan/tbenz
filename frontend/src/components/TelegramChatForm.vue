@@ -208,7 +208,7 @@ function handleSubmit() {
         </div>
 
         <div class="form-row">
-          <label for="fuelTypes">Виды топлива (через запятую, пусто — все)</label>
+          <label for="fuelTypes">Виды топлива (через запятую, пусто — АИ-92, АИ-95, ДТ)</label>
           <input id="fuelTypes" v-model="fuelTypesText" type="text" placeholder="92, 95, 98" />
         </div>
 

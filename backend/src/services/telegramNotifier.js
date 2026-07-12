@@ -6,6 +6,7 @@ const telegramDigestImage = require('./telegramDigestImage');
 const telegramAlertMapImage = require('./telegramAlertMapImage');
 const telegramPredictiveAlerts = require('./telegramPredictiveAlerts');
 const telegramPromoContent = require('./telegramPromoContent');
+const { CORE_FUEL_TYPES } = require('./metricsService');
 const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
 
@@ -37,7 +38,16 @@ function fuelLabel(fuelType) {
 function chatMatchesFilters(chat, station, fuelType) {
   const isWatchlisted = chat.watchlist.some((id) => String(id) === String(station._id));
   if (isWatchlisted) return true;
-  if (chat.fuelTypes.length && !chat.fuelTypes.includes(fuelType)) return false;
+  // An admin who explicitly listed fuel types in chat settings gets exactly
+  // those, unchanged; a chat that never configured this (the common case)
+  // used to mean "every fuel type this station reports" - including
+  // propane/98/100, which most subscribers don't drive on and don't care to
+  // be pinged about. Defaults to CORE_FUEL_TYPES instead (see
+  // metricsService.js's own doc comment), same "unconfigured = 92/95/ДТ"
+  // default already applied to the map badge/reports/digest/predictive
+  // alerts - not "no filter" anymore.
+  const allowedFuelTypes = chat.fuelTypes.length ? chat.fuelTypes : CORE_FUEL_TYPES;
+  if (!allowedFuelTypes.includes(fuelType)) return false;
   if (chat.brands.length && !chat.brands.includes(station.name)) return false;
   return true;
 }
@@ -456,4 +466,5 @@ module.exports = {
   notifyPredictiveAlerts,
   sendPromoPost,
   escapeHtml,
+  chatMatchesFilters,
 };
