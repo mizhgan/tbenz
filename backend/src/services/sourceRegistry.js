@@ -4,7 +4,10 @@ const gdebenzParser = require('./gdebenzParser');
 const SberazsStation = require('../models/SberazsStation');
 const sberazsClient = require('./sberazsClient');
 const sberazsParser = require('./sberazsParser');
-const { gdebenzEnabled, sberazsEnabled } = require('../config/env');
+const AlfabankStation = require('../models/AlfabankStation');
+const alfabankClient = require('./alfabankClient');
+const alfabankParser = require('./alfabankParser');
+const { gdebenzEnabled, sberazsEnabled, alfabankEnabled } = require('../config/env');
 
 // Single place that lists every *secondary* fuel-availability source (i.e.
 // every source besides tbank itself). tbank stays special-cased everywhere
@@ -96,6 +99,25 @@ const SOURCES = [
     buildRequestUrl: sberazsClient.buildRequestUrl,
     extractStationsArray: sberazsParser.extractStationsArray,
     parseStation: sberazsParser.parseStation,
+  },
+  {
+    key: 'alfabank',
+    label: 'alfabank.ru',
+    model: AlfabankStation,
+    // Full weight, not discounted like sberazs's blanket 0 - this source's
+    // per-fuel-type status is genuine transaction-derived evidence for every
+    // station on every poll (see alfabankParser.js's doc comment), the same
+    // kind of signal tbank itself provides, not an equipment list or a
+    // coarse station-level guess. fuelStatusWeight is left unset - it falls
+    // back to this same weight (see mergeStationFuelStatuses).
+    weight: 1.0,
+    get enabled() {
+      return alfabankEnabled;
+    },
+    fetchStations: alfabankClient.fetchStations,
+    buildRequestUrl: alfabankClient.buildRequestUrl,
+    extractStationsArray: alfabankParser.extractStationsArray,
+    parseStation: alfabankParser.parseStation,
   },
 ];
 

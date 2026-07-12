@@ -43,4 +43,11 @@ module.exports = {
   // above.
   sberazsApiBaseUrl: process.env.SBERAZS_API_BASE_URL || 'https://sberazs.ru/api/stations',
   sberazsEnabled: process.env.SBERAZS_ENABLED !== 'false',
+  // alfabank.ru is a fourth, independent fuel-availability source
+  // (transaction-based, genuine per-fuel-type status - see alfabankParser.js)
+  // - same "public endpoint, off only if explicitly disabled" reasoning as
+  // gdebenz/sberazs above. No bbox param on its own request (see
+  // alfabankClient.js), so this base URL is the whole endpoint, not a prefix.
+  alfabankApiBaseUrl: process.env.ALFABANK_API_BASE_URL || 'https://alfabank.ru/api/v1/azs-stations/public/stations',
+  alfabankEnabled: process.env.ALFABANK_ENABLED !== 'false',
 };

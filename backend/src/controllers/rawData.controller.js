@@ -4,6 +4,7 @@ const Region = require('../models/Region');
 const Station = require('../models/Station');
 const GdebenzStation = require('../models/GdebenzStation');
 const SberazsStation = require('../models/SberazsStation');
+const AlfabankStation = require('../models/AlfabankStation');
 const StationSnapshot = require('../models/StationSnapshot');
 
 // Deliberately a small, explicit whitelist - this exists purely so an admin
@@ -18,6 +19,7 @@ const COLLECTIONS = {
   stations: Station,
   gdebenzStations: GdebenzStation,
   sberazsStations: SberazsStation,
+  alfabankStations: AlfabankStation,
   stationSnapshots: StationSnapshot,
 };
 
