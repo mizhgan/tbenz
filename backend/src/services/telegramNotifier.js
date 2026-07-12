@@ -350,7 +350,7 @@ function formatDropAlertBlock({ station, predictedAt, availablePct }) {
   return [
     `⚠️ <b>${escapeHtml(station.name || 'АЗС')}</b>`,
     station.address ? escapeHtml(station.address) : null,
-    `Вероятность наличия топлива к ${timeOnlyFmt.format(predictedAt)} падает до ~${availablePct.toFixed(0)}% (по истории для этого времени)`,
+    `Вероятность наличия АИ-92, АИ-95 или ДТ к ${timeOnlyFmt.format(predictedAt)} падает до ~${availablePct.toFixed(0)}% (по истории для этого времени)`,
   ]
     .filter(Boolean)
     .join('\n');
