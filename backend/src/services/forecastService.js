@@ -1,5 +1,5 @@
 const StationSnapshot = require('../models/StationSnapshot');
-const { computeOutages, getAvailabilityTrend } = require('./metricsService');
+const { computeOutages, getAvailabilityTrend, CORE_FUEL_TYPES } = require('./metricsService');
 const { memoizeAsync } = require('../utils/cache');
 
 const DEFAULT_TZ = 'Europe/Moscow';
@@ -30,6 +30,15 @@ function isoWeekdayAndHour(date, tz) {
  * station+weekday+hour) rather than one query per station. Used both by
  * the bulk predictive-alert scan (many stations at once) and by
  * getStationHourlyProfile (a single-element array).
+ *
+ * Pools each snapshot's own reading for CORE_FUEL_TYPES (92/95/ДТ), same as
+ * metricsService.js's reliability/trend/heatmap numbers this modal's
+ * "Надёжность" tile already shows next to this forecast - not each
+ * snapshot's one blanket overall `status`, which would otherwise make the
+ * forecast disagree with the tile right above it. A station with no core-3
+ * reading at all (pure propane/methane AGZS) drops out entirely (empty
+ * profile, overallAvailablePct null) rather than forecasting off data that
+ * was never about 92/95/ДТ.
  */
 async function getBulkHourlyProfiles(stationIds, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
   const from = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
@@ -38,11 +47,22 @@ async function getBulkHourlyProfiles(stationIds, { lookbackDays = 28, tz = DEFAU
     { $match: { station: { $in: stationIds }, polledAt: { $gte: from } } },
     { $addFields: { parts: { $dateToParts: { date: '$polledAt', timezone: tz, iso8601: true } } } },
     {
+      $addFields: {
+        coreFuelStatuses: {
+          $filter: {
+            input: { $ifNull: ['$fuelStatuses', []] },
+            cond: { $in: ['$$this.fuelType', CORE_FUEL_TYPES] },
+          },
+        },
+      },
+    },
+    { $unwind: '$coreFuelStatuses' },
+    {
       $group: {
         _id: { station: '$station', weekday: '$parts.isoDayOfWeek', hour: '$parts.hour' },
         total: { $sum: 1 },
-        available: { $sum: { $cond: [{ $eq: ['$status', 'available'] }, 1, 0] } },
-        noData: { $sum: { $cond: [{ $eq: ['$status', 'no_data'] }, 1, 0] } },
+        available: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'available'] }, 1, 0] } },
+        noData: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'no_data'] }, 1, 0] } },
       },
     },
   ]);
@@ -104,6 +124,11 @@ function forecastHour(profile, overallAvailablePct, at, tz) {
  * walked backwards from the most recent snapshot. Capped to the last 500
  * snapshots for a station that has been stable for a very long time - the
  * "since" timestamp in that case is a lower bound, not exact.
+ *
+ * Deliberately still each snapshot's one blanket overall `status`, not
+ * CORE_FUEL_TYPES - same reasoning as metricsService.js leaving outage
+ * duration alone: "how long has this station been down" is a discrete
+ * streak with no settled per-fuel-type definition yet.
  */
 async function getCurrentStatusStreak(stationId) {
   const recent = await StationSnapshot.find({ station: stationId })
