@@ -32,7 +32,7 @@ function formatDateTime(ms) {
 // Same two-pass measure-then-draw approach as stationCard.js/regionReportCard.js
 // - `draw` false only measures (so the canvas can be sized to fit the actual
 // content), true actually paints.
-function layoutCard(ctx, { regionName, mapCanvas, counts, availablePct, generatedAt }, draw) {
+function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availablePct, generatedAt }, draw) {
   const contentWidth = WIDTH - PADDING * 2;
   let y = PADDING + 20;
 
@@ -85,7 +85,11 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, availablePct, generate
   if (draw) {
     ctx.fillStyle = '#64748b';
     ctx.fillText('доступность сейчас', PADDING + 210, y + 30);
-    ctx.fillText(`из ${counts.available + counts.maybe_available + counts.not_available + counts.no_data} станций`, PADDING + 210, y + 54);
+    // stationCount, not a sum of `counts` - `counts` now counts per-fuel-type
+    // readings (up to 3 per station, see MapView.vue's currentSummary) when
+    // no specific fuel type is picked, so summing it would overcount how
+    // many actual stations that covers.
+    ctx.fillText(`из ${stationCount} станций`, PADDING + 210, y + 54);
   }
   y += 90;
 
@@ -179,8 +183,8 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, availablePct, generate
  * two-pass approach as stationCard.js/regionReportCard.js, resolves with a
  * PNG Blob.
  */
-export function renderMapShareCard({ regionName, mapCanvas, counts, availablePct, generatedAt }) {
-  const payload = { regionName, mapCanvas, counts, availablePct, generatedAt };
+export function renderMapShareCard({ regionName, mapCanvas, counts, stationCount, availablePct, generatedAt }) {
+  const payload = { regionName, mapCanvas, counts, stationCount, availablePct, generatedAt };
 
   const measureCanvas = document.createElement('canvas');
   const measureCtx = measureCanvas.getContext('2d');

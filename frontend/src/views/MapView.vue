@@ -99,17 +99,60 @@ const selectedFuelTypesLabel = computed(() =>
   selectedFuelTypes.value.map(fuelTypeLabel).join(', ')
 );
 
+// What the status-badge's percentage is actually about right now - shown
+// next to it so a number that used to mean "share of stations open at all"
+// and now means "share of core-fuel readings available" doesn't read as an
+// unexplained change (see currentSummary's own doc comment).
+const badgeFuelLabel = computed(() =>
+  selectedFuelTypes.value.length ? selectedFuelTypesLabel.value : CORE_FUEL_TYPES.map(fuelTypeLabel).join(', ')
+);
+
+// The three fuel types most drivers actually ask for - unlike premium
+// grades (98/100) or gas conversions (propane/methane), which only a
+// minority of stations even carry, these three are close to universal (see
+// availableFuelTypes coverage checked live: 92/95 on ~100% of stations,
+// ДТ on ~78%).
+const CORE_FUEL_TYPES = ['92', '95', 'ДТ'];
+
 // Current-state summary for the selected region - always over every loaded
 // station, not just the ones visible under the status/brand checkboxes
 // (those are for decluttering markers, not for changing what "the region's
-// current state" actually is). Uses the same effectiveStatus() the markers
-// are colored by, so this never disagrees with what's drawn on the map,
-// including when a specific fuel type is selected instead of overall status.
+// current state" actually is).
+//
+// Default case (no fuel type picked in the filter drawer): pools each
+// station's own reading for CORE_FUEL_TYPES, each counted as its own data
+// point, rather than each station's one blanket overall status (what this
+// used to do unconditionally, via effectiveStatus/station.status). Verified
+// live that these disagree materially - a per-station blanket ~52% vs ~42%
+// pooled this way, with 92 alone as low as ~33% - because a station's
+// blanket status is usually driven by whichever fuel/source made it green,
+// not necessarily the specific type a given driver needs; "52% of stations
+// are open for business" and "42% chance your specific fuel is actually
+// there" are different, both true, claims, and the second is the one a
+// driver checking this badge is actually asking. Marker dot colors are
+// unaffected by this (still effectiveStatus/station.status) - this only
+// changes the aggregate %/counts shown in the badge, the drawer's inline
+// summary, and the share card.
+//
+// Explicit-selection case (user picked specific fuel type(s) in the filter):
+// unchanged - pools by effectiveStatus (best-of among just those types), so
+// picking propane still means the badge is about propane, not silently
+// staying pinned to 92/95/ДТ regardless of what was picked.
 const currentSummary = computed(() => {
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
-  for (const s of stations.value) {
-    const st = effectiveStatus(s);
-    counts[st] = (counts[st] || 0) + 1;
+  if (selectedFuelTypes.value.length) {
+    for (const s of stations.value) {
+      const st = effectiveStatus(s);
+      counts[st] = (counts[st] || 0) + 1;
+    }
+  } else {
+    for (const s of stations.value) {
+      const byType = Object.fromEntries((s.fuelStatuses || []).map((f) => [f.fuelType, f.status]));
+      for (const type of CORE_FUEL_TYPES) {
+        const st = byType[type] || 'no_data';
+        counts[st] = (counts[st] || 0) + 1;
+      }
+    }
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
   const availablePct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
@@ -689,6 +732,7 @@ async function generateShareCard() {
       regionName: selectedRegion.value?.name || 'Район',
       mapCanvas: frameCanvas,
       counts: currentSummary.value.counts,
+      stationCount: currentSummary.value.total,
       availablePct: currentSummary.value.availablePct,
       generatedAt: Date.now(),
     });
@@ -878,6 +922,7 @@ onBeforeUnmount(() => {
               {{ formatPct(currentSummary.availablePct) }}
             </strong>
           </span>
+          <span class="hint small">{{ badgeFuelLabel }}</span>
           <span class="hint small">{{ filteredStations.length }} из {{ currentSummary.total }}</span>
         </div>
       </Transition>
@@ -927,7 +972,7 @@ onBeforeUnmount(() => {
 
               <div class="filter-block">
                 <template v-if="availableFuelTypes.length">
-                  <span class="filter-label">Виды топлива (не выбрано — общий статус):</span>
+                  <span class="filter-label">Виды топлива (влияет на цвет точек на карте):</span>
                   <label v-for="ft in availableFuelTypes" :key="ft" class="filter-checkbox">
                     <input type="checkbox" v-model="selectedFuelTypes" :value="ft" @change="handleFilterChange" />
                     {{ fuelTypeLabel(ft) }}
@@ -969,9 +1014,7 @@ onBeforeUnmount(() => {
 
           <Transition name="fade">
             <div v-if="currentSummary.total" class="current-state-inline">
-              <span class="current-state-label">
-                Сейчас{{ selectedFuelTypes.length ? ` · ${selectedFuelTypesLabel}` : '' }}:
-              </span>
+              <span class="current-state-label"> Сейчас · {{ badgeFuelLabel }}: </span>
               <strong class="current-state-pct" :style="{ color: statusMeta('available').color }">
                 {{ formatPct(currentSummary.availablePct) }}
               </strong>
