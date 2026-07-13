@@ -44,8 +44,14 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    # Loopback-only, not 0.0.0.0 - all public traffic now arrives via the
+    # cloudflared service below, which reaches this container over the
+    # internal docker network by service name (frontend:80), not through
+    # this host port at all. Kept bound to 127.0.0.1 (same pattern as
+    # backend's own port mapping) purely for local debugging, not for any
+    # production traffic path.
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
 
   # Outbound-only connection to Cloudflare's edge - no host ports needed at
   # all. Reaches the frontend container directly over the default
