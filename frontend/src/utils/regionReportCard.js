@@ -271,10 +271,16 @@ function layoutCard(
   y += kpiHeight + 48;
 
   // Trend section: title + direction badge + sparkline + start-vs-end delta.
+  // Same "(АИ-92, АИ-95)" qualifier ReportsView.vue's own on-page heading
+  // has, for consistency between the two.
   if (draw) {
     ctx.fillStyle = '#0f172a';
     ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.fillText('Динамика доступности', PADDING, y);
+    const titleWidth = ctx.measureText('Динамика доступности').width;
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText(' (АИ-92, АИ-95)', PADDING + titleWidth, y);
   }
   const dirMeta = DIRECTION_META[direction] || DIRECTION_META.unknown;
   if (draw) {
@@ -313,12 +319,22 @@ function layoutCard(
 
   // Recovery-time bars - same data/bucketing as the reports page's own
   // "Время восстановления после отключений" section (RecoveryTrendChart.vue).
+  // Qualifier drawn on its own line below the title, not appended inline
+  // like the shorter "Динамика доступности" heading above - this title is
+  // already long enough that appending " (АИ-92, АИ-95)" at 1000px card
+  // width risked crowding the right edge.
   if (draw) {
     ctx.fillStyle = '#0f172a';
     ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.fillText('Время восстановления после отключений', PADDING, y);
   }
-  y += 28;
+  y += 26;
+  if (draw) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '18px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('АИ-92, АИ-95', PADDING, y);
+  }
+  y += 22;
 
   if (recoveryTrendBuckets.length) {
     const barsHeight = 90;
