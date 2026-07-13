@@ -127,6 +127,59 @@ function forecastHour(profile, overallAvailablePct, at, tz) {
 }
 
 /**
+ * Per-station availability share for each hour-of-day (0-23), pooled across
+ * every weekday - the day/night-cycle baseline getStationForecastUncached
+ * blends its own short-trend extrapolation into for hours further out (see
+ * that function's doc comment and blendHourForecast below). Deliberately
+ * NOT split by weekday like getBulkHourlyProfiles' own (weekday, hour)
+ * grid: with only a few days to a few weeks of history, a 168-cell grid
+ * mostly lands under MIN_HOUR_PROFILE_SAMPLES per cell - the same
+ * cold-start problem that retired the old seasonal per-station forecast.
+ * Pooling by hour alone needs 7x fewer samples per cell to become
+ * informative, trading away a "Monday morning vs Saturday morning"
+ * distinction a supply-driven shortage is unlikely to care about anyway.
+ * Confirmed live across a 15-station sample: a clear day/night cycle
+ * (long overnight outages, available during the day) showed up in 5 of 15
+ * stations checked - common enough to be worth a dedicated signal, not a
+ * one-off.
+ */
+async function getStationHourProfile(stationId, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
+  const from = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+  const rows = await StationSnapshot.aggregate([
+    { $match: { station: stationId, polledAt: { $gte: from } } },
+    { $addFields: { hour: { $hour: { date: '$polledAt', timezone: tz } } } },
+    {
+      $addFields: {
+        coreFuelStatuses: {
+          $filter: {
+            input: { $ifNull: ['$fuelStatuses', []] },
+            cond: { $in: ['$$this.fuelType', CORE_FUEL_TYPES] },
+          },
+        },
+      },
+    },
+    { $unwind: '$coreFuelStatuses' },
+    {
+      $group: {
+        _id: '$hour',
+        total: { $sum: 1 },
+        available: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'available'] }, 1, 0] } },
+        noData: { $sum: { $cond: [{ $eq: ['$coreFuelStatuses.status', 'no_data'] }, 1, 0] } },
+      },
+    },
+  ]);
+
+  const profile = new Map();
+  for (const row of rows) {
+    const known = row.total - row.noData;
+    if (known > 0) {
+      profile.set(row._id, { availablePct: (row.available / known) * 100, samples: known });
+    }
+  }
+  return profile;
+}
+
+/**
  * How long the station has been continuously in its latest-known status,
  * walked backwards from the most recent snapshot. Capped to the last 500
  * snapshots for a station that has been stable for a very long time - the
@@ -179,42 +232,112 @@ const STATION_TREND_LOOKBACK_HOURS = 48;
 // same threshold getRegionTrendForecast already uses for its own buckets.
 const MIN_TREND_BUCKETS = 3;
 
+// The regression that actually drives the near-term forecast (see
+// blendHourForecast below) fits over just this many of the most recent
+// hourly buckets, not the full STATION_TREND_LOOKBACK_HOURS window (that
+// window is still fetched and kept around for overallAvailablePct's own
+// longer-run baseline). A station that just recovered after a long outage
+// - confirmed live for a real station (Лукойл, Потребкооперации 2/1):
+// available for the last ~4h after a ~13h outage - had its forecast stuck
+// near 15% for the next 12 hours, because an unweighted regression over the
+// full 48h gave equal say to those 13 down-hours and the 4 up-hours,
+// netting out to a nearly flat line. An 8h window is short enough that a
+// real recent change dominates the fit instead of being diluted by it.
+const SHORT_TREND_LOOKBACK_HOURS = 8;
+
+// Below this many real observations, an hour-of-day profile cell (see
+// getStationHourProfile) is too thin to trust over the plain overall
+// average - same reasoning as MIN_TREND_BUCKETS above, just for a
+// different signal.
+const MIN_HOUR_PROFILE_SAMPLES = 3;
+
+// How many forecasted hours the short-trend regression's own extrapolation
+// fades into the hour-of-day profile over, rather than a hard cutover at a
+// fixed hour - a straight line extrapolated many hours past its own 8h
+// input window stops being meaningful (it doesn't know a supply-driven
+// station's actual day/night cycle), but switching models outright would
+// show a visible "cliff" in the hourly bar chart between two models'
+// different answers for the same hour.
+const TREND_BLEND_HOURS = 3;
+
+/**
+ * One forecasted hour's availability, blending two signals rather than
+ * picking one:
+ *  - `shortReg`: a linear extrapolation of the station's own last
+ *    SHORT_TREND_LOOKBACK_HOURS - "is it, right now, trending up or down".
+ *    Dominates the near term (basis 'trend').
+ *  - `hourProfile`: this station's historical availability share for this
+ *    specific hour-of-day (see getStationHourProfile), falling back to
+ *    `overallAvailablePct` when that hour's own cell is too thin
+ *    (MIN_HOUR_PROFILE_SAMPLES) - "what does this hour of the day usually
+ *    look like here". Takes over for hours further out (basis
+ *    'hour-profile'/'flat-average'), since a straight line extrapolated
+ *    many hours past its own short input window stops meaning anything for
+ *    a station with a real day/night supply cycle.
+ * The two are linearly blended over TREND_BLEND_HOURS forecasted hours
+ * (basis 'trend+hour-profile') so the hourly bar chart doesn't show a
+ * visible cliff where the model handoff happens.
+ */
+function blendHourForecast({ i, x, shortReg, hourProfile, overallAvailablePct, at, tz }) {
+  const trendPct = shortReg ? Math.max(0, Math.min(100, shortReg.slope * x + shortReg.intercept)) : null;
+
+  const { hour } = isoWeekdayAndHour(at, tz);
+  const cell = hourProfile.get(hour);
+  const hasProfileCell = Boolean(cell) && cell.samples >= MIN_HOUR_PROFILE_SAMPLES;
+  const profilePct = hasProfileCell ? cell.availablePct : overallAvailablePct;
+  const profileBasis = hasProfileCell ? 'hour-profile' : profilePct !== null ? 'flat-average' : 'no-data';
+
+  if (trendPct === null) {
+    return { availablePct: profilePct, basis: profilePct !== null ? profileBasis : 'no-data' };
+  }
+  if (profilePct === null) {
+    return { availablePct: trendPct, basis: 'trend' };
+  }
+
+  const blendWeight = Math.max(0, Math.min(1, 1 - (i - 1) / TREND_BLEND_HOURS));
+  if (blendWeight >= 1) return { availablePct: trendPct, basis: 'trend' };
+  if (blendWeight <= 0) return { availablePct: profilePct, basis: profileBasis };
+  return {
+    availablePct: trendPct * blendWeight + profilePct * (1 - blendWeight),
+    basis: 'trend+hour-profile',
+  };
+}
+
 /**
  * Forecasts, for the next `hoursAhead` hours, the station's estimated
- * availability - a linear extrapolation of this station's own last
- * STATION_TREND_LOOKBACK_HOURS (hourly buckets, same
- * CORE_FUEL_TYPES/getAvailabilityTrend machinery as the region-wide trend
- * chart, just scoped to one station via metricsService.getStationTrend),
- * clamped to a valid percentage range. Falls back to a flat average over
- * that same window when there isn't enough of it yet for a meaningful
- * slope (see MIN_TREND_BUCKETS). If the station is currently down, also
- * estimates a recovery time from its historical average outage duration
- * (a separate, longer-lookback signal - see getStationRecoveryStats below).
+ * availability by blending a short-term trend with an hour-of-day baseline
+ * (see blendHourForecast above for how and why). If the station is
+ * currently down, also estimates a recovery time from its historical
+ * average outage duration (a separate, longer-lookback signal - see
+ * getStationRecoveryStats below).
  *
  * Replaces an earlier version of this function built on a (weekday, hour)
  * seasonal profile (still used by telegramPredictiveAlerts.js's bulk scan -
- * see getBulkHourlyProfiles's own doc comment). Verified live that model
- * was producing a flat line across all 24 forecasted hours for every
- * station checked: with data collection only ~6 days old at the time, most
- * of the next 24 hours' (weekday, hour) combinations - e.g. "Monday
- * 10:00-14:00" when today's Monday hadn't reached 10:00 yet in any prior
- * week - simply had zero historical observations, so every hour fell back
- * to the same flat station-wide average. That cold-start problem will
- * shrink as more weeks of data accumulate, but the deeper issue doesn't:
- * this app is currently tracking a supply-side shortage, not a
- * commute-driven demand pattern, so day-of-week/hour-of-day was never
- * likely to be the right signal for "will this fuel be here soon" in the
- * first place - a short recent trend is.
+ * see getBulkHourlyProfiles's own doc comment) - that one was retired for
+ * being flat across all 24 hours for every station checked (cold-start: no
+ * (weekday, hour) history yet for most of the next day's slots). The
+ * trend-only model that replaced it had its own failure mode, also found
+ * live: a station that just recovered after a long outage (Лукойл,
+ * Потребкооперации 2/1 - available for ~4h after a ~13h outage) stayed
+ * forecast near 15% for the next 12 hours, because its regression pooled
+ * the full 48h unweighted, diluting the recent recovery under a longer
+ * down streak. This version fixes that with a short (8h) trend window for
+ * the near term, and - since a same-15-station sample found a real
+ * day/night availability cycle in 5 of them - adds the hour-of-day profile
+ * back for the hours further out the short trend can't meaningfully reach,
+ * without reintroducing the (weekday, hour) grid's cold-start problem
+ * (hour-only needs 7x fewer samples per cell to be trusted).
  *
  * Still a simple empirical estimate, not a fitted time-series model - no
- * seasonality, no confidence interval, same caveat the region-wide trend
+ * seasonality confidence interval, same caveat the region-wide trend
  * forecast's own doc comment states.
  */
 async function getStationForecastUncached(stationId, { hoursAhead = 24, lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
   const now = new Date();
   const trendFrom = new Date(now.getTime() - STATION_TREND_LOOKBACK_HOURS * 60 * 60 * 1000);
+  const shortTrendFrom = new Date(now.getTime() - SHORT_TREND_LOOKBACK_HOURS * 60 * 60 * 1000);
 
-  const [trendBuckets, streak, recoveryStats] = await Promise.all([
+  const [trendBuckets, streak, recoveryStats, hourProfile] = await Promise.all([
     getStationTrend(stationId, { from: trendFrom, to: now, bucketHours: 1, tz }),
     getCurrentStatusStreak(stationId),
     // Previously only fetched when the station was currently down (all
@@ -223,27 +346,28 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
     // wants this station's outage history regardless of whether it
     // happens to be down at load time.
     getStationRecoveryStats(stationId, { lookbackDays }),
+    getStationHourProfile(stationId, { lookbackDays, tz }),
   ]);
 
   const known = trendBuckets.filter((b) => b.availablePct !== null);
-  const reg = known.length >= MIN_TREND_BUCKETS ? linearRegression(known.map((b, i) => ({ x: i, y: b.availablePct }))) : null;
   const overallAvailablePct = known.length ? known.reduce((sum, b) => sum + b.availablePct, 0) / known.length : null;
+
+  // Short window is a time-based slice of the already-fetched 48h buckets
+  // (no extra query) - same filter-then-index convention `known` above
+  // uses, so a gap in the short window compacts rather than leaving a null
+  // point for linearRegression to skip over anyway.
+  const shortKnown = trendBuckets.filter((b) => b.bucketStart >= shortTrendFrom && b.availablePct !== null);
+  const shortReg =
+    shortKnown.length >= MIN_TREND_BUCKETS
+      ? linearRegression(shortKnown.map((b, i) => ({ x: i, y: b.availablePct })))
+      : null;
 
   const hours = [];
   for (let i = 1; i <= hoursAhead; i++) {
     const at = new Date(now.getTime() + i * 60 * 60 * 1000);
-    if (reg) {
-      const x = known.length - 1 + i;
-      const yRaw = reg.slope * x + reg.intercept;
-      hours.push({ at, availablePct: Math.max(0, Math.min(100, yRaw)), samples: known.length, basis: 'trend' });
-    } else {
-      hours.push({
-        at,
-        availablePct: overallAvailablePct,
-        samples: known.length,
-        basis: overallAvailablePct !== null ? 'flat-average' : 'no-data',
-      });
-    }
+    const x = shortKnown.length - 1 + i;
+    const { availablePct, basis } = blendHourForecast({ i, x, shortReg, hourProfile, overallAvailablePct, at, tz });
+    hours.push({ at, availablePct, samples: shortKnown.length, basis });
   }
 
   let estimatedRecoveryAt = null;
@@ -343,11 +467,14 @@ async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bu
 
 module.exports = {
   getStationForecast,
+  getStationForecastUncached,
   getRegionTrendForecast,
   getBulkHourlyProfiles,
+  getStationHourProfile,
   getCurrentStatusStreak,
   getStationRecoveryStats,
   forecastHour,
+  blendHourForecast,
   linearRegression,
   isoWeekdayAndHour,
 };

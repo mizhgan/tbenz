@@ -19,13 +19,18 @@ function formatHour(iso) {
   });
 }
 
-// basis values changed from the old (weekday, hour) seasonal model's
-// 'history'/'overall-average' to the current trend-based one's own
-// 'trend'/'flat-average'/'no-data' - see forecastService.js's
-// getStationForecastUncached doc comment for why the model itself changed.
+// basis values: 'trend' (short recent trend dominates - near-term hours),
+// 'hour-profile' (this station's own typical availability for this hour of
+// day - further-out hours), 'trend+hour-profile' (blend of both, during the
+// handoff window), 'flat-average' (an hour-profile cell too thin to trust,
+// falls back to the plain average), 'no-data'. See forecastService.js's
+// getStationForecastUncached/blendHourForecast doc comments for why both
+// signals exist and how they're combined.
 function basisNote(basis) {
   if (basis === 'no-data') return ' (нет истории)';
-  if (basis === 'flat-average') return ' (мало данных для тренда, среднее)';
+  if (basis === 'flat-average') return ' (мало данных, среднее)';
+  if (basis === 'hour-profile') return ' (обычно в это время суток)';
+  if (basis === 'trend+hour-profile') return ' (тренд + обычно в это время)';
   return '';
 }
 
@@ -94,8 +99,9 @@ watch(() => props.stationId, load);
         </div>
       </div>
       <p class="hint small">
-        Экстраполяция динамики АИ-92 и АИ-95 на станции за последние 48 часов — грубая оценка
-        направления, не точный прогноз.
+        Ближайшие часы — по недавней динамике станции (АИ-92, АИ-95), дальше — по тому, как
+        обычно выглядит доступность в это время суток на этой станции. Грубая оценка, не точный
+        прогноз.
       </p>
 
       <template v-if="forecast.recentOutages?.length">
