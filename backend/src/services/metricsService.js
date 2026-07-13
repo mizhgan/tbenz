@@ -637,4 +637,5 @@ module.exports = {
   computeOutages,
   CORE_FUEL_TYPES,
   deriveCoreStatus,
+  METRICS_CACHE_TTL_MS,
 };

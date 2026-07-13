@@ -1,5 +1,11 @@
 const StationSnapshot = require('../models/StationSnapshot');
-const { computeOutages, getAvailabilityTrend, getStationTrend, CORE_FUEL_TYPES } = require('./metricsService');
+const {
+  computeOutages,
+  getAvailabilityTrend,
+  getStationTrend,
+  CORE_FUEL_TYPES,
+  METRICS_CACHE_TTL_MS,
+} = require('./metricsService');
 const { memoizeAsync } = require('../utils/cache');
 
 const DEFAULT_TZ = 'Europe/Moscow';
@@ -269,7 +275,7 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
 // bounded, cosmetic staleness on a supplementary forecast, not the primary
 // status a visitor sees.
 const getStationForecast = memoizeAsync(getStationForecastUncached, {
-  ttlMs: 5 * 60 * 1000,
+  ttlMs: METRICS_CACHE_TTL_MS,
   keyFn: (stationId, opts = {}) =>
     JSON.stringify([String(stationId), opts.hoursAhead ?? 24, opts.lookbackDays ?? 28, opts.tz ?? DEFAULT_TZ]),
 });

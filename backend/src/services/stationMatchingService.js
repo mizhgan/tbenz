@@ -4,9 +4,33 @@ const { getSource } = require('./sourceRegistry');
 const EARTH_RADIUS_M = 6371000;
 const DEFAULT_RADIUS_M = 250;
 const DEFAULT_LIMIT = 5;
+// Longitude/latitude degree-to-meter conversion for the cheap bounding-box
+// pre-filter below (a real $geoNear isn't available - see suggestMatches'
+// own doc comment) - not exact (varies slightly with latitude for
+// longitude, which is why lonDelta below still applies its own cos()
+// correction on top of this), but well within the margin needed to filter
+// candidates before the precise haversineMeters distance is computed.
+const METERS_PER_DEGREE_LAT = 111320;
+// Down-weights distance (meters) to not dominate similarity (a 0-1 score) -
+// a candidate has to be this many meters closer to outweigh one full point
+// of name similarity.
+const METERS_PER_SIMILARITY_POINT = 5;
+const SIMILARITY_SCALE = 100;
 
 function toRad(deg) {
   return (deg * Math.PI) / 180;
+}
+
+function boundingBoxDeltas(lat, radiusMeters) {
+  const latDelta = radiusMeters / METERS_PER_DEGREE_LAT;
+  const lonDelta = radiusMeters / (METERS_PER_DEGREE_LAT * Math.max(0.1, Math.cos(toRad(lat))));
+  return { latDelta, lonDelta };
+}
+
+// Shared ranking score for both suggestMatches/suggestMatchesForStation
+// below - closer and more-similar-named candidates rank higher.
+function rankScore(similarity, distanceMeters) {
+  return similarity * SIMILARITY_SCALE - distanceMeters / METERS_PER_SIMILARITY_POINT;
 }
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -53,8 +77,7 @@ function nameSimilarity(a, b) {
  * $geoNear query.
  */
 async function suggestMatches(secondaryDoc, sourceKey, { radiusMeters = DEFAULT_RADIUS_M, limit = DEFAULT_LIMIT } = {}) {
-  const latDelta = radiusMeters / 111320;
-  const lonDelta = radiusMeters / (111320 * Math.max(0.1, Math.cos(toRad(secondaryDoc.lat))));
+  const { latDelta, lonDelta } = boundingBoxDeltas(secondaryDoc.lat, radiusMeters);
 
   const boxCandidates = await Station.find(
     {
@@ -78,10 +101,7 @@ async function suggestMatches(secondaryDoc, sourceKey, { radiusMeters = DEFAULT_
         distanceMeters: Math.round(distanceMeters),
         nameSimilarity: similarity,
         alreadyMatched: (station.sourceLinks || []).some((l) => l.sourceKey === sourceKey),
-        // Closer and more-similar-named candidates rank higher; distance is
-        // in meters so it needs scaling down to not dominate a 0-1
-        // similarity score.
-        score: similarity * 100 - distanceMeters / 5,
+        score: rankScore(similarity, distanceMeters),
       };
     })
     .filter((c) => c.distanceMeters <= radiusMeters)
@@ -104,8 +124,7 @@ async function suggestMatchesForStation(station, sourceKey, { radiusMeters = DEF
   const sourceConfig = getSource(sourceKey);
   if (!sourceConfig) return [];
 
-  const latDelta = radiusMeters / 111320;
-  const lonDelta = radiusMeters / (111320 * Math.max(0.1, Math.cos(toRad(station.lat))));
+  const { latDelta, lonDelta } = boundingBoxDeltas(station.lat, radiusMeters);
 
   const boxCandidates = await sourceConfig.model
     .find(
@@ -132,7 +151,7 @@ async function suggestMatchesForStation(station, sourceKey, { radiusMeters = DEF
         fuelTypes: doc.fuelTypes,
         distanceMeters: Math.round(distanceMeters),
         nameSimilarity: similarity,
-        score: similarity * 100 - distanceMeters / 5,
+        score: rankScore(similarity, distanceMeters),
       };
     })
     .filter((c) => c.distanceMeters <= radiusMeters)
