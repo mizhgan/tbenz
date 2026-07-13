@@ -3,6 +3,15 @@ const TelegramChat = require('../models/TelegramChat');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
 const { escapeHtml } = require('../utils/escapeHtml');
+const logger = require('../utils/logger');
+
+// Generic fallback shown on any DB/Telegram-API failure inside a settings
+// handler - without this, a failed raw.save() (see loadChatRaw callers
+// below) used to propagate straight to telegramBot.js's bot.catch(), which
+// only logs; ctx.answerCbQuery() had already fired by then, so the tapped
+// button's loading spinner had already cleared and the user was left
+// looking at a stale menu with no indication anything went wrong.
+const GENERIC_ERROR_TEXT = '⚠️ Что-то пошло не так. Попробуйте ещё раз через /settings.';
 
 // Same 6 events as the admin panel's TelegramChatForm.vue - kept in sync by
 // hand since the frontend and backend don't share a module, same as the
@@ -210,9 +219,14 @@ function registerSettingsMenu(bot, { upsertChatFromCtx }) {
       );
       return;
     }
-    await upsertChatFromCtx(ctx);
-    const chat = await loadChat(String(ctx.chat.id));
-    await openMain(ctx, chat, { fresh: true });
+    try {
+      await upsertChatFromCtx(ctx);
+      const chat = await loadChat(String(ctx.chat.id));
+      await openMain(ctx, chat, { fresh: true });
+    } catch (err) {
+      logger.error('Telegram settings menu: /settings failed:', err.message);
+      await ctx.reply(GENERIC_ERROR_TEXT).catch(() => {});
+    }
   });
 
   bot.on('callback_query', async (ctx, next) => {
@@ -229,6 +243,15 @@ function registerSettingsMenu(bot, { upsertChatFromCtx }) {
 
     const action = data.slice('settings:'.length);
 
+    try {
+      await handleSettingsAction(ctx, chatIdStr, action);
+    } catch (err) {
+      logger.error(`Telegram settings menu: action "${action}" failed:`, err.message);
+      await safeEditMessageText(ctx, GENERIC_ERROR_TEXT, {}).catch(() => {});
+    }
+  });
+
+  async function handleSettingsAction(ctx, chatIdStr, action) {
     if (action === 'main') {
       const chat = await loadChat(chatIdStr);
       if (!chat) return;
@@ -329,7 +352,7 @@ function registerSettingsMenu(bot, { upsertChatFromCtx }) {
     if (action === 'close') {
       return safeEditMessageText(ctx, 'Настройки закрыты. Наберите /settings, чтобы открыть снова.', {});
     }
-  });
+  }
 
   bot.on('text', async (ctx, next) => {
     const chatIdStr = String(ctx.chat.id);
@@ -339,13 +362,19 @@ function registerSettingsMenu(bot, { upsertChatFromCtx }) {
     const query = ctx.message.text.trim();
     if (!query) return next();
 
-    const stations = await searchStations(query);
-    const { text, extra } = searchResultsMenu(stations);
-    await ctx.reply(text, extra);
-    // Flag stays set so the user can immediately try another search term
-    // without pressing "Добавить станцию" again - it only clears once they
-    // pick a result or navigate away via any other menu button (see the
-    // callback_query handler above).
+    try {
+      const stations = await searchStations(query);
+      const { text, extra } = searchResultsMenu(stations);
+      await ctx.reply(text, extra);
+      // Flag stays set so the user can immediately try another search term
+      // without pressing "Добавить станцию" again - it only clears once they
+      // pick a result or navigate away via any other menu button (see the
+      // callback_query handler above).
+    } catch (err) {
+      logger.error('Telegram settings menu: watchlist search failed:', err.message);
+      awaitingWatchlistSearch.delete(chatIdStr);
+      await ctx.reply(GENERIC_ERROR_TEXT).catch(() => {});
+    }
   });
 }
 
