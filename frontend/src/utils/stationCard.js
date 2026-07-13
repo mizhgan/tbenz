@@ -1,4 +1,4 @@
-import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES } from './fuelStatus';
+import { statusMeta, fuelTypeLabel, bestFuelStatus, CORE_FUEL_TYPES } from './fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
 import { downsampleEvenly } from './mapExport';
 import { roundRect, wrapText, renderCard } from './canvasDraw';
@@ -91,7 +91,11 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
 
   y += 20;
 
-  const overallMeta = statusMeta(station.status);
+  // Gasoline-only badge (bestFuelStatus's own CORE_FUEL_TYPES default) -
+  // not station.status, which is an independent per-source vote across
+  // every fuel type a station sells and can disagree with the
+  // gasoline-only picture the rest of the card (and app) already shows.
+  const overallMeta = statusMeta(bestFuelStatus(station.fuelStatuses));
   const badgeHeight = 64;
   if (draw) {
     ctx.fillStyle = overallMeta.color;

@@ -6,7 +6,7 @@ import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
-import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes, CORE_FUEL_TYPES } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, sortFuelTypes, bestFuelStatus, CORE_FUEL_TYPES } from '../utils/fuelStatus';
 import { formatPct, availabilityColor } from '../utils/colorScale';
 import { renderMapShareCard, MAP_CONTENT_WIDTH } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
@@ -99,21 +99,15 @@ const availableFuelTypes = computed(() => {
 // cleared every checkbox.
 const activeFuelTypes = computed(() => (selectedFuelTypes.value.length ? selectedFuelTypes.value : CORE_FUEL_TYPES));
 
-// A station's effective status is the best (see STATUS_ORDER) among
-// activeFuelTypes - "is at least one of these available here" is the useful
-// question for a single-color map dot, not "are all of them". Always
-// fuel-type-scoped now (gasoline by default) rather than falling back to
-// the station's blanket overall status - that blanket reading used to drive
-// every dot on the map regardless of which specific fuel a driver needed.
+// A station's effective status is the best (see fuelStatus.js's
+// bestFuelStatus) among activeFuelTypes - "is at least one of these
+// available here" is the useful question for a single-color map dot, not
+// "are all of them". Always fuel-type-scoped now (gasoline by default)
+// rather than falling back to the station's blanket overall status - that
+// blanket reading used to drive every dot on the map regardless of which
+// specific fuel a driver needed.
 function effectiveStatus(station) {
-  const types = activeFuelTypes.value;
-  const entries = (station.fuelStatuses || []).filter((f) => types.includes(f.fuelType));
-  if (!entries.length) return 'no_data';
-  let best = entries[0].status;
-  for (const entry of entries) {
-    if (statusOrdinal(entry.status) > statusOrdinal(best)) best = entry.status;
-  }
-  return best;
+  return bestFuelStatus(station.fuelStatuses, activeFuelTypes.value);
 }
 
 // What the status-badge's percentage (and the marker colors) are actually

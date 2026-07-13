@@ -28,6 +28,29 @@ export function statusOrdinal(status) {
   return idx === -1 ? STATUS_ORDER.indexOf('no_data') : idx;
 }
 
+// Best (see STATUS_ORDER) status among `types` (gasoline/CORE_FUEL_TYPES by
+// default) - "is at least one of these available" is the useful question
+// for a single status badge, not "are all of them". Mirrors the backend's
+// own metricsService.deriveCoreStatus exactly (same rank order, same
+// no_data-for-nothing-to-check fallback) - use this instead of a station's
+// blanket `status`/`lastStatus` field wherever a badge is meant to say
+// "is gasoline here", since that blanket field is its own independent vote
+// across every fuel type a station sells (see mergeStatusService.js's own
+// doc comment: "overall status is its own value from the source, not
+// derived from the per-fuel breakdown") and can disagree with the
+// gasoline-only picture - confirmed live: a station showing green on the
+// map (gasoline fine) read orange on its own detail card, because the
+// card's badge was reading raw `station.status` instead of this.
+export function bestFuelStatus(fuelStatuses, types = CORE_FUEL_TYPES) {
+  const entries = (fuelStatuses || []).filter((f) => types.includes(f.fuelType));
+  if (!entries.length) return 'no_data';
+  let best = entries[0].status;
+  for (const entry of entries) {
+    if (statusOrdinal(entry.status) > statusOrdinal(best)) best = entry.status;
+  }
+  return best;
+}
+
 // Short "how long ago" label for a per-fuel-type reading's own
 // lastTransactionAt (see useSourceFuelRows.js) - a source like alfabank can
 // go days between transactions for a given fuel type, so "when" is exactly

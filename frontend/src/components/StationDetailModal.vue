@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import L from 'leaflet';
 import { metricsApi } from '../api/metrics';
 import { stationsApi } from '../api/regions';
-import { statusMeta, fuelTypeLabel, formatRelativeAge } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, formatRelativeAge, bestFuelStatus } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
@@ -25,6 +25,20 @@ const emit = defineEmits(['close', 'changed']);
 // side regardless, but showing a viewer an "изменить" link that would just
 // 403 on submit is misleading, so it's hidden for them entirely instead.
 const auth = useAuthStore();
+
+// The badge/mini-map marker's own status - best-of among whatever fuel
+// types the map had selected when this modal was opened (props.selectedFuelTypes,
+// same set driving that marker's own color), falling back to gasoline
+// (bestFuelStatus's own CORE_FUEL_TYPES default) when opened without that
+// context. NOT the station's blanket `status` field - that's an
+// independent per-source vote across every fuel type a station sells (see
+// mergeStatusService.js's own doc comment) and can disagree with the
+// gasoline-only picture the rest of the app already shows - confirmed
+// live: a station read green on the map but orange here, because this
+// badge was reading that blanket field instead of this.
+const badgeStatus = computed(() =>
+  bestFuelStatus(props.station.fuelStatuses, props.selectedFuelTypes.length ? props.selectedFuelTypes : undefined)
+);
 
 const miniMapContainer = ref(null);
 let miniMap = null;
@@ -235,8 +249,8 @@ onMounted(async () => {
   }).addTo(miniMap);
   L.circleMarker([props.station.lat, props.station.lon], {
     radius: 8,
-    color: statusMeta(props.station.status).color,
-    fillColor: statusMeta(props.station.status).color,
+    color: statusMeta(badgeStatus.value).color,
+    fillColor: statusMeta(badgeStatus.value).color,
     fillOpacity: 0.9,
     weight: 2,
   }).addTo(miniMap);
@@ -291,8 +305,8 @@ onBeforeUnmount(() => {
         </div>
 
         <p>
-          <span class="badge-dot" :style="{ background: statusMeta(station.status).color }"></span>
-          {{ statusMeta(station.status).label }}
+          <span class="badge-dot" :style="{ background: statusMeta(badgeStatus).color }"></span>
+          {{ statusMeta(badgeStatus).label }}
         </p>
 
         <div ref="miniMapContainer" class="mini-map"></div>
