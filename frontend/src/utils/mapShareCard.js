@@ -85,10 +85,12 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availabl
   if (draw) {
     ctx.fillStyle = '#64748b';
     ctx.fillText(`доступность сейчас · ${fuelLabel || 'АИ-92, АИ-95'}`, PADDING + 210, y + 30);
-    // stationCount, not a sum of `counts` - `counts` now counts per-fuel-type
-    // readings (one per active fuel type per station, see MapView.vue's
-    // currentSummary/activeFuelTypes) when no specific fuel type is picked,
-    // so summing it would overcount how many actual stations that covers.
+    // Its own explicit field rather than a sum of `counts` - MapView.vue
+    // passes `counts` as one bucket per station (currentSummary.stationCounts,
+    // matching the STATUS_TILES below), but this card shouldn't need to
+    // assume that's always true of whatever a caller passes; stationCount
+    // is the one number this card actually needs "из X станций" to be
+    // trustworthy regardless of how `counts` itself is bucketed.
     ctx.fillText(`из ${stationCount} станций`, PADDING + 210, y + 54);
   }
   y += 90;

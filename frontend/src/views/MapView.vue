@@ -129,6 +129,14 @@ const badgeFuelLabel = computed(() => activeFuelTypes.value.map(fuelTypeLabel).j
 // actually there" are different, both potentially true, claims, and the
 // second is the one a driver checking this badge is actually asking.
 const currentSummary = computed(() => {
+  // Pools each station's own reading for activeFuelTypes, each counted as
+  // its own data point (see this function's own git history for why -
+  // "52% of stations are open" and "27% chance your gasoline is actually
+  // there" are different claims). Used only for availablePct below - with
+  // 2 active fuel types by default, summing `counts` itself would come out
+  // to ~2x the real station count, which is exactly the bug reported in
+  // the Telegram digest cards (see telegramDigestData.js's own fix) and
+  // turned out to affect this same live panel + the map share card too.
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
   const types = activeFuelTypes.value;
   for (const s of stations.value) {
@@ -140,7 +148,18 @@ const currentSummary = computed(() => {
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
   const availablePct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
-  return { counts, availablePct, total: stations.value.length };
+
+  // One status per station (bestFuelStatus, same as the marker dots and
+  // StationDetailModal's own badge) - sums to exactly stations.value.length,
+  // unlike `counts` above. What the live panel's four numbers and the
+  // share card's stat tiles actually display.
+  const stationCounts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
+  for (const s of stations.value) {
+    const st = bestFuelStatus(s.fuelStatuses, types);
+    stationCounts[st] = (stationCounts[st] || 0) + 1;
+  }
+
+  return { counts, stationCounts, availablePct, total: stations.value.length };
 });
 
 const selectedRegion = computed(() => regions.value.find((r) => r._id === selectedRegionId.value) || null);
@@ -734,7 +753,7 @@ async function generateShareCard() {
     const blob = await renderMapShareCard({
       regionName: selectedRegion.value?.name || 'Район',
       mapCanvas: frameCanvas,
-      counts: currentSummary.value.counts,
+      counts: currentSummary.value.stationCounts,
       stationCount: currentSummary.value.total,
       availablePct: currentSummary.value.availablePct,
       fuelLabel: badgeFuelLabel.value,
@@ -1024,19 +1043,19 @@ onBeforeUnmount(() => {
               </strong>
               <span class="current-state-item">
                 <span class="dot" :style="{ background: statusMeta('available').color }"></span>
-                {{ currentSummary.counts.available }}
+                {{ currentSummary.stationCounts.available }}
               </span>
               <span class="current-state-item">
                 <span class="dot" :style="{ background: statusMeta('maybe_available').color }"></span>
-                {{ currentSummary.counts.maybe_available }}
+                {{ currentSummary.stationCounts.maybe_available }}
               </span>
               <span class="current-state-item">
                 <span class="dot" :style="{ background: statusMeta('not_available').color }"></span>
-                {{ currentSummary.counts.not_available }}
+                {{ currentSummary.stationCounts.not_available }}
               </span>
               <span class="current-state-item">
                 <span class="dot" :style="{ background: statusMeta('no_data').color }"></span>
-                {{ currentSummary.counts.no_data }}
+                {{ currentSummary.stationCounts.no_data }}
               </span>
               <span class="current-state-shown hint small">
                 показано {{ filteredStations.length }} из {{ stations.length }}
