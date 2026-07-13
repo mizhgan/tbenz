@@ -144,13 +144,47 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
   }
 }
 
+// Simple bar chart for average recovery time per bucket - same underlying
+// data/bucketing as RecoveryTrendChart.vue's Chart.js bars on the reports
+// page itself, redrawn in plain Canvas 2D like the rest of this card. No
+// per-bar date labels (unlike the on-page version) - with up to ~19 bars
+// for a 24h/hourly selection there isn't room to keep them legible at this
+// card's fixed width, and the header/footer already carry the period's own
+// date range.
+function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
+  if (!draw || !buckets.length) return;
+  const maxMinutes = Math.max(1, ...buckets.map((b) => b.avgRecoveryMinutes));
+  const gap = Math.min(8, width / buckets.length / 4);
+  const barWidth = (width - gap * (buckets.length - 1)) / buckets.length;
+
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + height);
+  ctx.lineTo(x + width, y + height);
+  ctx.stroke();
+
+  buckets.forEach((b, i) => {
+    const barHeight = Math.max(3, (b.avgRecoveryMinutes / maxMinutes) * height);
+    const bx = x + i * (barWidth + gap);
+    const by = y + height - barHeight;
+    ctx.fillStyle = 'rgba(37, 99, 235, 0.75)';
+    roundRect(ctx, bx, by, Math.max(1, barWidth), barHeight, Math.min(3, barWidth / 2));
+    ctx.fill();
+  });
+}
+
 // Runs the full layout against `ctx`; when `draw` is false, drawing calls
 // are skipped (measureText still runs) so the same function can measure
 // content height first, then draw for real on a canvas of that height -
 // same two-pass approach as stationCard.js, for the same reason (a report
 // with 0 top stations or no trend data shouldn't ship a card that's mostly
 // empty space below a fixed height).
-function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuckets, direction, topStations, stationsLabel }, draw) {
+function layoutCard(
+  ctx,
+  { region, from, to, summary, trendBuckets, forecastBuckets, recoveryTrendBuckets, direction, topStations, stationsLabel },
+  draw
+) {
   const contentWidth = WIDTH - PADDING * 2;
   let y = PADDING + 20;
 
@@ -277,6 +311,38 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuck
 
   y += 16;
 
+  // Recovery-time bars - same data/bucketing as the reports page's own
+  // "Время восстановления после отключений" section (RecoveryTrendChart.vue).
+  if (draw) {
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
+    ctx.fillText('Время восстановления после отключений', PADDING, y);
+  }
+  y += 28;
+
+  if (recoveryTrendBuckets.length) {
+    const barsHeight = 90;
+    drawRecoveryBars(ctx, recoveryTrendBuckets, PADDING, y, contentWidth, barsHeight, draw);
+    y += barsHeight + 28;
+
+    if (draw) {
+      const worst = recoveryTrendBuckets.reduce((a, b) => (b.avgRecoveryMinutes > a.avgRecoveryMinutes ? b : a));
+      ctx.fillStyle = '#64748b';
+      ctx.font = '600 20px -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText(`Дольше всего — ${formatMinutes(worst.avgRecoveryMinutes)} в среднем`, PADDING, y);
+    }
+    y += 40;
+  } else {
+    if (draw) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('За период не было отключений с восстановлением', PADDING, y + 20);
+    }
+    y += 60;
+  }
+
+  y += 16;
+
   // Top stations (best or worst, matching whichever sort tab was active on
   // the page when the card was generated).
   if (topStations.length) {
@@ -345,7 +411,18 @@ function layoutCard(ctx, { region, from, to, summary, trendBuckets, forecastBuck
  * its actual content instead of shipping a fixed size with empty space when
  * there's no trend data or no top stations yet.
  */
-export function renderRegionReportCard({ region, from, to, summary, trendBuckets, forecastBuckets, direction, topStations, stationsLabel }) {
+export function renderRegionReportCard({
+  region,
+  from,
+  to,
+  summary,
+  trendBuckets,
+  forecastBuckets,
+  recoveryTrendBuckets,
+  direction,
+  topStations,
+  stationsLabel,
+}) {
   const payload = {
     region,
     from,
@@ -353,6 +430,7 @@ export function renderRegionReportCard({ region, from, to, summary, trendBuckets
     summary,
     trendBuckets: trendBuckets || [],
     forecastBuckets: forecastBuckets || [],
+    recoveryTrendBuckets: recoveryTrendBuckets || [],
     direction,
     topStations: topStations || [],
     stationsLabel,

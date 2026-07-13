@@ -202,6 +202,7 @@ async function generateReportCard() {
       summary: summary.value,
       trendBuckets: trendBuckets.value,
       forecastBuckets: forecastBuckets.value,
+      recoveryTrendBuckets: recoveryTrendBuckets.value,
       direction: forecastDirection.value,
       topStations: highlightedStations.value.slice(0, 3),
       stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
@@ -408,8 +409,8 @@ onMounted(async () => {
     <div class="card section">
       <h2>Картинка отчёта для шаринга</h2>
       <p class="hint">
-        Собирает KPI, график динамики и топ-3 станции текущей вкладки (лучшие/худшие) в одну
-        картинку — удобно переслать в чат вместо ссылки на отчёт.
+        Собирает KPI, графики динамики и времени восстановления, топ-3 станции текущей вкладки
+        (лучшие/худшие) в одну картинку — удобно переслать в чат вместо ссылки на отчёт.
       </p>
 
       <template v-if="!cardUrl">

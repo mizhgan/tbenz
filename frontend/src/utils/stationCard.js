@@ -202,6 +202,52 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
     y += 2 * tileHeight + gap + 40;
   }
 
+  // Recent outages - same data as StationForecast.vue's own "Последние
+  // отключения" mini bar list on the live page (forecast.recentOutages,
+  // most recent first), redrawn in plain Canvas 2D. Capped at 5 here (the
+  // live page shows up to 10) - a shared card needs to stay a reasonable
+  // height, and 5 is enough to see whether recovery time is consistent or
+  // all over the place.
+  const shownOutages = (forecast?.recentOutages || []).slice(0, 5);
+  if (shownOutages.length) {
+    if (draw) {
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillText('Последние отключения (АИ-92, АИ-95)', PADDING, y);
+    }
+    y += 20;
+
+    const maxMinutes = Math.max(1, ...shownOutages.map((o) => o.durationMinutes));
+    const dateWidth = 190;
+    const durationWidth = 90;
+    const barAreaWidth = contentWidth - dateWidth - durationWidth;
+    const barHeight = 14;
+
+    for (const o of shownOutages) {
+      y += 34;
+      if (draw) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(formatHour(o.start), PADDING, y);
+
+        const barWidth = Math.max(4, (o.durationMinutes / maxMinutes) * barAreaWidth);
+        ctx.fillStyle = '#f1f5f9';
+        roundRect(ctx, PADDING + dateWidth, y - barHeight + 2, barAreaWidth, barHeight, 4);
+        ctx.fill();
+        ctx.fillStyle = '#dc2626';
+        roundRect(ctx, PADDING + dateWidth, y - barHeight + 2, barWidth, barHeight, 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '600 20px -apple-system, "Segoe UI", Roboto, sans-serif';
+        const durText = formatMinutes(o.durationMinutes);
+        const durWidth = ctx.measureText(durText).width;
+        ctx.fillText(durText, PADDING + contentWidth - durWidth, y);
+      }
+    }
+    y += 36;
+  }
+
   // Compact fuel history: one horizontal strip per fuel type, each segment a
   // status color in chronological order (oldest -> newest, left -> right).
   // Deliberately not a full axis-and-legend line chart like
