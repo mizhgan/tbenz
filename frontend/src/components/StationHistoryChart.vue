@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
 import { stationsApi } from '../api/regions';
-import { STATUS_ORDER, statusMeta, statusOrdinal } from '../utils/fuelStatus';
+import { STATUS_ORDER, statusMeta, statusOrdinal, fuelTypeLabel } from '../utils/fuelStatus';
 import { useFuelColorsStore } from '../store/fuelColors';
 
 const props = defineProps({
@@ -15,11 +15,21 @@ const errorMessage = ref('');
 let chart = null;
 const fuelColors = useFuelColorsStore();
 
+// Same gasoline-only default as everywhere else (see metricsService.js's
+// own doc comment on CORE_FUEL_TYPES) - with up to 5 fuel types (92/95/100/
+// ДТ/propane/methane) all plotted as separate stepped lines on the same
+// 4-value status axis, showing everything at once read as an illegible mess
+// of overlapping lines. Non-core lines start hidden (Chart.js's own
+// clickable legend, not removed from the chart entirely) rather than
+// filtered out of the data - a driver curious about diesel/gas can still
+// click that legend entry to bring it back for this one station.
+const CORE_FUEL_TYPES = ['92', '95'];
+
 function renderChart(snapshots) {
   const fuelTypes = [...new Set(snapshots.flatMap((s) => s.fuelStatuses.map((f) => f.fuelType)))];
   const labels = snapshots.map((s) => new Date(s.polledAt).toLocaleString('ru-RU'));
   const datasets = fuelTypes.map((fuelType) => ({
-    label: `АИ-${fuelType}`,
+    label: fuelTypeLabel(fuelType),
     data: snapshots.map((s) => {
       const entry = s.fuelStatuses.find((f) => f.fuelType === fuelType);
       return entry ? statusOrdinal(entry.status) : null;
@@ -28,6 +38,7 @@ function renderChart(snapshots) {
     backgroundColor: fuelColors.colorFor(fuelType),
     spanGaps: true,
     stepped: true,
+    hidden: !CORE_FUEL_TYPES.includes(fuelType),
   }));
 
   if (chart) chart.destroy();
@@ -90,6 +101,10 @@ onBeforeUnmount(() => {
     <div v-show="!loading && !errorMessage" class="canvas-box">
       <canvas ref="canvasRef"></canvas>
     </div>
+    <p v-if="!loading && !errorMessage" class="hint small">
+      По умолчанию показаны только АИ-92 и АИ-95 — остальные виды топлива скрыты, чтобы график не
+      превращался в кашу из линий; нажмите на нужный вид топлива в легенде, чтобы его показать.
+    </p>
   </div>
 </template>
 
@@ -97,5 +112,10 @@ onBeforeUnmount(() => {
 .canvas-box {
   position: relative;
   height: 220px;
+}
+
+.hint.small {
+  font-size: 11px;
+  margin-top: 6px;
 }
 </style>
