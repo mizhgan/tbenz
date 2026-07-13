@@ -502,35 +502,52 @@ const getHeatmap = memoizeAsync(getHeatmapUncached, {
 });
 
 // Moscow has used a fixed UTC+3 offset with no DST since 2014 - same
-// shortcut telegramPromoScheduler.js already relies on - so a Moscow
-// calendar day can be built directly from a literal +03:00 offset instead
-// of pulling in a timezone-arithmetic library.
-const RECOVERY_TREND_TZ = 'Europe/Moscow';
-const recoveryTrendDayFmt = new Intl.DateTimeFormat('en-CA', {
-  timeZone: RECOVERY_TREND_TZ,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
+// shortcut telegramPromoScheduler.js already relies on - so bucket
+// boundaries can be computed with plain epoch-ms arithmetic shifted by a
+// literal +3h, instead of pulling in a timezone-arithmetic library.
+const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+// Epoch-aligned truncation of `date` to the start of its own bucket, given
+// the same {unit, binSize} shape getAvailabilityTrendUncached derives from
+// bucketHours (see there) - not a byte-exact reproduction of Mongo's own
+// $dateTrunc (which this function doesn't have access to for outages built
+// in JS, not aggregated in Mongo), just a consistent, good-enough
+// approximation so both trend charts land on comparably-sized buckets for
+// the same bucketHours choice instead of one always stuck at daily
+// regardless of what the other is showing.
+function truncateToBucketStart(date, unit, binSize) {
+  const bucketMs = (unit === 'hour' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000) * binSize;
+  const localMs = date.getTime() + MOSCOW_OFFSET_MS;
+  const truncatedLocalMs = Math.floor(localMs / bucketMs) * bucketMs;
+  return new Date(truncatedLocalMs - MOSCOW_OFFSET_MS);
+}
 
 /**
- * Region-wide average recovery time, bucketed by calendar day - "is it
- * taking longer or shorter to come back after running out" over the
- * period, a complement to getAvailabilityTrend's "how often is it
- * available" (that one counts snapshots directly via a Mongo aggregation;
- * an outage is a streak spanning several snapshots, so this instead re-uses
- * computeOutages per station - same approach getStationMetricsUncached
- * already takes for the aggregate outageCount/avgOutageMinutes - and
- * buckets each individual outage by the calendar day it *ended* (when a
- * driver would have actually noticed fuel was back), not the day it started.
+ * Region-wide average recovery time, bucketed the same way
+ * getAvailabilityTrend's own bucketHours does (hour buckets for a short
+ * window, day/week for a longer one - see that function's own unit/binSize
+ * derivation, mirrored here) - "is it taking longer or shorter to come back
+ * after running out" over the period, a complement to that trend's "how
+ * often is it available". That one counts snapshots directly via a Mongo
+ * aggregation; an outage is a streak spanning several snapshots, so this
+ * instead re-uses computeOutages per station (same approach
+ * getStationMetricsUncached already takes for the aggregate outageCount/
+ * avgOutageMinutes) and buckets each individual outage by the moment it
+ * *ended* (when a driver would have actually noticed fuel was back), not
+ * when it started.
  *
- * Deliberately always day-granularity, unlike getAvailabilityTrend's
- * configurable bucketHours - outages are comparatively rare events (a
- * handful a day region-wide), so replicating that finer hour/week
- * granularity here would mostly produce sparse, mostly-empty buckets
- * without adding real signal.
+ * Verified live this was worth doing, not just cosmetic: with bucketHours
+ * fixed at "always a day" (an earlier version of this function), a 24h
+ * selection showed 2 sparse day-bars next to the availability chart's dozen
+ * hourly points right above it, and a 30-day selection showed the same
+ * several daily bars as a 7-day one instead of the coarser weekly view the
+ * availability chart itself switches to - both read as "this chart is
+ * broken" even though the underlying data was correct.
  */
-async function getRecoveryTrendUncached(regionId, { from, to }) {
+async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24 }) {
+  const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
+  const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
+
   const match = buildMatch(regionId, from, to);
   const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1 })
     .sort({ station: 1, polledAt: 1 })
@@ -543,21 +560,22 @@ async function getRecoveryTrendUncached(regionId, { from, to }) {
     historyByStation.get(key).push(row);
   }
 
-  const byDay = new Map(); // 'YYYY-MM-DD' -> { totalMinutes, outageCount }
+  const byBucket = new Map(); // bucketStart ms -> { totalMinutes, outageCount }
   for (const history of historyByStation.values()) {
     const { outages } = computeOutages(history);
     for (const outage of outages) {
-      const dayKey = recoveryTrendDayFmt.format(outage.end);
-      const entry = byDay.get(dayKey) || { totalMinutes: 0, outageCount: 0 };
+      const bucketStart = truncateToBucketStart(outage.end, unit, binSize);
+      const key = bucketStart.getTime();
+      const entry = byBucket.get(key) || { totalMinutes: 0, outageCount: 0 };
       entry.totalMinutes += outage.durationMinutes;
       entry.outageCount += 1;
-      byDay.set(dayKey, entry);
+      byBucket.set(key, entry);
     }
   }
 
-  return Array.from(byDay.entries())
-    .map(([dayKey, entry]) => ({
-      bucketStart: new Date(`${dayKey}T00:00:00+03:00`),
+  return Array.from(byBucket.entries())
+    .map(([bucketStartMs, entry]) => ({
+      bucketStart: new Date(bucketStartMs),
       avgRecoveryMinutes: entry.totalMinutes / entry.outageCount,
       outageCount: entry.outageCount,
     }))

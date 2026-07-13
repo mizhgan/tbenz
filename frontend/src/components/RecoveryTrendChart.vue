@@ -28,7 +28,11 @@ function renderChart() {
     return;
   }
 
-  const labels = props.buckets.map((b) => new Date(b.bucketStart).toLocaleDateString('ru-RU'));
+  // Full date+time (not just the date) - the backend now buckets by hour
+  // for a short-enough range (see metricsService.getRecoveryTrend's own
+  // bucketHours), and a bare date would show several identical-looking
+  // hourly bars with no way to tell them apart.
+  const labels = props.buckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU'));
 
   if (chart) chart.destroy();
   chart = new Chart(canvasRef.value, {

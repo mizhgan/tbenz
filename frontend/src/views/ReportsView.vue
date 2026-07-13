@@ -281,7 +281,7 @@ async function loadMetrics() {
       metricsApi.stations(regionId, { from, to }),
       metricsApi.brands(regionId, { from, to }),
       metricsApi.heatmap(regionId, { from, to }),
-      metricsApi.recoveryTrend(regionId, { from, to }),
+      metricsApi.recoveryTrend(regionId, { from, to, bucketHours }),
     ]);
 
   if (trendResult.status === 'fulfilled') {
