@@ -7,6 +7,9 @@ const WIDTH = 1000;
 const PADDING = 56;
 const FOOTER_HEIGHT = 90;
 const MAX_STRIP_SEGMENTS = 40;
+// Gasoline only - same default as everywhere else (see metricsService.js's
+// own doc comment on CORE_FUEL_TYPES).
+const CORE_FUEL_TYPES = ['92', '95'];
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -253,12 +256,21 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
   // Deliberately not a full axis-and-legend line chart like
   // StationHistoryChart.vue - this needs to read at a glance in a shared
   // image, not be analyzed, so it trades precision for compactness.
+  //
+  // Gasoline only, same CORE_FUEL_TYPES default as everywhere else (see
+  // metricsService.js's own doc comment) - unlike the live page's own
+  // history chart (StationHistoryChart.vue), a static shared image has no
+  // clickable legend to bring the other fuel types back, so they're left
+  // off entirely here rather than drawn hidden. Fixed order (92 before 95),
+  // not history's own insertion order, for a consistent shared image
+  // regardless of which type happened to be seen first in this window.
   const fuelSeries = buildFuelSeries(history);
-  if (fuelSeries.size) {
+  const coreFuelEntries = CORE_FUEL_TYPES.filter((t) => fuelSeries.has(t)).map((t) => [t, fuelSeries.get(t)]);
+  if (coreFuelEntries.length) {
     if (draw) {
       ctx.fillStyle = '#0f172a';
       ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('История по видам топлива', PADDING, y);
+      ctx.fillText('История по видам топлива (АИ-92, АИ-95)', PADDING, y);
     }
     y += 20;
 
@@ -267,7 +279,7 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
     const stripAreaWidth = contentWidth - labelWidth;
     const segGap = 3;
 
-    for (const [fuelType, series] of fuelSeries.entries()) {
+    for (const [fuelType, series] of coreFuelEntries) {
       y += 36;
       const sampled = downsampleEvenly(series, MAX_STRIP_SEGMENTS);
       if (draw) {
