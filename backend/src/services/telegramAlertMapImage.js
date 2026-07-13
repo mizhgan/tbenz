@@ -21,20 +21,23 @@ const sharp = require('sharp');
 const browserFetchService = require('./browserFetchService');
 const { deriveCoreStatus } = require('./metricsService');
 const logger = require('../utils/logger');
+const {
+  FONT,
+  COLOR_BG,
+  COLOR_GOOD,
+  COLOR_WARN,
+  COLOR_BAD,
+  COLOR_MUTED,
+  COLOR_TEXT,
+  COLOR_SUBTEXT,
+  pctColor: pctColorFor,
+  escapeXml,
+} = require('./telegramImageStyle');
 
 const MAP_WIDTH = 640;
 const MAP_HEIGHT = 400;
 const STRIP_HEIGHT = 84;
 const PAD = 24;
-const FONT = 'DejaVu Sans, Arial, sans-serif';
-
-const COLOR_BG = '#0f172a';
-const COLOR_GOOD = '#16a34a';
-const COLOR_WARN = '#d97706';
-const COLOR_BAD = '#dc2626';
-const COLOR_MUTED = '#9ca3af';
-const COLOR_TEXT = '#f1f5f9';
-const COLOR_SUBTEXT = '#94a3b8';
 
 const STATUS_COLORS = {
   available: COLOR_GOOD,
@@ -42,23 +45,6 @@ const STATUS_COLORS = {
   not_available: COLOR_BAD,
   no_data: COLOR_MUTED,
 };
-
-function escapeXml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&apos;';
-    }
-  });
-}
 
 // Leaflet/tiles loaded from unpkg's CDN rather than bundled - this only
 // runs occasionally (a fuel-availability change, not every request), so
@@ -135,13 +121,6 @@ function statChip(x, y, dotColor, count, label) {
     <text x="${x + 22}" y="${y}" font-family="${FONT}" font-size="20" font-weight="bold" fill="${COLOR_TEXT}">${count}</text>
     <text x="${x}" y="${y + 18}" font-family="${FONT}" font-size="11" fill="${COLOR_SUBTEXT}">${escapeXml(label)}</text>
   `;
-}
-
-function pctColorFor(pct) {
-  if (pct === null) return COLOR_MUTED;
-  if (pct >= 85) return COLOR_GOOD;
-  if (pct >= 60) return COLOR_WARN;
-  return COLOR_BAD;
 }
 
 // Same "available + maybe_available over available + maybe_available +

@@ -1,42 +1,21 @@
 const sharp = require('sharp');
+const {
+  FONT,
+  COLOR_BG,
+  COLOR_BORDER,
+  COLOR_GOOD,
+  COLOR_WARN,
+  COLOR_BAD,
+  COLOR_MUTED,
+  COLOR_TEXT,
+  COLOR_SUBTEXT,
+  pctColor,
+  escapeXml,
+} = require('./telegramImageStyle');
 
 const WIDTH = 640;
 const HEIGHT = 340;
 const PAD = 32;
-const FONT = 'DejaVu Sans, Arial, sans-serif';
-
-const COLOR_BG = '#0f172a';
-const COLOR_BORDER = '#1e293b';
-const COLOR_GOOD = '#16a34a';
-const COLOR_WARN = '#d97706';
-const COLOR_BAD = '#dc2626';
-const COLOR_MUTED = '#64748b';
-const COLOR_TEXT = '#f1f5f9';
-const COLOR_SUBTEXT = '#94a3b8';
-
-function pctColor(pct) {
-  if (pct === null) return COLOR_MUTED;
-  if (pct >= 85) return COLOR_GOOD;
-  if (pct >= 60) return COLOR_WARN;
-  return COLOR_BAD;
-}
-
-function escapeXml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case '&':
-        return '&amp;';
-      case '<':
-        return '&lt;';
-      case '>':
-        return '&gt;';
-      case '"':
-        return '&quot;';
-      default:
-        return '&apos;';
-    }
-  });
-}
 
 const TREND_META = {
   improving: { arrow: '↗', color: COLOR_GOOD },
