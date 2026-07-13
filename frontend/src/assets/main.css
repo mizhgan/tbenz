@@ -121,6 +121,36 @@ body {
   padding: 0;
 }
 
+/* Official channel link - always visible regardless of auth state (unlike
+   the admin nav links), so it lives in .user rather than .nav. Telegram's
+   own brand blue rather than the app's usual link-btn blue, so it reads as
+   "this is Telegram" at a glance rather than just another nav link. */
+.telegram-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #7ec8f2;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.telegram-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Icon-only below the same width the nav itself starts wrapping to its own
+   row (see .topbar's media query) - brand + username + role badge + this
+   link all still have to share one line at that width, and the icon alone
+   (with its title="" tooltip) stays recognizable without the label. */
+@media (max-width: 700px) {
+  .telegram-link__label {
+    display: none;
+  }
+}
+
 .content {
   flex: 1;
   padding: 24px;
