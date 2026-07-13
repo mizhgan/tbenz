@@ -101,11 +101,6 @@ async function getBulkHourlyProfiles(stationIds, { lookbackDays = 28, tz = DEFAU
   return result;
 }
 
-async function getStationHourlyProfile(stationId, { lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
-  const bulk = await getBulkHourlyProfiles([stationId], { lookbackDays, tz });
-  return bulk.get(String(stationId)) || { profile: new Map(), overallAvailablePct: null };
-}
-
 /**
  * Estimated availability for a single hour, read off a station's (weekday,
  * hour) profile - falls back to the station's overall average when that
@@ -344,7 +339,6 @@ module.exports = {
   getStationForecast,
   getRegionTrendForecast,
   getBulkHourlyProfiles,
-  getStationHourlyProfile,
   getCurrentStatusStreak,
   getStationRecoveryStats,
   forecastHour,

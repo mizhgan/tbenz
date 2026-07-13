@@ -2,7 +2,6 @@ import http from './http';
 
 export const regionsApi = {
   list: () => http.get('/regions').then((r) => r.data),
-  get: (id) => http.get(`/regions/${id}`).then((r) => r.data),
   create: (payload) => http.post('/regions', payload).then((r) => r.data),
   update: (id, payload) => http.put(`/regions/${id}`, payload).then((r) => r.data),
   remove: (id) => http.delete(`/regions/${id}`),

@@ -4,6 +4,14 @@
 // statuses out on a chart axis; it isn't an officially documented ordering.
 export const STATUS_ORDER = ['not_available', 'no_data', 'maybe_available', 'available'];
 
+// Gasoline only - mirrors the backend's own CORE_FUEL_TYPES (see
+// metricsService.js's doc comment for the real-data justification: gasoline
+// availability is meaningfully worse than diesel, so folding diesel in
+// dilutes/hides the real shortage). Single source of truth for every
+// frontend file that needs "the default fuel types" - map badge/filters,
+// station history chart, shareable station card.
+export const CORE_FUEL_TYPES = ['92', '95'];
+
 export const STATUS_META = {
   available: { label: 'Есть', color: '#16a34a' },
   maybe_available: { label: 'Возможно есть', color: '#d97706' },

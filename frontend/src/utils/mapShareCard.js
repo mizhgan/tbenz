@@ -1,5 +1,5 @@
 import { availabilityColor, formatPct } from './colorScale';
-import { roundRect, wrapText } from './canvasDraw';
+import { roundRect, wrapText, renderCard } from './canvasDraw';
 
 const WIDTH = 1000;
 const PADDING = 56;
@@ -179,34 +179,11 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availabl
  * Draws a shareable "map snapshot" card - the current map view (tiles +
  * status-colored markers, already composited by the caller into
  * `mapCanvas`) plus a headline availability percentage and status-count
- * tiles for the current moment. Pure Canvas 2D, same measure-then-draw
- * two-pass approach as stationCard.js/regionReportCard.js, resolves with a
- * PNG Blob.
+ * tiles for the current moment. Pure Canvas 2D, resolves with a PNG Blob via
+ * the shared measure-then-draw runner (canvasDraw.js's renderCard) used by
+ * stationCard.js/regionReportCard.js too.
  */
 export function renderMapShareCard({ regionName, mapCanvas, counts, stationCount, availablePct, fuelLabel, generatedAt }) {
   const payload = { regionName, mapCanvas, counts, stationCount, availablePct, fuelLabel, generatedAt };
-
-  const measureCanvas = document.createElement('canvas');
-  const measureCtx = measureCanvas.getContext('2d');
-  const height = layoutCard(measureCtx, payload, false);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#f4f6f8';
-  ctx.fillRect(0, 0, WIDTH, height);
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, 24, 24, WIDTH - 48, height - 48, 24);
-  ctx.fill();
-
-  layoutCard(ctx, payload, true);
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error('Не удалось создать изображение'));
-    }, 'image/png');
-  });
+  return renderCard(layoutCard, payload, { width: WIDTH });
 }

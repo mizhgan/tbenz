@@ -6,7 +6,7 @@ import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
-import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes } from '../utils/fuelStatus';
+import { statusMeta, statusOrdinal, fuelTypeLabel, sortFuelTypes, CORE_FUEL_TYPES } from '../utils/fuelStatus';
 import { formatPct, availabilityColor } from '../utils/colorScale';
 import { renderMapShareCard, MAP_CONTENT_WIDTH } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
@@ -71,12 +71,10 @@ function brandOf(station) {
 // gasoline is where this region's real shortage is (verified live: 92 at
 // ~25%, 95 at ~29.5%, against diesel's own ~38.7% over the same stations/
 // period - folding diesel in would have quietly diluted the number away
-// from the fuel drivers are actually struggling to find). Same list as the
-// backend's metricsService.CORE_FUEL_TYPES, which everything else (reports,
-// digest, forecast, predictive/status alerts, the "⚠ расходятся" warning)
-// already pools by - kept as its own local constant rather than fetched,
-// since it drives the *default* filter selection below, not a server call.
-const CORE_FUEL_TYPES = ['92', '95'];
+// from the fuel drivers are actually struggling to find). Imported from
+// fuelStatus.js (shared with StationHistoryChart.vue/stationCard.js) rather
+// than redefined here - drives the *default* filter selection below, not a
+// server call, same list as the backend's metricsService.CORE_FUEL_TYPES.
 
 // Defaults to gasoline checked, not empty - this is the actual filter (see
 // the "Виды топлива" checkboxes in the drawer), not just a fallback: an

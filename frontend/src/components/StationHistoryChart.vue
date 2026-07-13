@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
 import { stationsApi } from '../api/regions';
-import { STATUS_ORDER, statusMeta, statusOrdinal, fuelTypeLabel } from '../utils/fuelStatus';
+import { STATUS_ORDER, statusMeta, statusOrdinal, fuelTypeLabel, CORE_FUEL_TYPES } from '../utils/fuelStatus';
 import { useFuelColorsStore } from '../store/fuelColors';
 
 const props = defineProps({
@@ -15,15 +15,14 @@ const errorMessage = ref('');
 let chart = null;
 const fuelColors = useFuelColorsStore();
 
-// Same gasoline-only default as everywhere else (see metricsService.js's
-// own doc comment on CORE_FUEL_TYPES) - with up to 5 fuel types (92/95/100/
-// ДТ/propane/methane) all plotted as separate stepped lines on the same
-// 4-value status axis, showing everything at once read as an illegible mess
-// of overlapping lines. Non-core lines start hidden (Chart.js's own
-// clickable legend, not removed from the chart entirely) rather than
-// filtered out of the data - a driver curious about diesel/gas can still
-// click that legend entry to bring it back for this one station.
-const CORE_FUEL_TYPES = ['92', '95'];
+// CORE_FUEL_TYPES (imported above, shared with MapView.vue/stationCard.js) -
+// with up to 5 fuel types (92/95/100/ДТ/propane/methane) all plotted as
+// separate stepped lines on the same 4-value status axis, showing everything
+// at once read as an illegible mess of overlapping lines. Non-core lines
+// start hidden (Chart.js's own clickable legend, not removed from the chart
+// entirely) rather than filtered out of the data - a driver curious about
+// diesel/gas can still click that legend entry to bring it back for this
+// one station.
 
 function renderChart(snapshots) {
   const fuelTypes = [...new Set(snapshots.flatMap((s) => s.fuelStatuses.map((f) => f.fuelType)))];

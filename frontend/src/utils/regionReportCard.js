@@ -1,5 +1,5 @@
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
-import { roundRect, wrapText } from './canvasDraw';
+import { roundRect, wrapText, renderCard } from './canvasDraw';
 
 const WIDTH = 1000;
 const PADDING = 56;
@@ -422,10 +422,11 @@ function layoutCard(
 
 /**
  * Draws a shareable "region report card" (KPIs, trend, top stations) for a
- * chosen period and resolves with a PNG Blob. Pure Canvas 2D, same
- * measure-then-draw approach as stationCard.js, so the card's height fits
- * its actual content instead of shipping a fixed size with empty space when
- * there's no trend data or no top stations yet.
+ * chosen period and resolves with a PNG Blob. Pure Canvas 2D, via the shared
+ * measure-then-draw runner (canvasDraw.js's renderCard) also used by
+ * stationCard.js/mapShareCard.js, so the card's height fits its actual
+ * content instead of shipping a fixed size with empty space when there's no
+ * trend data or no top stations yet.
  */
 export function renderRegionReportCard({
   region,
@@ -451,28 +452,5 @@ export function renderRegionReportCard({
     topStations: topStations || [],
     stationsLabel,
   };
-
-  const measureCanvas = document.createElement('canvas');
-  const measureCtx = measureCanvas.getContext('2d');
-  const height = layoutCard(measureCtx, payload, false);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#f4f6f8';
-  ctx.fillRect(0, 0, WIDTH, height);
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, 24, 24, WIDTH - 48, height - 48, 24);
-  ctx.fill();
-
-  layoutCard(ctx, payload, true);
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error('Не удалось создать изображение'));
-    }, 'image/png');
-  });
+  return renderCard(layoutCard, payload, { width: WIDTH });
 }

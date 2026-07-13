@@ -1,15 +1,12 @@
-import { statusMeta, fuelTypeLabel } from './fuelStatus';
+import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES } from './fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
 import { downsampleEvenly } from './mapExport';
-import { roundRect, wrapText } from './canvasDraw';
+import { roundRect, wrapText, renderCard } from './canvasDraw';
 
 const WIDTH = 1000;
 const PADDING = 56;
 const FOOTER_HEIGHT = 90;
 const MAX_STRIP_SEGMENTS = 40;
-// Gasoline only - same default as everywhere else (see metricsService.js's
-// own doc comment on CORE_FUEL_TYPES).
-const CORE_FUEL_TYPES = ['92', '95'];
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -338,29 +335,7 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
  * are optional - their sections are simply omitted when not supplied.
  */
 export function renderStationCard({ station, reliability, forecast, history }) {
-  const measureCanvas = document.createElement('canvas');
-  const measureCtx = measureCanvas.getContext('2d');
-  const height = layoutCard(measureCtx, { station, reliability, forecast, history }, false);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-
-  ctx.fillStyle = '#f4f6f8';
-  ctx.fillRect(0, 0, WIDTH, height);
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, 24, 24, WIDTH - 48, height - 48, 24);
-  ctx.fill();
-
-  layoutCard(ctx, { station, reliability, forecast, history }, true);
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error('Не удалось создать изображение'));
-    }, 'image/png');
-  });
+  return renderCard(layoutCard, { station, reliability, forecast, history }, { width: WIDTH });
 }
 
 export function canCopyImageToClipboard() {

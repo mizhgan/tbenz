@@ -8,11 +8,6 @@ export function availabilityColor(pct) {
   return `hsl(${hue}, 70%, 45%)`;
 }
 
-export function availabilityTextColor(pct) {
-  if (pct === null || pct === undefined || Number.isNaN(pct)) return '#6b7280';
-  return availabilityColor(pct);
-}
-
 export function formatPct(pct, fractionDigits = 0) {
   if (pct === null || pct === undefined || Number.isNaN(pct)) return '—';
   return `${pct.toFixed(fractionDigits)}%`;
