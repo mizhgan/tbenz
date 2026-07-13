@@ -19,6 +19,16 @@ function formatHour(iso) {
   });
 }
 
+// basis values changed from the old (weekday, hour) seasonal model's
+// 'history'/'overall-average' to the current trend-based one's own
+// 'trend'/'flat-average'/'no-data' - see forecastService.js's
+// getStationForecastUncached doc comment for why the model itself changed.
+function basisNote(basis) {
+  if (basis === 'no-data') return ' (нет истории)';
+  if (basis === 'flat-average') return ' (мало данных для тренда, среднее)';
+  return '';
+}
+
 function formatOutageDate(iso) {
   return new Date(iso).toLocaleString('ru-RU', {
     day: '2-digit',
@@ -74,7 +84,7 @@ watch(() => props.stationId, load);
           v-for="h in forecast.hours"
           :key="h.at"
           class="forecast-bar"
-          :title="`${formatHour(h.at)}: ${formatPct(h.availablePct)}${h.basis === 'no-data' ? ' (нет истории)' : ''}`"
+          :title="`${formatHour(h.at)}: ${formatPct(h.availablePct)}${basisNote(h.basis)}`"
         >
           <div
             class="bar-fill"
@@ -84,8 +94,8 @@ watch(() => props.stationId, load);
         </div>
       </div>
       <p class="hint small">
-        Оценка по истории доступности АИ-92 и АИ-95 на станции в этот день недели и час — не
-        точный прогноз.
+        Экстраполяция динамики АИ-92 и АИ-95 на станции за последние 48 часов — грубая оценка
+        направления, не точный прогноз.
       </p>
 
       <template v-if="forecast.recentOutages?.length">

@@ -1,5 +1,5 @@
 const StationSnapshot = require('../models/StationSnapshot');
-const { computeOutages, getAvailabilityTrend, CORE_FUEL_TYPES } = require('./metricsService');
+const { computeOutages, getAvailabilityTrend, getStationTrend, CORE_FUEL_TYPES } = require('./metricsService');
 const { memoizeAsync } = require('../utils/cache');
 
 const DEFAULT_TZ = 'Europe/Moscow';
@@ -27,9 +27,15 @@ function isoWeekdayAndHour(date, tz) {
  * Historical share of "available" readings (of known-status readings) for
  * each (weekday, hour) slot, per station, over the lookback window - for
  * every station in `stationIds` in a single aggregation (grouped by
- * station+weekday+hour) rather than one query per station. Used both by
- * the bulk predictive-alert scan (many stations at once) and by
- * getStationHourlyProfile (a single-element array).
+ * station+weekday+hour) rather than one query per station.
+ *
+ * Used only by the bulk predictive-alert scan (telegramPredictiveAlerts.js)
+ * now - the station card's own hourly forecast (getStationForecast below)
+ * moved off this seasonal model onto a short-term trend extrapolation
+ * instead (see that function's own doc comment for why). Left as-is here
+ * rather than also changed, to keep this fix scoped to what was actually
+ * reported (the station card) - the predictive-alert scan has the same
+ * cold-start/wrong-model-class concerns, just not addressed yet.
  *
  * Pools each snapshot's own reading for CORE_FUEL_TYPES (92/95), same as
  * metricsService.js's reliability/trend/heatmap numbers this modal's
@@ -156,25 +162,59 @@ async function getStationRecoveryStats(stationId, { lookbackDays = 28 } = {}) {
   return computeOutages(history);
 }
 
-/**
- * Forecasts, for the next `hoursAhead` hours, the station's estimated
- * availability probability - read directly off its own historical
- * (weekday, hour) profile, falling back to its overall average when a slot
- * has no history yet. If the station is currently down, also estimates a
- * recovery time from its historical average outage duration.
- *
- * This is a simple empirical/frequentist estimate, not a fitted model - it
- * assumes the recent past (last `lookbackDays` days) is representative of
- * the near future, which is a reasonable but not guaranteed assumption.
- */
 // Most recent outages shown on a station card - a handful is plenty to spot
 // a pattern (e.g. "always ~2h") without the list itself becoming the thing
 // that needs scrolling.
 const RECENT_OUTAGES_LIMIT = 10;
 
+// How far back the per-station trend regression looks - short and fixed
+// (not lookbackDays-scaled) on purpose: this is meant to answer "is this
+// specific station's own availability trending up or down *lately*", the
+// same question the region-wide trend forecast answers region-wide, not a
+// long-run average.
+const STATION_TREND_LOOKBACK_HOURS = 48;
+// Below this many hourly buckets with real data, a regression line is more
+// noise than signal (2 points always "fit" perfectly and mean nothing) -
+// same threshold getRegionTrendForecast already uses for its own buckets.
+const MIN_TREND_BUCKETS = 3;
+
+/**
+ * Forecasts, for the next `hoursAhead` hours, the station's estimated
+ * availability - a linear extrapolation of this station's own last
+ * STATION_TREND_LOOKBACK_HOURS (hourly buckets, same
+ * CORE_FUEL_TYPES/getAvailabilityTrend machinery as the region-wide trend
+ * chart, just scoped to one station via metricsService.getStationTrend),
+ * clamped to a valid percentage range. Falls back to a flat average over
+ * that same window when there isn't enough of it yet for a meaningful
+ * slope (see MIN_TREND_BUCKETS). If the station is currently down, also
+ * estimates a recovery time from its historical average outage duration
+ * (a separate, longer-lookback signal - see getStationRecoveryStats below).
+ *
+ * Replaces an earlier version of this function built on a (weekday, hour)
+ * seasonal profile (still used by telegramPredictiveAlerts.js's bulk scan -
+ * see getBulkHourlyProfiles's own doc comment). Verified live that model
+ * was producing a flat line across all 24 forecasted hours for every
+ * station checked: with data collection only ~6 days old at the time, most
+ * of the next 24 hours' (weekday, hour) combinations - e.g. "Monday
+ * 10:00-14:00" when today's Monday hadn't reached 10:00 yet in any prior
+ * week - simply had zero historical observations, so every hour fell back
+ * to the same flat station-wide average. That cold-start problem will
+ * shrink as more weeks of data accumulate, but the deeper issue doesn't:
+ * this app is currently tracking a supply-side shortage, not a
+ * commute-driven demand pattern, so day-of-week/hour-of-day was never
+ * likely to be the right signal for "will this fuel be here soon" in the
+ * first place - a short recent trend is.
+ *
+ * Still a simple empirical estimate, not a fitted time-series model - no
+ * seasonality, no confidence interval, same caveat the region-wide trend
+ * forecast's own doc comment states.
+ */
 async function getStationForecastUncached(stationId, { hoursAhead = 24, lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
-  const [{ profile, overallAvailablePct }, streak, recoveryStats] = await Promise.all([
-    getStationHourlyProfile(stationId, { lookbackDays, tz }),
+  const now = new Date();
+  const trendFrom = new Date(now.getTime() - STATION_TREND_LOOKBACK_HOURS * 60 * 60 * 1000);
+
+  const [trendBuckets, streak, recoveryStats] = await Promise.all([
+    getStationTrend(stationId, { from: trendFrom, to: now, bucketHours: 1, tz }),
     getCurrentStatusStreak(stationId),
     // Previously only fetched when the station was currently down (all
     // this ever needed was avgOutageMinutes for the recovery estimate
@@ -184,11 +224,25 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
     getStationRecoveryStats(stationId, { lookbackDays }),
   ]);
 
-  const now = Date.now();
+  const known = trendBuckets.filter((b) => b.availablePct !== null);
+  const reg = known.length >= MIN_TREND_BUCKETS ? linearRegression(known.map((b, i) => ({ x: i, y: b.availablePct }))) : null;
+  const overallAvailablePct = known.length ? known.reduce((sum, b) => sum + b.availablePct, 0) / known.length : null;
+
   const hours = [];
   for (let i = 1; i <= hoursAhead; i++) {
-    const at = new Date(now + i * 60 * 60 * 1000);
-    hours.push(forecastHour(profile, overallAvailablePct, at, tz));
+    const at = new Date(now.getTime() + i * 60 * 60 * 1000);
+    if (reg) {
+      const x = known.length - 1 + i;
+      const yRaw = reg.slope * x + reg.intercept;
+      hours.push({ at, availablePct: Math.max(0, Math.min(100, yRaw)), samples: known.length, basis: 'trend' });
+    } else {
+      hours.push({
+        at,
+        availablePct: overallAvailablePct,
+        samples: known.length,
+        basis: overallAvailablePct !== null ? 'flat-average' : 'no-data',
+      });
+    }
   }
 
   let estimatedRecoveryAt = null;
@@ -211,9 +265,9 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
 }
 
 // StationDetailModal.vue opens this for every station any visitor clicks -
-// walks up to 500 snapshots (getCurrentStatusStreak) plus a 28-day profile
-// aggregation (getStationHourlyProfile) on every call, uncached until now.
-// Same 5 min TTL as metricsService.js's own memoized functions - the
+// walks up to 500 snapshots (getCurrentStatusStreak) plus a 48h trend
+// aggregation (getStationTrend) on every call, uncached until now. Same 5
+// min TTL as metricsService.js's own memoized functions - the
 // `currentStatus`/`estimatedRecoveryAt` fields can lag a real recovery by up
 // to that long, but the station's actual live status is shown elsewhere in
 // the same modal straight from the (uncached) Station document, so this is

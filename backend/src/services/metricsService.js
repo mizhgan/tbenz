@@ -287,6 +287,44 @@ const getAvailabilityTrend = memoizeAsync(getAvailabilityTrendUncached, {
 });
 
 /**
+ * Same bucketed-availability computation as getAvailabilityTrend, scoped to
+ * one station instead of a whole region - added for forecastService.js's
+ * per-station short-term trend extrapolation (see that file's own doc
+ * comment on why a single station's recent trajectory replaced the old
+ * weekday/hour seasonal profile there). Kept here rather than in
+ * forecastService.js since it's the exact same CORE_FUEL_UNWIND_STAGES/
+ * STATUS_COUNTS_GROUP/withKnownPct pipeline as getAvailabilityTrend, just a
+ * different $match.
+ */
+async function getStationTrendUncached(stationId, { from, to, bucketHours = 1, tz = DEFAULT_TZ }) {
+  const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
+  const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
+
+  const rows = await StationSnapshot.aggregate([
+    { $match: { station: stationId, polledAt: { $gte: from, $lte: to } } },
+    ...CORE_FUEL_UNWIND_STAGES,
+    {
+      $group: {
+        _id: { $dateTrunc: { date: '$polledAt', unit, binSize, timezone: tz } },
+        ...STATUS_COUNTS_GROUP,
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+
+  return rows.map((row) => ({
+    bucketStart: row._id,
+    total: row.total,
+    ...withKnownPct(row),
+  }));
+}
+
+const getStationTrend = memoizeAsync(getStationTrendUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (stationId, opts) => rangeKey(stationId, opts),
+});
+
+/**
  * Availability series bucketed into roughly `bucketCount` evenly-spaced
  * minute-granularity windows - used for the Telegram digest sparkline,
  * which needs finer/more flexible buckets than getAvailabilityTrend's
@@ -590,6 +628,7 @@ const getRecoveryTrend = memoizeAsync(getRecoveryTrendUncached, {
 module.exports = {
   getCurrentSnapshot,
   getAvailabilityTrend,
+  getStationTrend,
   getAvailabilitySeries,
   getStationMetrics,
   getBrandMetrics,
