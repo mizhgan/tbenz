@@ -638,4 +638,5 @@ module.exports = {
   CORE_FUEL_TYPES,
   deriveCoreStatus,
   METRICS_CACHE_TTL_MS,
+  truncateToBucketStart,
 };
