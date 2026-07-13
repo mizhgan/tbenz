@@ -161,7 +161,7 @@ function truncateToWidth(text, maxWidth, avgCharWidth) {
  * belongs in the accompanying text message, not crammed into the image.
  */
 async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
-  const { region, counts, currentPct, trend, trendDeltaPct, series } = data;
+  const { region, stationCounts, currentPct, trend, trendDeltaPct, series } = data;
   const color = pctColor(currentPct);
   const pctText = currentPct === null ? '—' : `${currentPct.toFixed(0)}%`;
   const trendInfo = trendLabel(trend, trendDeltaPct, comparisonLabel);
@@ -170,12 +170,15 @@ async function renderRegionDigestCard(data, { periodLabel, comparisonLabel }) {
 
   // Four equal-width columns rather than fixed pixel offsets - stays
   // readable even when a busy region pushes a count into 2-3 digits.
+  // stationCounts (not the reading-pooled `counts` the percentage above is
+  // built from) - one bucket per station, so these four numbers always sum
+  // to the region's actual station count instead of ~2x it.
   const colWidth = (WIDTH - PAD * 2) / 4;
   const statRow = [
-    [COLOR_GOOD, counts.available, 'доступно'],
-    [COLOR_WARN, counts.maybe_available, 'частично'],
-    [COLOR_BAD, counts.not_available, 'нет'],
-    [COLOR_MUTED, counts.no_data, 'нет данных'],
+    [COLOR_GOOD, stationCounts.available, 'доступно'],
+    [COLOR_WARN, stationCounts.maybe_available, 'частично'],
+    [COLOR_BAD, stationCounts.not_available, 'нет'],
+    [COLOR_MUTED, stationCounts.no_data, 'нет данных'],
   ]
     .map(([dotColor, count, label], i) => statChip(PAD + i * colWidth, 216, dotColor, count, label))
     .join('');

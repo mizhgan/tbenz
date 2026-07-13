@@ -59,7 +59,10 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
   // digest (periodPct/prevPeriodPct/series below all come from
   // metricsService functions that already pool this way) - not each
   // station's one blanket overall status, which read materially more
-  // optimistic (see metricsService.js's own doc comment on why).
+  // optimistic (see metricsService.js's own doc comment on why). Used only
+  // for currentPct below, kept consistent with the live map's own badge %
+  // - the human-readable stationCounts breakdown further down is a
+  // separate, per-station tally (see its own comment for why).
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
   for (const s of current) {
     const byType = Object.fromEntries((s.fuelStatuses || []).map((f) => [f.fuelType, f.status]));
@@ -70,6 +73,20 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
   const currentPct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
+
+  // One status per station (best-of among 92/95, via the same
+  // deriveCoreStatus used for the map marker dot, predictive alerts and the
+  // disagree-warning) - unlike `counts` above, this sums to exactly
+  // stationCount, matching what the digest image's stat chips ("доступно"/
+  // "частично"/"нет"/"нет данных") read as to a viewer. Reported by the
+  // user: a region's card showed e.g. 15+31+120+36=202 next to a station
+  // count well under that, because the old code (still used for `counts`
+  // above) counted every station twice - once per core fuel type.
+  const stationCounts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
+  for (const s of current) {
+    const st = metricsService.deriveCoreStatus(s.fuelStatuses);
+    stationCounts[st] = (stationCounts[st] || 0) + 1;
+  }
 
   const periodPct = weightedAvgAvailablePct(periodStations);
   const prevPeriodPct = weightedAvgAvailablePct(prevPeriodStations);
@@ -90,6 +107,7 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
     from,
     to,
     counts,
+    stationCounts,
     currentPct,
     periodPct,
     prevPeriodPct,
