@@ -47,5 +47,19 @@ services:
     ports:
       - "8080:80"
 
+  # Outbound-only connection to Cloudflare's edge - no host ports needed at
+  # all. Reaches the frontend container directly over the default
+  # compose-created network by service name (frontend:80), which already
+  # proxies /api/ to backend:4000 internally (see frontend/nginx.conf), so
+  # one ingress rule in cloudflared/config.yml covers the whole site.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /home/nonroot/.cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/home/nonroot/.cloudflared:ro
+    depends_on:
+      - frontend
+
 volumes:
   mongo_data:
