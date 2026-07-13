@@ -19,18 +19,20 @@ function formatHour(iso) {
   });
 }
 
-// basis values: 'trend' (short recent trend dominates - near-term hours),
-// 'hour-profile' (this station's own typical availability for this hour of
-// day - further-out hours), 'trend+hour-profile' (blend of both, during the
+// basis values: 'trend' (anchored to the actual current status, shaped by a
+// short recent trend - near-term hours), 'current' (anchored to the actual
+// current status with no trend data yet, held flat), 'hour-profile' (this
+// station's own typical availability for this hour of day - further-out
+// hours), 'trend+hour-profile'/'current+hour-profile' (blend during the
 // handoff window), 'flat-average' (an hour-profile cell too thin to trust,
 // falls back to the plain average), 'no-data'. See forecastService.js's
-// getStationForecastUncached/blendHourForecast doc comments for why both
+// getStationForecastUncached/blendHourForecast doc comments for why these
 // signals exist and how they're combined.
 function basisNote(basis) {
   if (basis === 'no-data') return ' (нет истории)';
   if (basis === 'flat-average') return ' (мало данных, среднее)';
   if (basis === 'hour-profile') return ' (обычно в это время суток)';
-  if (basis === 'trend+hour-profile') return ' (тренд + обычно в это время)';
+  if (basis === 'trend+hour-profile' || basis === 'current+hour-profile') return ' (тренд + обычно в это время)';
   return '';
 }
 

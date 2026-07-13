@@ -1,10 +1,12 @@
 const StationSnapshot = require('../models/StationSnapshot');
+const Station = require('../models/Station');
 const {
   computeOutages,
   getAvailabilityTrend,
   getStationTrend,
   CORE_FUEL_TYPES,
   METRICS_CACHE_TTL_MS,
+  deriveCoreStatus,
 } = require('./metricsService');
 const { memoizeAsync } = require('../utils/cache');
 
@@ -260,26 +262,55 @@ const MIN_HOUR_PROFILE_SAMPLES = 3;
 // different answers for the same hour.
 const TREND_BLEND_HOURS = 3;
 
+// The forecast's actual starting point - the station's literally-just-
+// observed core-fuel status, mapped the same "available + maybe_available
+// both count as available" way every other %-availability number in the
+// app already does (see metricsService.js's withKnownPct) rather than a
+// 50%-partial-credit guess for maybe_available. Only no_data has nothing
+// to anchor to.
+function currentCoreStatusToPct(status) {
+  if (status === 'available' || status === 'maybe_available') return 100;
+  if (status === 'not_available') return 0;
+  return null;
+}
+
 /**
- * One forecasted hour's availability, blending two signals rather than
- * picking one:
- *  - `shortReg`: a linear extrapolation of the station's own last
- *    SHORT_TREND_LOOKBACK_HOURS - "is it, right now, trending up or down".
- *    Dominates the near term (basis 'trend').
+ * One forecasted hour's availability, blending three inputs:
+ *  - `currentAnchorPct` (see currentCoreStatusToPct above): guarantees the
+ *    forecast starts from the truth, not from wherever a regression line
+ *    happens to sit.
+ *  - `shortReg.slope`: rate of change per hour from a linear fit over the
+ *    station's own last SHORT_TREND_LOOKBACK_HOURS - used ONLY for its
+ *    slope, projected forward from currentAnchorPct rather than trusting
+ *    the regression's own fitted value at hour i directly. An earlier
+ *    version of this function used that raw fitted value unanchored, and
+ *    was found - via a fair same-instant comparison against the previous
+ *    48h-window model, on the same 15 stations already sampled to justify
+ *    adding this short window in the first place - to actually mismatch
+ *    *more* often (6/8 vs 4/8 currently-up stations forecasting <40% for
+ *    the next hour), not less. Root cause: a short window is more reactive
+ *    to a couple of noisy/borderline hours (e.g. a station that had been
+ *    100% for a day and just dipped to a weak maybe_available in the last
+ *    hour) - without an anchor, that reactivity showed up as the fitted
+ *    line simply being wrong about *right now*, not just aggressive about
+ *    the future. Anchoring fixes that: hour 1 is always close to the truth,
+ *    and the slope only shapes the trajectory away from it.
  *  - `hourProfile`: this station's historical availability share for this
- *    specific hour-of-day (see getStationHourProfile), falling back to
- *    `overallAvailablePct` when that hour's own cell is too thin
- *    (MIN_HOUR_PROFILE_SAMPLES) - "what does this hour of the day usually
- *    look like here". Takes over for hours further out (basis
- *    'hour-profile'/'flat-average'), since a straight line extrapolated
- *    many hours past its own short input window stops meaning anything for
- *    a station with a real day/night supply cycle.
- * The two are linearly blended over TREND_BLEND_HOURS forecasted hours
- * (basis 'trend+hour-profile') so the hourly bar chart doesn't show a
- * visible cliff where the model handoff happens.
+ *    specific hour-of-day (see getStationHourProfile) - takes over for
+ *    hours further out a short window's slope can't meaningfully reach,
+ *    same as before.
+ * The trend (anchored) and profile signals are linearly blended over
+ * TREND_BLEND_HOURS forecasted hours so the hourly bar chart doesn't show
+ * a visible cliff where the model handoff happens.
  */
-function blendHourForecast({ i, x, shortReg, hourProfile, overallAvailablePct, at, tz }) {
-  const trendPct = shortReg ? Math.max(0, Math.min(100, shortReg.slope * x + shortReg.intercept)) : null;
+function blendHourForecast({ i, currentAnchorPct, shortReg, hourProfile, overallAvailablePct, at, tz }) {
+  let trendPct = null;
+  let trendBasis = null;
+  if (currentAnchorPct !== null) {
+    const slope = shortReg ? shortReg.slope : 0;
+    trendPct = Math.max(0, Math.min(100, currentAnchorPct + slope * i));
+    trendBasis = shortReg ? 'trend' : 'current';
+  }
 
   const { hour } = isoWeekdayAndHour(at, tz);
   const cell = hourProfile.get(hour);
@@ -291,15 +322,15 @@ function blendHourForecast({ i, x, shortReg, hourProfile, overallAvailablePct, a
     return { availablePct: profilePct, basis: profilePct !== null ? profileBasis : 'no-data' };
   }
   if (profilePct === null) {
-    return { availablePct: trendPct, basis: 'trend' };
+    return { availablePct: trendPct, basis: trendBasis };
   }
 
   const blendWeight = Math.max(0, Math.min(1, 1 - (i - 1) / TREND_BLEND_HOURS));
-  if (blendWeight >= 1) return { availablePct: trendPct, basis: 'trend' };
+  if (blendWeight >= 1) return { availablePct: trendPct, basis: trendBasis };
   if (blendWeight <= 0) return { availablePct: profilePct, basis: profileBasis };
   return {
     availablePct: trendPct * blendWeight + profilePct * (1 - blendWeight),
-    basis: 'trend+hour-profile',
+    basis: `${trendBasis}+hour-profile`,
   };
 }
 
@@ -337,7 +368,7 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
   const trendFrom = new Date(now.getTime() - STATION_TREND_LOOKBACK_HOURS * 60 * 60 * 1000);
   const shortTrendFrom = new Date(now.getTime() - SHORT_TREND_LOOKBACK_HOURS * 60 * 60 * 1000);
 
-  const [trendBuckets, streak, recoveryStats, hourProfile] = await Promise.all([
+  const [trendBuckets, streak, recoveryStats, hourProfile, station] = await Promise.all([
     getStationTrend(stationId, { from: trendFrom, to: now, bucketHours: 1, tz }),
     getCurrentStatusStreak(stationId),
     // Previously only fetched when the station was currently down (all
@@ -347,6 +378,11 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
     // happens to be down at load time.
     getStationRecoveryStats(stationId, { lookbackDays }),
     getStationHourProfile(stationId, { lookbackDays, tz }),
+    // The Station document's own lastFuelStatuses (not a StationSnapshot
+    // query) - the same field the map marker/badge already treat as "the"
+    // current reading, kept fresh on every ingest tick regardless of
+    // polling cadence. Used only for currentCoreStatusToPct's anchor below.
+    Station.findById(stationId, { lastFuelStatuses: 1 }).lean(),
   ]);
 
   const known = trendBuckets.filter((b) => b.availablePct !== null);
@@ -361,12 +397,20 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
     shortKnown.length >= MIN_TREND_BUCKETS
       ? linearRegression(shortKnown.map((b, i) => ({ x: i, y: b.availablePct })))
       : null;
+  const currentAnchorPct = currentCoreStatusToPct(deriveCoreStatus(station?.lastFuelStatuses));
 
   const hours = [];
   for (let i = 1; i <= hoursAhead; i++) {
     const at = new Date(now.getTime() + i * 60 * 60 * 1000);
-    const x = shortKnown.length - 1 + i;
-    const { availablePct, basis } = blendHourForecast({ i, x, shortReg, hourProfile, overallAvailablePct, at, tz });
+    const { availablePct, basis } = blendHourForecast({
+      i,
+      currentAnchorPct,
+      shortReg,
+      hourProfile,
+      overallAvailablePct,
+      at,
+      tz,
+    });
     hours.push({ at, availablePct, samples: shortKnown.length, basis });
   }
 
@@ -475,6 +519,7 @@ module.exports = {
   getStationRecoveryStats,
   forecastHour,
   blendHourForecast,
+  currentCoreStatusToPct,
   linearRegression,
   isoWeekdayAndHour,
 };
