@@ -18,6 +18,7 @@ const {
   getStations,
   getBrands,
   getHeatmap,
+  getRecoveryTrend,
   getTrendForecast,
 } = require('../controllers/metrics.controller');
 const { requireAuth, requireAdmin, optionalAuth } = require('../middleware/auth.middleware');
@@ -37,6 +38,7 @@ router.get('/:id/metrics/trend', getTrend);
 router.get('/:id/metrics/stations', getStations);
 router.get('/:id/metrics/brands', getBrands);
 router.get('/:id/metrics/heatmap', getHeatmap);
+router.get('/:id/metrics/recovery-trend', getRecoveryTrend);
 router.get('/:id/metrics/trend-forecast', getTrendForecast);
 
 // Operationally sensitive (proxy failures, scraper URLs, raw third-party

@@ -11,6 +11,8 @@ export const metricsApi = {
     http.get(`/regions/${regionId}/metrics/brands`, { params: { from, to } }).then((r) => r.data),
   heatmap: (regionId, { from, to, tz } = {}) =>
     http.get(`/regions/${regionId}/metrics/heatmap`, { params: { from, to, tz } }).then((r) => r.data),
+  recoveryTrend: (regionId, { from, to } = {}) =>
+    http.get(`/regions/${regionId}/metrics/recovery-trend`, { params: { from, to } }).then((r) => r.data),
   trendForecast: (regionId, { from, to, bucketHours, bucketsAhead } = {}) =>
     http
       .get(`/regions/${regionId}/metrics/trend-forecast`, {

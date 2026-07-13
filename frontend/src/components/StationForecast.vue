@@ -1,7 +1,7 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { stationsApi } from '../api/regions';
-import { availabilityColor, formatPct } from '../utils/colorScale';
+import { availabilityColor, formatMinutes, formatPct } from '../utils/colorScale';
 
 const props = defineProps({
   stationId: { type: String, required: true },
@@ -17,6 +17,24 @@ function formatHour(iso) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatOutageDate(iso) {
+  return new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// Longest of the *shown* outages, not all-time - a bar chart's whole point
+// is relative comparison within what's actually on screen right now.
+const maxOutageMinutes = computed(() =>
+  Math.max(1, ...(forecast.value?.recentOutages || []).map((o) => o.durationMinutes))
+);
+function outageBarWidth(minutes) {
+  return `${Math.max(4, (minutes / maxOutageMinutes.value) * 100)}%`;
 }
 
 async function load() {
@@ -69,6 +87,23 @@ watch(() => props.stationId, load);
         Оценка по истории доступности АИ-92 и АИ-95 на станции в этот день недели и час — не
         точный прогноз.
       </p>
+
+      <template v-if="forecast.recentOutages?.length">
+        <h5 class="outages-title">
+          Последние отключения <span class="hint small">(АИ-92, АИ-95)</span>
+        </h5>
+        <div class="outage-row" v-for="o in forecast.recentOutages" :key="o.start">
+          <span class="outage-date">{{ formatOutageDate(o.start) }}</span>
+          <div class="outage-bar-track">
+            <div class="outage-bar-fill" :style="{ width: outageBarWidth(o.durationMinutes) }"></div>
+          </div>
+          <span class="outage-duration">{{ formatMinutes(o.durationMinutes) }}</span>
+        </div>
+        <p v-if="forecast.outageCount > forecast.recentOutages.length" class="hint small">
+          Показаны последние {{ forecast.recentOutages.length }} из {{ forecast.outageCount }} за 28 дней.
+        </p>
+      </template>
+      <p v-else class="hint small">За последние 28 дней отключений с восстановлением не было.</p>
     </div>
   </div>
 </template>
@@ -105,5 +140,43 @@ watch(() => props.stationId, load);
 
 .hint.small {
   font-size: 11px;
+}
+
+.outages-title {
+  font-size: 13px;
+  margin: 12px 0 6px;
+}
+
+.outage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.outage-date {
+  flex: 0 0 96px;
+  color: #667;
+}
+
+.outage-bar-track {
+  flex: 1;
+  height: 8px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.outage-bar-fill {
+  height: 100%;
+  background: #dc2626;
+  border-radius: 4px;
+}
+
+.outage-duration {
+  flex: 0 0 56px;
+  text-align: right;
+  font-weight: 600;
 }
 </style>

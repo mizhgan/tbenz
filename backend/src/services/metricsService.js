@@ -339,17 +339,28 @@ const RECOVERY_STATUSES = new Set(['available', 'maybe_available']);
 // available/maybe_available reading. A trailing outage that never recovers
 // within the queried window is intentionally excluded (its true duration is
 // unknown - "censored" data).
+//
+// `outages` (each `{start, end, durationMinutes}`, in chronological order)
+// is the individual record behind the outageCount/avgOutageMinutes
+// aggregate - added for the recovery-time trend chart (getRecoveryTrend
+// below) and the station card's recent-outages list (forecastService.js's
+// getStationForecast), both of which need each outage on its own rather
+// than just the average. Purely additive - every existing caller that only
+// destructures {outageCount, avgOutageMinutes} is unaffected.
 function computeOutages(history) {
   let outageCount = 0;
   let totalOutageMs = 0;
   let outageStartedAt = null;
+  const outages = [];
 
   for (const snap of history) {
     if (snap.status === 'not_available') {
       if (outageStartedAt === null) outageStartedAt = snap.polledAt;
     } else if (outageStartedAt !== null && RECOVERY_STATUSES.has(snap.status)) {
-      totalOutageMs += snap.polledAt.getTime() - outageStartedAt.getTime();
+      const durationMs = snap.polledAt.getTime() - outageStartedAt.getTime();
+      totalOutageMs += durationMs;
       outageCount += 1;
+      outages.push({ start: outageStartedAt, end: snap.polledAt, durationMinutes: durationMs / 60000 });
       outageStartedAt = null;
     }
     // status === 'no_data' while an outage is open: ambiguous, keep waiting.
@@ -358,6 +369,7 @@ function computeOutages(history) {
   return {
     outageCount,
     avgOutageMinutes: outageCount > 0 ? totalOutageMs / outageCount / 60000 : null,
+    outages,
   };
 }
 
@@ -489,6 +501,74 @@ const getHeatmap = memoizeAsync(getHeatmapUncached, {
   keyFn: (regionId, opts) => rangeKey(regionId, opts),
 });
 
+// Moscow has used a fixed UTC+3 offset with no DST since 2014 - same
+// shortcut telegramPromoScheduler.js already relies on - so a Moscow
+// calendar day can be built directly from a literal +03:00 offset instead
+// of pulling in a timezone-arithmetic library.
+const RECOVERY_TREND_TZ = 'Europe/Moscow';
+const recoveryTrendDayFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: RECOVERY_TREND_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/**
+ * Region-wide average recovery time, bucketed by calendar day - "is it
+ * taking longer or shorter to come back after running out" over the
+ * period, a complement to getAvailabilityTrend's "how often is it
+ * available" (that one counts snapshots directly via a Mongo aggregation;
+ * an outage is a streak spanning several snapshots, so this instead re-uses
+ * computeOutages per station - same approach getStationMetricsUncached
+ * already takes for the aggregate outageCount/avgOutageMinutes - and
+ * buckets each individual outage by the calendar day it *ended* (when a
+ * driver would have actually noticed fuel was back), not the day it started.
+ *
+ * Deliberately always day-granularity, unlike getAvailabilityTrend's
+ * configurable bucketHours - outages are comparatively rare events (a
+ * handful a day region-wide), so replicating that finer hour/week
+ * granularity here would mostly produce sparse, mostly-empty buckets
+ * without adding real signal.
+ */
+async function getRecoveryTrendUncached(regionId, { from, to }) {
+  const match = buildMatch(regionId, from, to);
+  const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1 })
+    .sort({ station: 1, polledAt: 1 })
+    .lean();
+
+  const historyByStation = new Map();
+  for (const row of historyRows) {
+    const key = String(row.station);
+    if (!historyByStation.has(key)) historyByStation.set(key, []);
+    historyByStation.get(key).push(row);
+  }
+
+  const byDay = new Map(); // 'YYYY-MM-DD' -> { totalMinutes, outageCount }
+  for (const history of historyByStation.values()) {
+    const { outages } = computeOutages(history);
+    for (const outage of outages) {
+      const dayKey = recoveryTrendDayFmt.format(outage.end);
+      const entry = byDay.get(dayKey) || { totalMinutes: 0, outageCount: 0 };
+      entry.totalMinutes += outage.durationMinutes;
+      entry.outageCount += 1;
+      byDay.set(dayKey, entry);
+    }
+  }
+
+  return Array.from(byDay.entries())
+    .map(([dayKey, entry]) => ({
+      bucketStart: new Date(`${dayKey}T00:00:00+03:00`),
+      avgRecoveryMinutes: entry.totalMinutes / entry.outageCount,
+      outageCount: entry.outageCount,
+    }))
+    .sort((a, b) => a.bucketStart - b.bucketStart);
+}
+
+const getRecoveryTrend = memoizeAsync(getRecoveryTrendUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (regionId, opts) => rangeKey(regionId, opts),
+});
+
 module.exports = {
   getCurrentSnapshot,
   getAvailabilityTrend,
@@ -496,6 +576,7 @@ module.exports = {
   getStationMetrics,
   getBrandMetrics,
   getHeatmap,
+  getRecoveryTrend,
   computeOutages,
   CORE_FUEL_TYPES,
   deriveCoreStatus,

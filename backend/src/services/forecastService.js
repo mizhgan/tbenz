@@ -167,10 +167,21 @@ async function getStationRecoveryStats(stationId, { lookbackDays = 28 } = {}) {
  * assumes the recent past (last `lookbackDays` days) is representative of
  * the near future, which is a reasonable but not guaranteed assumption.
  */
+// Most recent outages shown on a station card - a handful is plenty to spot
+// a pattern (e.g. "always ~2h") without the list itself becoming the thing
+// that needs scrolling.
+const RECENT_OUTAGES_LIMIT = 10;
+
 async function getStationForecastUncached(stationId, { hoursAhead = 24, lookbackDays = 28, tz = DEFAULT_TZ } = {}) {
-  const [{ profile, overallAvailablePct }, streak] = await Promise.all([
+  const [{ profile, overallAvailablePct }, streak, recoveryStats] = await Promise.all([
     getStationHourlyProfile(stationId, { lookbackDays, tz }),
     getCurrentStatusStreak(stationId),
+    // Previously only fetched when the station was currently down (all
+    // this ever needed was avgOutageMinutes for the recovery estimate
+    // below) - now always, since the station card's recent-outages list
+    // wants this station's outage history regardless of whether it
+    // happens to be down at load time.
+    getStationRecoveryStats(stationId, { lookbackDays }),
   ]);
 
   const now = Date.now();
@@ -181,11 +192,8 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
   }
 
   let estimatedRecoveryAt = null;
-  if (streak && streak.status === 'not_available') {
-    const { avgOutageMinutes } = await getStationRecoveryStats(stationId, { lookbackDays });
-    if (avgOutageMinutes !== null) {
-      estimatedRecoveryAt = new Date(streak.since.getTime() + avgOutageMinutes * 60000);
-    }
+  if (streak && streak.status === 'not_available' && recoveryStats.avgOutageMinutes !== null) {
+    estimatedRecoveryAt = new Date(streak.since.getTime() + recoveryStats.avgOutageMinutes * 60000);
   }
 
   return {
@@ -194,6 +202,11 @@ async function getStationForecastUncached(stationId, { hoursAhead = 24, lookback
     estimatedRecoveryAt,
     overallAvailablePct,
     hours,
+    outageCount: recoveryStats.outageCount,
+    avgOutageMinutes: recoveryStats.avgOutageMinutes,
+    // Most recent first - a station card cares about "what's it been doing
+    // lately", not chronological reading order.
+    recentOutages: recoveryStats.outages.slice(-RECENT_OUTAGES_LIMIT).reverse(),
   };
 }
 

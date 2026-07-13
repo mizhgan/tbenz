@@ -8,6 +8,7 @@ import { renderRegionReportCard } from '../utils/regionReportCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
 import TrendChart from '../components/TrendChart.vue';
+import RecoveryTrendChart from '../components/RecoveryTrendChart.vue';
 import BrandsChart from '../components/BrandsChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationsTable from '../components/StationsTable.vue';
@@ -70,6 +71,7 @@ const forecastDirection = ref('unknown');
 const stations = ref([]);
 const brands = ref([]);
 const heatmapCells = ref([]);
+const recoveryTrendBuckets = ref([]);
 const stationsSort = ref('best');
 
 const sectionErrors = ref({
@@ -78,6 +80,7 @@ const sectionErrors = ref({
   stations: '',
   brands: '',
   heatmap: '',
+  recoveryTrend: '',
 });
 
 const DIRECTION_META = {
@@ -271,13 +274,14 @@ async function loadMetrics() {
   const to = new Date(toMs.value).toISOString();
   const bucketHours = pickBucketHours(toMs.value - fromMs.value);
 
-  const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult] =
+  const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult, recoveryTrendResult] =
     await Promise.allSettled([
       metricsApi.trend(regionId, { from, to, bucketHours }),
       metricsApi.trendForecast(regionId, { from, to, bucketHours }),
       metricsApi.stations(regionId, { from, to }),
       metricsApi.brands(regionId, { from, to }),
       metricsApi.heatmap(regionId, { from, to }),
+      metricsApi.recoveryTrend(regionId, { from, to }),
     ]);
 
   if (trendResult.status === 'fulfilled') {
@@ -320,6 +324,14 @@ async function loadMetrics() {
   } else {
     heatmapCells.value = [];
     sectionErrors.value.heatmap = describeFailure(heatmapResult);
+  }
+
+  if (recoveryTrendResult.status === 'fulfilled') {
+    recoveryTrendBuckets.value = recoveryTrendResult.value.buckets;
+    sectionErrors.value.recoveryTrend = '';
+  } else {
+    recoveryTrendBuckets.value = [];
+    sectionErrors.value.recoveryTrend = describeFailure(recoveryTrendResult);
   }
 
   loading.value = false;
@@ -444,6 +456,16 @@ onMounted(async () => {
       <p class="hint small">
         Пунктир — простая линейная экстраполяция последних данных, а не точный прогноз: это
         грубая оценка направления тренда, без учёта сезонности.
+      </p>
+    </div>
+
+    <div class="card section">
+      <h2>Время восстановления после отключений <span class="hint small">(АИ-92, АИ-95)</span></h2>
+      <p v-if="sectionErrors.recoveryTrend" class="error-text">{{ sectionErrors.recoveryTrend }}</p>
+      <RecoveryTrendChart :buckets="recoveryTrendBuckets" />
+      <p class="hint small">
+        Среднее время от «пропало» до «появилось» по всем станциям района за день — растущий
+        график значит, что топливо не только реже есть, но и дольше не появляется.
       </p>
     </div>
 
