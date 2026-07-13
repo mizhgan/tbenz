@@ -29,7 +29,7 @@ async function handleSubmit() {
 <template>
   <div class="login-page">
     <form class="card login-card" @submit.prevent="handleSubmit">
-      <h1>⛽ Топливо — Админка</h1>
+      <h1>⛽ Топливо — Мониторинг</h1>
       <div class="form-row">
         <label for="username">Логин</label>
         <input id="username" v-model="username" type="text" autocomplete="username" required />
