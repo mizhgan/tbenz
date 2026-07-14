@@ -4,8 +4,16 @@ import { stationsApi } from '../api/regions';
 import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { formatMinutes } from '../utils/colorScale';
 
+// from/to (ISO strings) are optional - when the caller has an actual
+// period selected (see ReportsView.vue's own from/to date pickers, passed
+// down through StationHighlightCards.vue), the ribbon should show exactly
+// that period like every other chart on that page already does, not a
+// fixed lookback that quietly ignores it. StationDetailModal.vue (no
+// period concept of its own) omits them, falling back to LOOKBACK_DAYS.
 const props = defineProps({
   stationId: { type: String, required: true },
+  from: { type: String, default: null },
+  to: { type: String, default: null },
 });
 
 const LOOKBACK_DAYS = 7;
@@ -75,8 +83,10 @@ async function load() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const from = new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600 * 1000).toISOString();
-    const history = await stationsApi.history(props.stationId, { from, limit: 5000 });
+    const from = props.from || new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600 * 1000).toISOString();
+    const params = { from, limit: 5000 };
+    if (props.to) params.to = props.to;
+    const history = await stationsApi.history(props.stationId, params);
     if (!history.length) {
       rows.value = [];
       return;
@@ -95,7 +105,7 @@ async function load() {
 }
 
 onMounted(load);
-watch(() => props.stationId, load);
+watch(() => [props.stationId, props.from, props.to], load);
 </script>
 
 <template>
@@ -122,8 +132,9 @@ watch(() => props.stationId, load);
         </span>
       </div>
       <p class="hint small">
-        Реальные статусы за последние 7 дней сплошной лентой, без усреднения по часам; наведите
-        на участок, чтобы увидеть точное время и длительность.
+        Реальные статусы за {{ from ? 'выбранный период' : 'последние 7 дней' }} сплошной
+        лентой, без усреднения по часам; наведите на участок, чтобы увидеть точное время и
+        длительность.
       </p>
     </template>
   </div>

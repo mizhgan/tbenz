@@ -65,6 +65,12 @@ function closeDetailModal() {
 const now = Date.now();
 const fromMs = ref(now - 7 * 24 * 60 * 60 * 1000);
 const toMs = ref(now);
+// Exposed as their own computed properties (not just local vars inside
+// loadMetrics) so the template can pass the page's actual selected period
+// down to StationHighlightCards' ribbons too - those used to always show a
+// fixed last-7-days regardless of what period was picked here.
+const fromIso = computed(() => new Date(fromMs.value).toISOString());
+const toIso = computed(() => new Date(toMs.value).toISOString());
 
 const trendBuckets = ref([]);
 const forecastBuckets = ref([]);
@@ -272,8 +278,8 @@ async function loadMetrics() {
   resetReportCard();
 
   const regionId = selectedRegionId.value;
-  const from = new Date(fromMs.value).toISOString();
-  const to = new Date(toMs.value).toISOString();
+  const from = fromIso.value;
+  const to = toIso.value;
   const bucketHours = pickBucketHours(toMs.value - fromMs.value);
 
   const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult, recoveryTrendResult] =
@@ -471,38 +477,42 @@ onMounted(async () => {
       </p>
     </div>
 
-    <div class="card section">
-      <div class="section-header">
-        <h2>{{ stationsSort === 'best' ? 'Лучшие станции' : 'Худшие станции' }}</h2>
-        <div class="sort-toggle">
-          <button
-            class="btn secondary"
-            :class="{ active: stationsSort === 'best' }"
-            @click="stationsSort = 'best'"
-          >
-            Лучшие
-          </button>
-          <button
-            class="btn secondary"
-            :class="{ active: stationsSort === 'worst' }"
-            @click="stationsSort = 'worst'"
-          >
-            Худшие
-          </button>
+    <div class="two-col">
+      <div class="card section">
+        <div class="section-header">
+          <h2>{{ stationsSort === 'best' ? 'Лучшие станции' : 'Худшие станции' }}</h2>
+          <div class="sort-toggle">
+            <button
+              class="btn secondary"
+              :class="{ active: stationsSort === 'best' }"
+              @click="stationsSort = 'best'"
+            >
+              Лучшие
+            </button>
+            <button
+              class="btn secondary"
+              :class="{ active: stationsSort === 'worst' }"
+              @click="stationsSort = 'worst'"
+            >
+              Худшие
+            </button>
+          </div>
         </div>
+        <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
+        <StationHighlightCards
+          :stations="highlightedStations"
+          :loading-station-id="detailLoadingId"
+          :from="fromIso"
+          :to="toIso"
+          @select="openStationDetail"
+        />
       </div>
-      <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
-      <StationHighlightCards
-        :stations="highlightedStations"
-        :loading-station-id="detailLoadingId"
-        @select="openStationDetail"
-      />
-    </div>
 
-    <div class="card section">
-      <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
-      <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
-      <BrandsChart :brands="brands" />
+      <div class="card section">
+        <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
+        <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
+        <BrandsChart :brands="brands" />
+      </div>
     </div>
 
     <div class="card section">
@@ -599,5 +609,26 @@ onMounted(async () => {
 
 .hint.small {
   font-size: 12px;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* Grid items default to min-width: auto, which refuses to shrink narrower
+   than their content's intrinsic size - without this, the wider of the two
+   cards (station cards with ribbons, or the brands chart) would drag the
+   whole page into horizontal scroll on a narrow viewport instead of each
+   card's own overflow handling taking over. */
+.two-col > * {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

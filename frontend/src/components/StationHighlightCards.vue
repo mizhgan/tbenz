@@ -7,14 +7,20 @@ import StationReliabilityTimeline from './StationReliabilityTimeline.vue';
 // here (the best/worst toggle already re-sorts by availability, which is
 // the only thing that matters for "is this station reliable or not"), and
 // a dense table row had no room for a readable ribbon. One card per
-// station instead, full width, with its own real 7-day status ribbon
-// (StationReliabilityTimeline.vue, same component the station detail
-// modal uses) - only ever up to 5 of these at once (see
+// station instead, full width, with its own real status ribbon for the
+// page's selected period (StationReliabilityTimeline.vue, same component
+// the station detail modal uses) - only ever up to 5 of these at once (see
 // ReportsView.vue's own highlightedStations.slice(0, 5)), so 5 parallel
 // history fetches is a non-issue.
 defineProps({
   stations: { type: Array, default: () => [] },
   loadingStationId: { type: String, default: null },
+  // Passed straight through to each ribbon (see StationReliabilityTimeline.vue's
+  // own doc comment) - the reports page's own selected period, so these
+  // ribbons show the same window as every other chart on the page instead
+  // of a fixed 7 days regardless of what's actually selected.
+  from: { type: String, default: null },
+  to: { type: String, default: null },
 });
 const emit = defineEmits(['select']);
 </script>
@@ -54,7 +60,7 @@ const emit = defineEmits(['select']);
           <span class="stat-label">Нет данных</span>
         </div>
       </div>
-      <StationReliabilityTimeline :station-id="s.stationId" />
+      <StationReliabilityTimeline :station-id="s.stationId" :from="from" :to="to" />
     </div>
   </div>
 </template>
@@ -64,6 +70,13 @@ const emit = defineEmits(['select']);
   display: flex;
   flex-direction: column;
   gap: 20px;
+  /* Fixed height + its own scroll, same idea as BrandsChart.vue's own
+     max-height: 480px cap next to it in the two-column layout - up to 5
+     full ribbon cards stacked would otherwise push this column far past
+     its neighbor's natural height. */
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .highlight-card {
