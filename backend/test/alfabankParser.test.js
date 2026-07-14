@@ -29,14 +29,26 @@ test('extractStationsArray reads a flat array with no wrapper object', () => {
   assert.deepEqual(extractStationsArray({ stations: [] }), []); // no wrapper support needed - never seen live
 });
 
-test('parseStation: a fresh (<12h) "available" reading passes through as available', () => {
+test('parseStation: a fresh (<4h) "available" reading passes through as available', () => {
   const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 2)] }));
   assert.equal(parsed.fuelStatuses[0].status, 'available');
   assert.equal(parsed.status, 'available'); // single-fuel overall vote mirrors it
 });
 
-test('parseStation: a stale (>12h) "available" reading is downgraded to no_data', () => {
+test('parseStation: a stale (>4h) "available" reading is downgraded to no_data', () => {
   const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 20)] }));
+  assert.equal(parsed.fuelStatuses[0].status, 'no_data');
+});
+
+// "available" uses its own, much stricter 4h bar than probably_unavailable/
+// unavailable's shared 12h one (see alfabankParser.js's own doc comment on
+// why - a stale "available" over-reports, which is the worse failure for a
+// source that's sometimes the only vote a station gets at all) - this is
+// exactly the boundary where the two bars now disagree: 6h is stale for
+// "available" but would still be fresh under the old (and still-current
+// for the other two statuses) 12h bar.
+test('parseStation: a 6h-old "available" reading is stale under its own 4h bar, even though 6h would pass the 12h bar the other statuses use', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 6)] }));
   assert.equal(parsed.fuelStatuses[0].status, 'no_data');
 });
 

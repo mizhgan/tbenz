@@ -30,24 +30,30 @@
  *
  * `last_transaction_at` recency check: verified live against a real region's
  * worth of data (Kirov, 77 stations) that "available"/"probably_unavailable"/
- * "unavailable" are genuinely transaction-recency-derived. Two different
- * questions came up while tuning STALE_AFTER_MS, worth separating:
+ * "unavailable" are genuinely transaction-recency-derived. "available" and
+ * the two negative statuses deliberately use different staleness bars -
+ * see AVAILABLE_STALE_AFTER_MS/STALE_AFTER_MS below for the current figures
+ * and reasoning - because they carry different risk if trusted stale:
  *  - "probably_unavailable" ranges up to 27 days stale (median ~6 days,
  *    never under 17 hours) - alfabank keeps asserting this weak-negative
  *    hedge indefinitely rather than ever giving up and reporting "unknown"
  *    once a pump's own transaction history goes cold. A three-week-old
  *    "probably_unavailable" at full weight would let stale noise quietly
  *    outvote a fresh tbank/gdebenz reading (see combineTwo's doc comment on
- *    why this app prefers admitting "we don't know" over guessing).
- *  - "available" is a stronger claim to weaken deliberately: median age
- *    ~8.4 hours, so a "must be fresh within a few hours" bar (considered and
- *    explicitly rejected - would have zeroed out 81-88% of all "available"
- *    readings at a 2-4h cutoff) would leave the source silent on most
- *    stations most of the time. 12 hours is the compromise actually chosen:
- *    keeps ~58% of "available" readings trusted (a purchase this morning is
- *    still meaningful evidence for "probably still available", unlike one
- *    from days ago) while still meaningfully discounting anything that
- *    isn't from roughly the current day.
+ *    why this app prefers admitting "we don't know" over guessing) - kept
+ *    at the same 12h bar "unavailable" gets, not tightened, since a stale
+ *    negative merely under-reports (worst case: a driver checks elsewhere
+ *    for fuel that was actually there).
+ *  - "available" over-reports if trusted stale (worst case: a driver drives
+ *    to a station banking on fuel that's been gone for hours) - the worse
+ *    failure for this app's purpose, and the one that prompted tightening
+ *    this bar specifically after a live report of exactly that: a station
+ *    with zero tbank/gdebenz/sberazs coverage read "available" off a
+ *    same-day but hours-stale alfabank purchase alone, with nothing to
+ *    check it against (resolveVotes reduces to a single vote when it's the
+ *    only source with any signal at all for that fuel type - not a bug in
+ *    the vote resolver itself, just this source's own claim being weaker
+ *    evidence than its weight assumed once several hours old).
  * Either way, once stale, mapStatus downgrades the reading to no_data,
  * dropping it out of the merge vote entirely (resolveVotes skips readings
  * whose status isn't a recognized available/maybe_available/not_available).
@@ -74,22 +80,39 @@ const STATUS_MAP = {
 };
 
 // See this file's doc comment above for why exactly these three (not
-// "closed"/"unknown") get staleness-checked, and for the 12h figure itself -
-// a deliberate compromise, not a "never touches real data" safe margin the
-// way the originally-considered 7 days was.
+// "closed"/"unknown") get staleness-checked at all, and for the 12h figure
+// itself - a deliberate compromise, not a "never touches real data" safe
+// margin the way the originally-considered 7 days was.
+//
+// "available" gets its own, much stricter bar (4h, not 12h) - confirmed
+// live this source is sometimes literally the only vote a station gets for
+// a given fuel type (no tbank/gdebenz/sberazs coverage there at all), so
+// resolveVotes' weighted average reduces to just this one reading with
+// nothing to check it against. A stale "unavailable"/"probably_unavailable"
+// merely under-reports (worst case, a driver checks elsewhere for fuel
+// that was actually there) - a stale solo "available" over-reports (worst
+// case, a driver drives to a station banking on fuel that's been gone for
+// hours), which is the worse failure for this app's whole purpose. Verified
+// live (Кировская область, 87 raw "available" readings) that this cutoff
+// is a real, deliberate trade: only ~21% of them stay trusted, down from
+// ~49% at 12h - accepted anyway, since the alternative was this source
+// single-handedly asserting "available" off a same-day-but-hours-stale
+// purchase with zero corroboration.
 const RECENCY_DEPENDENT_STATUSES = new Set(['available', 'probably_unavailable', 'unavailable']);
 const STALE_AFTER_MS = 12 * 60 * 60 * 1000;
+const AVAILABLE_STALE_AFTER_MS = 4 * 60 * 60 * 1000;
 
-function isStale(lastTransactionAt) {
+function isStale(rawStatus, lastTransactionAt) {
   if (!lastTransactionAt) return true;
   const date = new Date(lastTransactionAt);
   if (Number.isNaN(date.getTime())) return true;
-  return Date.now() - date.getTime() > STALE_AFTER_MS;
+  const staleAfterMs = rawStatus === 'available' ? AVAILABLE_STALE_AFTER_MS : STALE_AFTER_MS;
+  return Date.now() - date.getTime() > staleAfterMs;
 }
 
 function mapStatus(rawStatus, lastTransactionAt) {
   if (rawStatus === null || rawStatus === undefined) return 'no_data';
-  if (RECENCY_DEPENDENT_STATUSES.has(rawStatus) && isStale(lastTransactionAt)) return 'no_data';
+  if (RECENCY_DEPENDENT_STATUSES.has(rawStatus) && isStale(rawStatus, lastTransactionAt)) return 'no_data';
   return STATUS_MAP[rawStatus] || 'no_data';
 }
 
