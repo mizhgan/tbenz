@@ -14,6 +14,11 @@ const props = defineProps({
   stationId: { type: String, required: true },
   from: { type: String, default: null },
   to: { type: String, default: null },
+  // The explanatory hint below the ribbon is only worth its space once -
+  // StationDetailModal.vue shows exactly one ribbon per station, but
+  // StationHighlightCards.vue renders up to 5 of these in a row, where the
+  // exact same sentence repeated under every card added nothing.
+  showHint: { type: Boolean, default: true },
 });
 
 const LOOKBACK_DAYS = 7;
@@ -131,7 +136,7 @@ watch(() => [props.stationId, props.from, props.to], load);
           {{ tick.label }}
         </span>
       </div>
-      <p class="hint small">
+      <p v-if="showHint" class="hint small">
         Реальные статусы за {{ from ? 'выбранный период' : 'последние 7 дней' }} сплошной
         лентой, без усреднения по часам; наведите на участок, чтобы увидеть точное время и
         длительность.

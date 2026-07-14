@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router';
 import { regionsApi, stationsApi } from '../api/regions';
 import { metricsApi } from '../api/metrics';
 import { formatMinutes, formatPct } from '../utils/colorScale';
+import { computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { renderRegionReportCard } from '../utils/regionReportCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
@@ -202,6 +203,28 @@ async function generateReportCard() {
   copyFeedback.value = '';
   cardGenerating.value = true;
   try {
+    const topStationsBase = highlightedStations.value.slice(0, 3);
+    // Best-of (default CORE_FUEL_TYPES) ribbon per top station, same real
+    // segments (not bucketed) StationReliabilityTimeline.vue itself draws -
+    // fetched here rather than inside regionReportCard.js since that file
+    // is a pure Canvas layout function with no API access of its own (same
+    // pattern generateCard() in StationDetailModal.vue already follows for
+    // its own card's history). Only 3 stations, so 3 parallel fetches.
+    const historyResults = await Promise.allSettled(
+      topStationsBase.map((s) => stationsApi.history(s.stationId, { from: fromIso.value, to: toIso.value, limit: 5000 }))
+    );
+    const topStations = topStationsBase.map((s, i) => {
+      const result = historyResults[i];
+      const history = result.status === 'fulfilled' ? result.value : [];
+      const ribbon = history.length ? collapseIsolatedBlips(computeStatusSegments(history)) : [];
+      return {
+        ...s,
+        ribbon,
+        ribbonRangeStart: history.length ? history[0].polledAt : null,
+        ribbonRangeEnd: history.length ? history[history.length - 1].polledAt : null,
+      };
+    });
+
     const blob = await renderRegionReportCard({
       region: selectedRegion.value || { name: 'Район' },
       from: fromMs.value,
@@ -211,7 +234,7 @@ async function generateReportCard() {
       forecastBuckets: forecastBuckets.value,
       recoveryTrendBuckets: recoveryTrendBuckets.value,
       direction: forecastDirection.value,
-      topStations: highlightedStations.value.slice(0, 3),
+      topStations,
       stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
     });
     if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);

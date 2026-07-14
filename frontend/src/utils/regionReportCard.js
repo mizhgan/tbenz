@@ -1,4 +1,5 @@
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
+import { statusMeta } from './fuelStatus';
 import { roundRect, wrapText, renderCard } from './canvasDraw';
 
 const WIDTH = 1000;
@@ -395,6 +396,38 @@ function layoutCard(
         }
       }
       if (s.address) y += 22;
+
+      // Compact best-of status ribbon for this station's own period - same
+      // real segments StationReliabilityTimeline.vue draws (fetched by the
+      // caller, see ReportsView.vue's generateReportCard), just shorter
+      // (14px, one combined row) to fit three of them on a card that
+      // already has plenty else on it. No day-tick labels or hint text
+      // here on purpose - a static image has no hover interaction to
+      // explain, and the card's own header/footer already carry the
+      // period's date range.
+      if (s.ribbon && s.ribbon.length) {
+        y += 10;
+        const ribbonHeight = 14;
+        const ribbonX = PADDING + 34;
+        const ribbonWidth = contentWidth - 34;
+        if (draw) {
+          const rangeStart = new Date(s.ribbonRangeStart).getTime();
+          const rangeEnd = new Date(s.ribbonRangeEnd).getTime();
+          const totalMs = Math.max(1, rangeEnd - rangeStart);
+          ctx.save();
+          roundRect(ctx, ribbonX, y, ribbonWidth, ribbonHeight, 4);
+          ctx.clip();
+          let sx = ribbonX;
+          for (const seg of s.ribbon) {
+            const segWidth = ((new Date(seg.end).getTime() - new Date(seg.start).getTime()) / totalMs) * ribbonWidth;
+            ctx.fillStyle = statusMeta(seg.status).color;
+            ctx.fillRect(sx, y, Math.max(segWidth, 0.5), ribbonHeight);
+            sx += segWidth;
+          }
+          ctx.restore();
+        }
+        y += ribbonHeight;
+      }
     }
     y += 24;
   }

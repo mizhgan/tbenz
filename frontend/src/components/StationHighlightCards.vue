@@ -60,7 +60,7 @@ const emit = defineEmits(['select']);
           <span class="stat-label">Нет данных</span>
         </div>
       </div>
-      <StationReliabilityTimeline :station-id="s.stationId" :from="from" :to="to" />
+      <StationReliabilityTimeline :station-id="s.stationId" :from="from" :to="to" :show-hint="false" />
     </div>
   </div>
 </template>
