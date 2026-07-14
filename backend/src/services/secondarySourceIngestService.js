@@ -131,10 +131,24 @@ async function computeMergedStatusForStation(station) {
  */
 async function applyMergeToStation(station, region, polledAt) {
   const previousFuelStatuses = station.lastFuelStatuses;
+  const previousConfirmedFuelStatuses = station.confirmedFuelStatuses;
   const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
+
+  const { transitions, nextConfirmedFuelStatuses } = telegramNotifier.computeTransitions(
+    previousFuelStatuses,
+    previousConfirmedFuelStatuses,
+    mergedFuelStatuses
+  );
 
   station.lastStatus = mergedStatus;
   station.lastFuelStatuses = mergedFuelStatuses;
+  // Kept in step with the region poll loop's own bookkeeping (see
+  // ingestService.ingestRegion) even though this is a one-off, out-of-band
+  // recompute - otherwise the next real poll tick would compare against a
+  // confirmedFuelStatuses value that never learned about this merge, and
+  // could fire (or miss) a transition that already effectively happened
+  // here.
+  station.confirmedFuelStatuses = nextConfirmedFuelStatuses;
   station.lastSeenAt = polledAt;
   await station.save();
 
@@ -150,7 +164,7 @@ async function applyMergeToStation(station, region, polledAt) {
     raw: { mergedFromSourceLinks: station.sourceLinks },
   });
 
-  return telegramNotifier.computeTransitions(previousFuelStatuses, mergedFuelStatuses);
+  return transitions;
 }
 
 /**

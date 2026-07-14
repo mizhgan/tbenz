@@ -78,6 +78,27 @@ const stationSchema = new Schema(
     // in a merged cycle.
     tbankLastSeenAt: { type: Date, default: null },
     lastTransactionAt: { type: Date, default: null },
+    // "Last confirmed" per-fuel-type status for Telegram appeared/disappeared
+    // alerts (see telegramNotifier.js's computeTransitions) - only ever
+    // updated by a literal 'available' or 'not_available' reading; a
+    // 'maybe_available' or 'no_data' poll leaves this untouched. Exists
+    // because comparing against lastFuelStatuses (the raw previous poll)
+    // alone made a station flapping available <-> maybe_available - confirmed
+    // live as a common pattern, dozens of times per station in production -
+    // re-fire "появилось" on every maybe_available -> available flip, and
+    // separately made a genuine available -> ... -> not_available transition
+    // go silent whenever the one poll right before the not_available
+    // reading happened to land on maybe_available. Deliberately separate
+    // from lastFuelStatuses (the actual, unfiltered current reading
+    // everything else in the app reads) - this field exists purely to give
+    // the alert logic a longer memory than "one poll back".
+    confirmedFuelStatuses: [
+      {
+        _id: false,
+        fuelType: { type: String },
+        status: { type: String },
+      },
+    ],
     // Full raw payload for this station as last received from the source API,
     // kept so nothing is lost if our field-mapping assumptions above change.
     lastRaw: { type: Schema.Types.Mixed, default: null },

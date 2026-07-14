@@ -10,23 +10,6 @@ const { CORE_FUEL_TYPES } = require('./metricsService');
 const { escapeHtml } = require('../utils/escapeHtml');
 const logger = require('../utils/logger');
 
-// Only the confirmed "available" status counts as "the fuel is here" for
-// appeared/disappeared notifications - "maybe_available" is an uncertain
-// signal from the source, and counting it as available-like (as an earlier
-// version of this did) meant a station flickering between not_available and
-// maybe_available fired a false "появилось" every time it touched
-// maybe_available, and a false "пропало" every time it left. Restricting
-// this to literal "available" makes that flicker produce no notification at
-// all (a real signal is required for either direction), and turns
-// maybe_available -> available into its own proper "появилось" (previously
-// swallowed, since both statuses used to count as the same "available-like"
-// bucket). Deliberately local to this file - metricsService.js's own
-// availability-percentage/outage-recovery math and
-// telegramPredictiveAlerts.js's "currently up" check both still treat
-// maybe_available as available-like on purpose, for different reasons (a
-// station that's "maybe available" really is partially counted in the
-// availability %, and really shouldn't be flagged as "about to run out").
-const AVAILABLE_LIKE = new Set(['available']);
 // Telegram's real cap is 4096 chars; keep a margin so HTML entity escaping
 // (e.g. "&amp;" for "&") can't push a chunk over the limit.
 const MAX_MESSAGE_LEN = 3500;
@@ -63,33 +46,68 @@ function chatMatchesStation(chat, station) {
   return true;
 }
 
+// Statuses that update a fuel type's "confirmed" memory (see
+// computeTransitions below and Station.js's own doc comment on
+// confirmedFuelStatuses) - a real positive or negative claim, not the
+// ambiguous middle ground (maybe_available/no_data) that a station spends a
+// lot of its time flickering through in practice.
+const CONFIRMABLE_STATUSES = new Set(['available', 'not_available']);
+
 /**
  * Compares a station's fuel-type statuses before/after a poll and returns
- * the list of appeared/disappeared transitions. Pure and synchronous - no
- * chat lookup or sending here, so a whole region's worth of these can be
- * collected first and sent as one batch (see notifyRegionChanges) instead
- * of firing a message the instant each station is stored.
+ * the list of appeared/disappeared transitions, plus the next
+ * confirmedFuelStatuses the caller should persist. Pure and synchronous -
+ * no chat lookup, sending, or DB write here, so a whole region's worth of
+ * these can be collected first and sent as one batch (see
+ * notifyRegionChanges) instead of firing a message the instant each
+ * station is stored.
+ *
+ * Deliberately compares against `previousConfirmedFuelStatuses` (a longer-
+ * memory value, only ever updated by a literal available/not_available
+ * reading - see Station.js's own doc comment) rather than
+ * `previousRawFuelStatuses` (the immediately-prior single poll) for
+ * deciding whether a transition is real. An earlier version compared
+ * against the raw previous poll directly, which - confirmed live as a
+ * common production pattern, a station flapping available <-> maybe_available
+ * dozens of times in its own history - had two symmetric problems: it
+ * re-fired "появилось" on every maybe_available -> available flip (nothing
+ * had actually changed since the last confirmed "available"), and it
+ * silently missed genuine available -> ... -> not_available transitions
+ * whenever the one poll right before the not_available reading happened to
+ * land on maybe_available (the single-hop comparison saw
+ * maybe_available -> not_available, which isn't the tracked
+ * available -> not_available pair). Comparing against a value that only
+ * moves on confirmed readings fixes both: a run of maybe_available polls
+ * between two confirmed readings is invisible to this comparison, exactly
+ * as it should be.
+ *
+ * `previousRawFuelStatuses` is still needed separately, only to tell "this
+ * fuel type has never been seen before at all" (skip - nothing to compare
+ * against yet) apart from "seen before but never confirmed either way"
+ * (prevConfirmed is null/absent, a legitimate transition target).
  */
-function computeTransitions(previousFuelStatuses, newFuelStatuses) {
-  const prevByType = new Map((previousFuelStatuses || []).map((f) => [f.fuelType, f.status]));
+function computeTransitions(previousRawFuelStatuses, previousConfirmedFuelStatuses, newFuelStatuses) {
+  const prevRawByType = new Map((previousRawFuelStatuses || []).map((f) => [f.fuelType, f.status]));
+  const nextConfirmedByType = new Map((previousConfirmedFuelStatuses || []).map((f) => [f.fuelType, f.status]));
   const transitions = [];
 
   for (const f of newFuelStatuses || []) {
-    const prevStatus = prevByType.has(f.fuelType) ? prevByType.get(f.fuelType) : null;
-    // A fuel type seen for the first time isn't a transition - there's
-    // nothing to compare against, so it can't have "become" anything yet.
-    if (prevStatus === null) continue;
+    if (!CONFIRMABLE_STATUSES.has(f.status)) continue; // maybe_available/no_data never move the memory
 
-    const wasAvailable = AVAILABLE_LIKE.has(prevStatus);
-    const isAvailable = AVAILABLE_LIKE.has(f.status);
+    const everSeenBefore = prevRawByType.has(f.fuelType);
+    if (everSeenBefore) {
+      const prevConfirmed = nextConfirmedByType.get(f.fuelType) ?? null;
+      let eventKey = null;
+      if (f.status === 'available' && prevConfirmed !== 'available') eventKey = 'stationAvailable';
+      else if (f.status === 'not_available' && prevConfirmed === 'available') eventKey = 'stationUnavailable';
+      if (eventKey) transitions.push({ fuelType: f.fuelType, eventKey });
+    }
 
-    let eventKey = null;
-    if (isAvailable && !wasAvailable) eventKey = 'stationAvailable';
-    else if (!isAvailable && wasAvailable && f.status === 'not_available') eventKey = 'stationUnavailable';
-    if (eventKey) transitions.push({ fuelType: f.fuelType, eventKey });
+    nextConfirmedByType.set(f.fuelType, f.status);
   }
 
-  return transitions;
+  const nextConfirmedFuelStatuses = [...nextConfirmedByType].map(([fuelType, status]) => ({ fuelType, status }));
+  return { transitions, nextConfirmedFuelStatuses };
 }
 
 function formatStationBlock(station, transitions) {

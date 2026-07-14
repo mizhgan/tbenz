@@ -27,7 +27,7 @@ async function storeStation(parsed, region, polledAt) {
   // silently reverted by this same write a few lines down.
   const previous = await Station.findOne(
     dedupeFilter,
-    { lastFuelStatuses: 1, nameEditedByAdmin: 1, addressEditedByAdmin: 1 }
+    { lastFuelStatuses: 1, confirmedFuelStatuses: 1, nameEditedByAdmin: 1, addressEditedByAdmin: 1 }
   ).lean();
 
   const setFields = {
@@ -78,8 +78,13 @@ async function storeStation(parsed, region, polledAt) {
   // The transition notification isn't computed here - see ingestRegion's own
   // comment on why it's deferred until every write for this tick (this
   // tbank write, then any secondary-source remerge) has landed, using this
-  // `previousFuelStatuses` as the one true "before" value.
-  return { station, previousFuelStatuses: previous?.lastFuelStatuses || [] };
+  // `previousFuelStatuses`/`previousConfirmedFuelStatuses` as the one true
+  // "before" values.
+  return {
+    station,
+    previousFuelStatuses: previous?.lastFuelStatuses || [],
+    previousConfirmedFuelStatuses: previous?.confirmedFuelStatuses || [],
+  };
 }
 
 /**
@@ -96,13 +101,14 @@ async function ingestRegion(region) {
 
     let stored = 0;
     let skipped = 0;
-    // Each touched station's fuel statuses from *before any write this
-    // tick* - the one true "previous" a transition notification should be
-    // compared against (see the comment on the final notifyRegionChanges
-    // call below for why this has to be a single before/after comparison
-    // spanning both the tbank write and any secondary-source remerge,
-    // rather than one comparison per write).
+    // Each touched station's fuel statuses (raw and confirmed) from *before
+    // any write this tick* - the one true "previous" a transition
+    // notification should be compared against (see the comment on the
+    // final notifyRegionChanges call below for why this has to be a single
+    // before/after comparison spanning both the tbank write and any
+    // secondary-source remerge, rather than one comparison per write).
     const previousByStationId = new Map();
+    const previousConfirmedByStationId = new Map();
     for (const raw of rawStations) {
       const parsed = parseStation(raw);
       if (!parsed) {
@@ -110,8 +116,13 @@ async function ingestRegion(region) {
         continue;
       }
       try {
-        const { station, previousFuelStatuses } = await storeStation(parsed, region, polledAt);
+        const { station, previousFuelStatuses, previousConfirmedFuelStatuses } = await storeStation(
+          parsed,
+          region,
+          polledAt
+        );
         previousByStationId.set(String(station._id), previousFuelStatuses);
+        previousConfirmedByStationId.set(String(station._id), previousConfirmedFuelStatuses);
         stored += 1;
       } catch (err) {
         logger.error(`Failed to store station for region ${region.name}:`, err.message);
@@ -145,13 +156,14 @@ async function ingestRegion(region) {
 
     // A station matched to a secondary source but not itself present in
     // tbank's response this tick (previousByStationId has no entry for it
-    // yet) still needs its true "before" value captured, from right before
+    // yet) still needs its true "before" values captured, from right before
     // the remerge below is its only write this tick.
     const uniqueMatchedIds = [...new Set(matchedStationIds.map(String))];
     for (const id of uniqueMatchedIds) {
       if (!previousByStationId.has(id)) {
-        const existing = await Station.findById(id, { lastFuelStatuses: 1 }).lean();
+        const existing = await Station.findById(id, { lastFuelStatuses: 1, confirmedFuelStatuses: 1 }).lean();
         previousByStationId.set(id, existing?.lastFuelStatuses || []);
+        previousConfirmedByStationId.set(id, existing?.confirmedFuelStatuses || []);
       }
     }
 
@@ -186,13 +198,27 @@ async function ingestRegion(region) {
     // (that event only needs "wasn't available before, is now") while
     // "пропало" alerts (which need the *exact* prior state to be
     // 'available') silently stopped.
+    //
+    // computeTransitions also compares against confirmedFuelStatuses (see
+    // its own doc comment and Station.js's), not just the raw previous
+    // poll - so this loop persists the returned nextConfirmedFuelStatuses
+    // back onto the station right away, keeping that memory current for
+    // next tick regardless of whether this tick produced an actual
+    // transition worth alerting on.
     const touchedIds = [...new Set([...previousByStationId.keys()])];
     const stationEvents = [];
     if (touchedIds.length) {
       const finalStations = await Station.find({ _id: { $in: touchedIds } });
       for (const station of finalStations) {
         const previousFuelStatuses = previousByStationId.get(String(station._id)) || [];
-        const transitions = telegramNotifier.computeTransitions(previousFuelStatuses, station.lastFuelStatuses);
+        const previousConfirmedFuelStatuses = previousConfirmedByStationId.get(String(station._id)) || [];
+        const { transitions, nextConfirmedFuelStatuses } = telegramNotifier.computeTransitions(
+          previousFuelStatuses,
+          previousConfirmedFuelStatuses,
+          station.lastFuelStatuses
+        );
+        station.confirmedFuelStatuses = nextConfirmedFuelStatuses;
+        await station.save();
         if (transitions.length) stationEvents.push({ station, transitions });
       }
     }
