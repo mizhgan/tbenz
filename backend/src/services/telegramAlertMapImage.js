@@ -130,6 +130,8 @@ function statChip(x, y, dotColor, count, label) {
 // own coreStatus (best-of among gasoline - see metricsService.deriveCoreStatus)
 // is what's counted here, not lastStatus (blanket overall status) - same
 // "gasoline is the real shortage, not diesel/gas" call as everywhere else.
+// `stations` here is renderAlertMapImage's statsStations - the chat's whole
+// region, not the bbox-scoped set the map above draws dots for.
 async function renderStatsStrip(stations) {
   const counts = { available: 0, maybe_available: 0, not_available: 0, no_data: 0 };
   for (const s of stations) {
@@ -168,20 +170,29 @@ async function renderStatsStrip(stations) {
  * Renders the full alert map image: Leaflet screenshot of `bbox` (with a
  * colored dot per station in `stations`, keyed by each station's own
  * coreStatus - best-of among gasoline, see metricsService.deriveCoreStatus,
- * not the blanket `lastStatus`) stacked above a stats strip summarizing
- * those same stations' current status breakdown. Returns a PNG Buffer,
- * ready for telegramBot.sendPhoto.
+ * not the blanket `lastStatus`) stacked above a stats strip. Returns a PNG
+ * Buffer, ready for telegramBot.sendPhoto.
+ *
+ * `stations` (bbox-scoped, picked by the admin purely so markers on this
+ * small image stay legible - see TelegramChat.js's alertMapBbox doc
+ * comment) only drives the *dots*. `statsStations` drives the strip's
+ * numbers and should be the chat's whole followed region, same set the
+ * site's own map/report cards use - reported by a user comparing this
+ * image against the site's share card: the strip used to summarize only
+ * the bbox-scoped `stations`, so a bbox covering e.g. 77 of a region's 101
+ * stations produced a strip whose numbers (and their sum) never matched
+ * the site at all, with nothing on the image explaining why. Falls back to
+ * `stations` if `statsStations` isn't given (keeps callers optional).
  *
  * `visibleStatuses` (optional Set/array of status keys) only thins out
  * which stations get a *dot* - e.g. a chat that's mostly not_available
  * stations can drop that status from the map so the few
- * available/maybe_available ones aren't lost in a sea of red. The stats
- * strip deliberately always summarizes the *full* `stations` list
- * regardless - showing "0 нет" under a map that hid 40 not_available
- * dots would read as "there are none" instead of "we chose not to show
- * them", which is a materially different (and wrong) claim about supply.
+ * available/maybe_available ones aren't lost in a sea of red. Doesn't
+ * touch the stats strip either, for the same "showing 0 нет under a map
+ * that hid 40 red dots reads as a wrong claim about supply" reason as
+ * before.
  */
-async function renderAlertMapImage({ bbox, stations, visibleStatuses }) {
+async function renderAlertMapImage({ bbox, stations, statsStations, visibleStatuses }) {
   const allowed = visibleStatuses ? new Set(visibleStatuses) : null;
   const points = stations
     .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon))
@@ -189,7 +200,10 @@ async function renderAlertMapImage({ bbox, stations, visibleStatuses }) {
     .filter((s) => !allowed || allowed.has(s.coreStatus))
     .map((s) => ({ lat: s.lat, lon: s.lon, color: STATUS_COLORS[s.coreStatus] || STATUS_COLORS.no_data }));
 
-  const [mapBuffer, statsBuffer] = await Promise.all([captureMapImage(bbox, points), renderStatsStrip(stations)]);
+  const [mapBuffer, statsBuffer] = await Promise.all([
+    captureMapImage(bbox, points),
+    renderStatsStrip(statsStations || stations),
+  ]);
 
   return sharp({
     create: { width: MAP_WIDTH, height: MAP_HEIGHT + STRIP_HEIGHT, channels: 3, background: COLOR_BG },

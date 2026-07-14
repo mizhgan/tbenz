@@ -205,16 +205,27 @@ async function sendChunkedText(chat, header, blocks) {
 async function sendAlertMapPost(chat, region, header, blocks) {
   try {
     const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
-    const stations = await Station.find({
-      regions: region._id,
-      lat: { $gte: minLat, $lte: maxLat },
-      lon: { $gte: minLon, $lte: maxLon },
-    })
-      .select('lat lon lastStatus lastFuelStatuses')
-      .lean();
+    // Two separate queries on purpose: `stations` (bbox-scoped) only feeds
+    // the map's dots, kept small so they stay legible on a small image.
+    // `statsStations` is the chat's whole followed region - the numbers in
+    // the strip below the map need to match the site's own region-wide
+    // figures, not silently shrink to whatever fraction of the region
+    // happens to fall inside the admin-picked bbox (see
+    // telegramAlertMapImage.js's own doc comment on the bug this fixed).
+    const [stations, statsStations] = await Promise.all([
+      Station.find({
+        regions: region._id,
+        lat: { $gte: minLat, $lte: maxLat },
+        lon: { $gte: minLon, $lte: maxLon },
+      })
+        .select('lat lon lastStatus lastFuelStatuses')
+        .lean(),
+      Station.find({ regions: region._id }).select('lat lon lastStatus lastFuelStatuses').lean(),
+    ]);
     const buffer = await telegramAlertMapImage.renderAlertMapImage({
       bbox: chat.alertMapBbox,
       stations,
+      statsStations,
       visibleStatuses: chat.alertMapStatuses,
     });
     const { caption, remainder } = buildCaptionWithRemainder(header, blocks);
@@ -455,15 +466,29 @@ async function sendPromoPost(chat) {
   if (chat.alertMapBbox) {
     try {
       const { minLat, maxLat, minLon, maxLon } = chat.alertMapBbox;
-      const stations = await Station.find({
-        lat: { $gte: minLat, $lte: maxLat },
-        lon: { $gte: minLon, $lte: maxLon },
-      })
-        .select('lat lon lastStatus lastFuelStatuses')
-        .lean();
+      // Same split as sendAlertMapPost above: bbox-scoped stations for the
+      // map's dots, the chat's whole followed region(s) for the stats
+      // strip's numbers. No single `region` here (promo isn't tied to one
+      // triggering event) - chat.regions is whatever region(s) this chat
+      // actually follows; an empty list (no region filter configured)
+      // falls back to the previous bbox-only behavior for the strip too,
+      // since there's no "whole region" to speak of otherwise.
+      const regionFilter = chat.regions?.length ? { regions: { $in: chat.regions } } : null;
+      const [stations, statsStations] = await Promise.all([
+        Station.find({
+          lat: { $gte: minLat, $lte: maxLat },
+          lon: { $gte: minLon, $lte: maxLon },
+        })
+          .select('lat lon lastStatus lastFuelStatuses')
+          .lean(),
+        regionFilter
+          ? Station.find(regionFilter).select('lat lon lastStatus lastFuelStatuses').lean()
+          : null,
+      ]);
       const buffer = await telegramAlertMapImage.renderAlertMapImage({
         bbox: chat.alertMapBbox,
         stations,
+        statsStations: statsStations || undefined,
         visibleStatuses: chat.alertMapStatuses,
       });
       const sent = await telegramBot.sendPhoto(chat, buffer, text);
