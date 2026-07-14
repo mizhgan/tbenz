@@ -11,6 +11,7 @@ import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 import { useAuthStore } from '../store/auth';
 import StationForecast from './StationForecast.vue';
 import StationHistoryChart from './StationHistoryChart.vue';
+import StationReliabilityTimeline from './StationReliabilityTimeline.vue';
 
 const props = defineProps({
   station: { type: Object, required: true },
@@ -436,6 +437,9 @@ onBeforeUnmount(() => {
             <span class="reliability-label">Ср. восстановление</span>
           </div>
         </div>
+
+        <h4>Лента статусов за 7 дней</h4>
+        <StationReliabilityTimeline :station-id="station.stationId" />
 
         <h4>Прогноз на ближайшие часы</h4>
         <StationForecast :station-id="station.stationId" />

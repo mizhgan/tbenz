@@ -51,6 +51,47 @@ export function bestFuelStatus(fuelStatuses, types = CORE_FUEL_TYPES) {
   return best;
 }
 
+// Collapses a station's raw snapshot history (oldest -> newest, each with
+// its own `fuelStatuses`) into contiguous runs of the same core-fuel status
+// - "10 hours available, then 12 hours down" as literal {status, start,
+// end} blocks, not a downsampled/bucketed approximation. Verified live this
+// is cheap enough to skip bucketing entirely: even the single most
+// fragmented station in production over a 7-day window (real ~15-minute
+// polling, ~700 raw snapshots) collapses to ~216 segments - trivial to
+// render, nowhere near a performance concern.
+//
+// Each segment's `end` is stretched to the *next* segment's `start` (not
+// left at its own last snapshot's time) so the timeline is gapless - a
+// status is assumed to hold until the next poll actually contradicts it,
+// same assumption metricsService.computeOutages makes on the backend. The
+// final segment's `end` is its own last snapshot's time, since there's
+// nothing later to stretch to.
+export function computeStatusSegments(history, types = CORE_FUEL_TYPES) {
+  if (!history?.length) return [];
+
+  const runs = [];
+  for (const snap of history) {
+    const status = bestFuelStatus(snap.fuelStatuses, types);
+    const at = new Date(snap.polledAt);
+    const last = runs[runs.length - 1];
+    if (last && last.status === status) {
+      last.lastSeenAt = at;
+    } else {
+      runs.push({ status, start: at, lastSeenAt: at });
+    }
+  }
+
+  return runs.map((run, i) => {
+    const end = i < runs.length - 1 ? runs[i + 1].start : run.lastSeenAt;
+    return {
+      status: run.status,
+      start: run.start,
+      end,
+      durationMinutes: (end.getTime() - run.start.getTime()) / 60000,
+    };
+  });
+}
+
 // Short "how long ago" label for a per-fuel-type reading's own
 // lastTransactionAt (see useSourceFuelRows.js) - a source like alfabank can
 // go days between transactions for a given fuel type, so "when" is exactly
