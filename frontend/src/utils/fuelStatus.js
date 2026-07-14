@@ -76,8 +76,9 @@ export function computeStatusSegments(history, types = CORE_FUEL_TYPES) {
     const last = runs[runs.length - 1];
     if (last && last.status === status) {
       last.lastSeenAt = at;
+      last.sampleCount += 1;
     } else {
-      runs.push({ status, start: at, lastSeenAt: at });
+      runs.push({ status, start: at, lastSeenAt: at, sampleCount: 1 });
     }
   }
 
@@ -88,8 +89,50 @@ export function computeStatusSegments(history, types = CORE_FUEL_TYPES) {
       start: run.start,
       end,
       durationMinutes: (end.getTime() - run.start.getTime()) / 60000,
+      // How many raw polls actually landed on this status while this
+      // segment was open - see collapseIsolatedBlips below, which uses this
+      // (not durationMinutes) to tell a single anomalous poll apart from a
+      // real, if brief, change: duration alone can't, since a region's own
+      // poll interval isn't fixed/known here, and a single poll can span an
+      // arbitrarily long gap to the next one if a poll cycle was missed.
+      sampleCount: run.sampleCount,
     };
   });
+}
+
+// Merges away a segment backed by exactly one raw poll (sampleCount === 1)
+// when the status on both sides of it is identical - confirmed live this is
+// a real, common pattern (240 isolated single-poll blips found across a
+// 150-station sample over one week, nearly all sandwiched between
+// same-status stretches spanning hours), most likely one source's vote in
+// the merge briefly landing on a different value for a single tick rather
+// than a real change. Deliberately conservative: never merges a segment
+// that differs between its two neighbors (available -> maybe_available ->
+// ... could be the genuine start of a real transition, not noise to hide)
+// or one backed by 2+ consecutive polls (harder to dismiss as a one-off).
+// Starting with exactly this narrow a rule on purpose, to see how much of
+// the reported "anomaly" pattern it actually accounts for before
+// considering anything broader (e.g. a duration-based cutoff instead of a
+// poll-count one).
+export function collapseIsolatedBlips(segments) {
+  if (segments.length < 3) return segments;
+
+  const result = [segments[0]];
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    const prev = result[result.length - 1];
+    const next = segments[i + 1];
+    const isIsolatedBlip = seg.sampleCount === 1 && next && prev.status === next.status && prev.status !== seg.status;
+    if (isIsolatedBlip) {
+      prev.end = next.end;
+      prev.durationMinutes = (prev.end.getTime() - prev.start.getTime()) / 60000;
+      prev.sampleCount += seg.sampleCount + next.sampleCount;
+      i += 1; // `next` is now absorbed into prev too - skip it
+    } else {
+      result.push(seg);
+    }
+  }
+  return result;
 }
 
 // Short "how long ago" label for a per-fuel-type reading's own

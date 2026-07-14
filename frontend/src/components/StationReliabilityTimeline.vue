@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { stationsApi } from '../api/regions';
-import { statusMeta, computeStatusSegments } from '../utils/fuelStatus';
+import { statusMeta, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { formatMinutes } from '../utils/colorScale';
 
 const props = defineProps({
@@ -72,7 +72,7 @@ async function load() {
       segments.value = [];
       return;
     }
-    segments.value = computeStatusSegments(history);
+    segments.value = collapseIsolatedBlips(computeStatusSegments(history));
     rangeStart.value = new Date(history[0].polledAt);
     rangeEnd.value = new Date(history[history.length - 1].polledAt);
   } catch (err) {
