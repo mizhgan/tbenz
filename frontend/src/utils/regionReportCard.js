@@ -402,12 +402,12 @@ function layoutCard(
       // caller, see ReportsView.vue's generateReportCard), just shorter
       // (14px, one combined row) to fit three of them on a card that
       // already has plenty else on it. No hint text here on purpose - a
-      // static image has no hover interaction to explain - but start/end
-      // date labels ARE kept (unlike the live version's full day-by-day
-      // ticks, just the two endpoints) - confirmed live the ribbon's own
-      // scale was illegible without them: the card's header/footer carry
-      // the period too, but that's far enough away from each individual
-      // ribbon that a viewer can't actually connect the two at a glance.
+      // static image has no hover interaction to explain - but day-boundary
+      // date labels ARE kept, same approach as the live ribbon
+      // (StationReliabilityTimeline.vue's own dayTicks): every local
+      // midnight within the range, not just the two endpoints - confirmed
+      // live a single "start – end" label pair wasn't enough to place a
+      // mid-week block in time at a glance.
       if (s.ribbon && s.ribbon.length) {
         y += 10;
         const ribbonHeight = 14;
@@ -431,13 +431,18 @@ function layoutCard(
         }
         y += ribbonHeight + 16;
         if (draw) {
-          const dateFmt = (ms) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
           ctx.fillStyle = '#94a3b8';
           ctx.font = '15px -apple-system, "Segoe UI", Roboto, sans-serif';
-          ctx.fillText(dateFmt(rangeStart), ribbonX, y);
-          const endLabel = dateFmt(rangeEnd);
-          const endWidth = ctx.measureText(endLabel).width;
-          ctx.fillText(endLabel, ribbonX + ribbonWidth - endWidth, y);
+          const d = new Date(rangeStart);
+          d.setHours(24, 0, 0, 0); // first midnight strictly after rangeStart
+          while (d.getTime() < rangeEnd) {
+            const tx = ribbonX + ((d.getTime() - rangeStart) / totalMs) * ribbonWidth;
+            const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+            const labelWidth = ctx.measureText(label).width;
+            const clampedX = Math.min(Math.max(tx - labelWidth / 2, ribbonX), ribbonX + ribbonWidth - labelWidth);
+            ctx.fillText(label, clampedX, y);
+            d.setDate(d.getDate() + 1);
+          }
         }
       }
     }
