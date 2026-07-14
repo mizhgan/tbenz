@@ -168,11 +168,17 @@ function layoutCard(ctx, { regionName, mapCanvas, counts, stationCount, availabl
     ctx.font = '22px -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.fillText(tsLabel, PADDING, footerY);
     ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
-    const brand = 'tbenz.in';
+    const brand = 'tbenz.in · t.me/tbenzin';
     const brandWidth = ctx.measureText(brand).width;
     ctx.fillText(brand, PADDING + contentWidth - brandWidth, footerY);
   }
-  y += FOOTER_HEIGHT - 20;
+  // Extra clearance below the footer text: the -42/-20 offsets used for
+  // footerY vs. this final increment only leave a 22px gap, but the white
+  // card itself is inset 24px from the canvas edge (see canvasDraw.js's
+  // renderCard) - net result was the text baseline sitting *below* the
+  // card's visible bottom edge on every card, not just some. +6 instead of
+  // -20 restores a real ~24px margin.
+  y += FOOTER_HEIGHT + 6;
 
   return Math.round(y);
 }

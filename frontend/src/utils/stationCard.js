@@ -284,8 +284,16 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
       ? `Снимок на момент: ${formatDateTime(station.polledAt)}`
       : '';
     ctx.fillText(snapshotLabel, PADDING, footerY);
+    ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
+    const brand = 'tbenz.in · t.me/tbenzin';
+    const brandWidth = ctx.measureText(brand).width;
+    ctx.fillText(brand, PADDING + contentWidth - brandWidth, footerY);
   }
-  y += FOOTER_HEIGHT - 20;
+  // Extra clearance below the footer text - see mapShareCard.js's own
+  // identical comment: the -42/-20 offset pairing left the text baseline
+  // sitting below the white card's visible bottom edge (24px inset) on
+  // every card, not just some.
+  y += FOOTER_HEIGHT + 6;
 
   return Math.round(y);
 }
