@@ -1,4 +1,11 @@
-import { statusMeta, fuelTypeLabel, bestFuelStatus, CORE_FUEL_TYPES } from './fuelStatus';
+import {
+  statusMeta,
+  fuelTypeLabel,
+  bestFuelStatus,
+  CORE_FUEL_TYPES,
+  computeStatusSegments,
+  collapseIsolatedBlips,
+} from './fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
 import { downsampleEvenly } from './mapExport';
 import { roundRect, wrapText, renderCard } from './canvasDraw';
@@ -206,47 +213,57 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
     y += 2 * tileHeight + gap + 40;
   }
 
-  // Recent outages - same data as StationForecast.vue's own "Последние
-  // отключения" mini bar list on the live page (forecast.recentOutages,
-  // most recent first), redrawn in plain Canvas 2D. Capped at 5 here (the
-  // live page shows up to 10) - a shared card needs to stay a reasonable
-  // height, and 5 is enough to see whether recovery time is consistent or
-  // all over the place.
-  const shownOutages = (forecast?.recentOutages || []).slice(0, 5);
-  if (shownOutages.length) {
+  // Status ribbon: same idea as the live page's own
+  // StationReliabilityTimeline.vue - real segments (not bucketed/
+  // downsampled) with isolated single-poll blips collapsed away (see
+  // fuelStatus.js's collapseIsolatedBlips), drawn as one proportional-width
+  // bar. Replaces the old "Последние отключения" bar list - this ribbon
+  // already shows exactly when and how long each outage was, at a glance,
+  // without a separate list needed alongside it.
+  const ribbonSegments = collapseIsolatedBlips(computeStatusSegments(history));
+  if (ribbonSegments.length) {
     if (draw) {
       ctx.fillStyle = '#0f172a';
       ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('Последние отключения (АИ-92, АИ-95)', PADDING, y);
+      ctx.fillText('Лента статусов за 7 дней (АИ-92, АИ-95)', PADDING, y);
     }
     y += 20;
 
-    const maxMinutes = Math.max(1, ...shownOutages.map((o) => o.durationMinutes));
-    const dateWidth = 190;
-    const durationWidth = 90;
-    const barAreaWidth = contentWidth - dateWidth - durationWidth;
-    const barHeight = 14;
+    const rangeStart = new Date(ribbonSegments[0].start).getTime();
+    const rangeEnd = new Date(ribbonSegments[ribbonSegments.length - 1].end).getTime();
+    const totalMs = Math.max(1, rangeEnd - rangeStart);
+    const ribbonHeight = 32;
 
-    for (const o of shownOutages) {
-      y += 34;
-      if (draw) {
-        ctx.fillStyle = '#64748b';
-        ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
-        ctx.fillText(formatHour(o.start), PADDING, y);
+    if (draw) {
+      ctx.save();
+      roundRect(ctx, PADDING, y, contentWidth, ribbonHeight, 6);
+      ctx.clip();
+      let sx = PADDING;
+      for (const seg of ribbonSegments) {
+        const segWidth = ((new Date(seg.end).getTime() - new Date(seg.start).getTime()) / totalMs) * contentWidth;
+        ctx.fillStyle = statusMeta(seg.status).color;
+        ctx.fillRect(sx, y, Math.max(segWidth, 0.5), ribbonHeight);
+        sx += segWidth;
+      }
+      ctx.restore();
+    }
+    y += ribbonHeight + 22;
 
-        const barWidth = Math.max(4, (o.durationMinutes / maxMinutes) * barAreaWidth);
-        ctx.fillStyle = '#f1f5f9';
-        roundRect(ctx, PADDING + dateWidth, y - barHeight + 2, barAreaWidth, barHeight, 4);
-        ctx.fill();
-        ctx.fillStyle = '#dc2626';
-        roundRect(ctx, PADDING + dateWidth, y - barHeight + 2, barWidth, barHeight, 4);
-        ctx.fill();
-
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '600 20px -apple-system, "Segoe UI", Roboto, sans-serif';
-        const durText = formatMinutes(o.durationMinutes);
-        const durWidth = ctx.measureText(durText).width;
-        ctx.fillText(durText, PADDING + contentWidth - durWidth, y);
+    // Day-boundary tick labels for orientation, same approach as the live
+    // ribbon - positioned by percentage along the range, not tied to
+    // segment edges (segments follow real poll timestamps, not midnight).
+    if (draw) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '18px -apple-system, "Segoe UI", Roboto, sans-serif';
+      const d = new Date(rangeStart);
+      d.setHours(24, 0, 0, 0);
+      while (d.getTime() < rangeEnd) {
+        const tx = PADDING + ((d.getTime() - rangeStart) / totalMs) * contentWidth;
+        const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+        const labelWidth = ctx.measureText(label).width;
+        const clampedX = Math.min(Math.max(tx - labelWidth / 2, PADDING), PADDING + contentWidth - labelWidth);
+        ctx.fillText(label, clampedX, y);
+        d.setDate(d.getDate() + 1);
       }
     }
     y += 36;

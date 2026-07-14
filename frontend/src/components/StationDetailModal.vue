@@ -171,9 +171,15 @@ async function generateCard() {
     // failure on either just means that section is omitted, not that the
     // whole card generation fails (same reasoning as the reports page's
     // per-section error handling).
+    // from/limit matches StationReliabilityTimeline.vue's own request - the
+    // card's status ribbon needs the same real 7 days of history the live
+    // page's ribbon shows, not just whatever the fuel-type strips below it
+    // used to get by with (200 most recent, unbounded span - often well
+    // under a week at ~15-minute polling).
+    const historyFrom = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
     const [forecastResult, historyResult] = await Promise.allSettled([
       stationsApi.forecast(props.station.stationId, { hoursAhead: 12 }),
-      stationsApi.history(props.station.stationId, { limit: 200 }),
+      stationsApi.history(props.station.stationId, { from: historyFrom, limit: 5000 }),
     ]);
     const forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
     const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
