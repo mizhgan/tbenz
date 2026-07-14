@@ -401,19 +401,22 @@ function layoutCard(
       // real segments StationReliabilityTimeline.vue draws (fetched by the
       // caller, see ReportsView.vue's generateReportCard), just shorter
       // (14px, one combined row) to fit three of them on a card that
-      // already has plenty else on it. No day-tick labels or hint text
-      // here on purpose - a static image has no hover interaction to
-      // explain, and the card's own header/footer already carry the
-      // period's date range.
+      // already has plenty else on it. No hint text here on purpose - a
+      // static image has no hover interaction to explain - but start/end
+      // date labels ARE kept (unlike the live version's full day-by-day
+      // ticks, just the two endpoints) - confirmed live the ribbon's own
+      // scale was illegible without them: the card's header/footer carry
+      // the period too, but that's far enough away from each individual
+      // ribbon that a viewer can't actually connect the two at a glance.
       if (s.ribbon && s.ribbon.length) {
         y += 10;
         const ribbonHeight = 14;
         const ribbonX = PADDING + 34;
         const ribbonWidth = contentWidth - 34;
+        const rangeStart = new Date(s.ribbonRangeStart).getTime();
+        const rangeEnd = new Date(s.ribbonRangeEnd).getTime();
+        const totalMs = Math.max(1, rangeEnd - rangeStart);
         if (draw) {
-          const rangeStart = new Date(s.ribbonRangeStart).getTime();
-          const rangeEnd = new Date(s.ribbonRangeEnd).getTime();
-          const totalMs = Math.max(1, rangeEnd - rangeStart);
           ctx.save();
           roundRect(ctx, ribbonX, y, ribbonWidth, ribbonHeight, 4);
           ctx.clip();
@@ -426,7 +429,16 @@ function layoutCard(
           }
           ctx.restore();
         }
-        y += ribbonHeight;
+        y += ribbonHeight + 16;
+        if (draw) {
+          const dateFmt = (ms) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+          ctx.fillStyle = '#94a3b8';
+          ctx.font = '15px -apple-system, "Segoe UI", Roboto, sans-serif';
+          ctx.fillText(dateFmt(rangeStart), ribbonX, y);
+          const endLabel = dateFmt(rangeEnd);
+          const endWidth = ctx.measureText(endLabel).width;
+          ctx.fillText(endLabel, ribbonX + ribbonWidth - endWidth, y);
+        }
       }
     }
     y += 24;
