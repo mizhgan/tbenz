@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { stationsApi } from '../api/regions';
-import { statusMeta, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
+import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { formatMinutes } from '../utils/colorScale';
 
 const props = defineProps({
@@ -12,7 +12,15 @@ const LOOKBACK_DAYS = 7;
 
 const loading = ref(true);
 const errorMessage = ref('');
-const segments = ref([]);
+// One row per core fuel type (see CORE_FUEL_TYPES) rather than one combined
+// best-of row - a combined row was strictly less informative (can't tell
+// "92 is out but 95 is fine" from "both are out") and duplicated what the
+// old, separate "История по видам топлива" section (downsampleEvenly'd,
+// only ~40 points regardless of how much real history existed) already
+// tried to show, just more crudely. This replaces that section entirely -
+// same underlying data, one real (not downsampled) view instead of two
+// approximate ones.
+const rows = ref([]);
 const rangeStart = ref(null);
 const rangeEnd = ref(null);
 
@@ -46,7 +54,8 @@ function segmentStyle(seg) {
 // Day-boundary (local midnight) tick marks for orientation along the bar,
 // positioned by percentage - segments themselves follow real poll
 // timestamps, which don't line up with midnight, so these are computed
-// independently rather than derived from segment edges.
+// independently rather than derived from segment edges. Shared by both
+// rows (same underlying history, same range for each).
 const dayTicks = computed(() => {
   if (!rangeStart.value || !rangeEnd.value) return [];
   const totalMs = rangeEnd.value - rangeStart.value;
@@ -69,10 +78,13 @@ async function load() {
     const from = new Date(Date.now() - LOOKBACK_DAYS * 24 * 3600 * 1000).toISOString();
     const history = await stationsApi.history(props.stationId, { from, limit: 5000 });
     if (!history.length) {
-      segments.value = [];
+      rows.value = [];
       return;
     }
-    segments.value = collapseIsolatedBlips(computeStatusSegments(history));
+    rows.value = CORE_FUEL_TYPES.map((fuelType) => ({
+      fuelType,
+      segments: collapseIsolatedBlips(computeStatusSegments(history, [fuelType])),
+    }));
     rangeStart.value = new Date(history[0].polledAt);
     rangeEnd.value = new Date(history[history.length - 1].polledAt);
   } catch (err) {
@@ -90,16 +102,19 @@ watch(() => props.stationId, load);
   <div>
     <p v-if="loading">Загрузка...</p>
     <p v-else-if="errorMessage" class="error-text">{{ errorMessage }}</p>
-    <p v-else-if="!segments.length" class="hint">Пока нет истории по этой станции.</p>
+    <p v-else-if="!rows.length" class="hint">Пока нет истории по этой станции.</p>
     <template v-else>
-      <div class="timeline-bar">
-        <div
-          v-for="(seg, i) in segments"
-          :key="i"
-          class="timeline-segment"
-          :style="segmentStyle(seg)"
-          :title="segmentTitle(seg)"
-        ></div>
+      <div v-for="row in rows" :key="row.fuelType" class="timeline-row">
+        <div class="timeline-row-label">{{ fuelTypeLabel(row.fuelType) }}</div>
+        <div class="timeline-bar">
+          <div
+            v-for="(seg, i) in row.segments"
+            :key="i"
+            class="timeline-segment"
+            :style="segmentStyle(seg)"
+            :title="segmentTitle(seg)"
+          ></div>
+        </div>
       </div>
       <div class="timeline-ticks">
         <span v-for="(tick, i) in dayTicks" :key="i" class="timeline-tick" :style="{ left: `${tick.pct}%` }">
@@ -107,20 +122,34 @@ watch(() => props.stationId, load);
         </span>
       </div>
       <p class="hint small">
-        АИ-92, АИ-95 — реальные статусы за последние 7 дней сплошной лентой, без усреднения по
-        часам; наведите на участок, чтобы увидеть точное время и длительность.
+        Реальные статусы за последние 7 дней сплошной лентой, без усреднения по часам; наведите
+        на участок, чтобы увидеть точное время и длительность.
       </p>
     </template>
   </div>
 </template>
 
 <style scoped>
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.timeline-row-label {
+  flex: 0 0 44px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
 .timeline-bar {
   display: flex;
-  height: 32px;
-  border-radius: 6px;
+  flex: 1;
+  height: 22px;
+  border-radius: 5px;
   overflow: hidden;
-  width: 100%;
 }
 
 .timeline-segment {
@@ -130,7 +159,8 @@ watch(() => props.stationId, load);
 .timeline-ticks {
   position: relative;
   height: 16px;
-  margin-top: 2px;
+  margin-top: 4px;
+  margin-left: 52px;
   font-size: 10px;
   color: #64748b;
 }

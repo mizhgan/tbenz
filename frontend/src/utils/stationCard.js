@@ -7,13 +7,11 @@ import {
   collapseIsolatedBlips,
 } from './fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from './colorScale';
-import { downsampleEvenly } from './mapExport';
 import { roundRect, wrapText, renderCard } from './canvasDraw';
 
 const WIDTH = 1000;
 const PADDING = 56;
 const FOOTER_HEIGHT = 90;
-const MAX_STRIP_SEGMENTS = 40;
 
 function formatDateTime(value) {
   if (!value) return '';
@@ -23,19 +21,6 @@ function formatDateTime(value) {
 function formatHour(value) {
   if (!value) return '';
   return new Date(value).toLocaleString('ru-RU', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-}
-
-// Groups a station's history (array of { polledAt, fuelStatuses }) into one
-// chronological status series per fuel type.
-function buildFuelSeries(history) {
-  const byType = new Map();
-  for (const snap of history || []) {
-    for (const f of snap.fuelStatuses || []) {
-      if (!byType.has(f.fuelType)) byType.set(f.fuelType, []);
-      byType.get(f.fuelType).push({ polledAt: snap.polledAt, status: f.status });
-    }
-  }
-  return byType;
 }
 
 // Runs the full card layout against `ctx`. When `draw` is false, every
@@ -214,40 +199,53 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
   }
 
   // Status ribbon: same idea as the live page's own
-  // StationReliabilityTimeline.vue - real segments (not bucketed/
-  // downsampled) with isolated single-poll blips collapsed away (see
-  // fuelStatus.js's collapseIsolatedBlips), drawn as one proportional-width
-  // bar. Replaces the old "Последние отключения" bar list - this ribbon
-  // already shows exactly when and how long each outage was, at a glance,
-  // without a separate list needed alongside it.
-  const ribbonSegments = collapseIsolatedBlips(computeStatusSegments(history));
-  if (ribbonSegments.length) {
+  // StationReliabilityTimeline.vue - one row per core fuel type, each drawn
+  // from real segments (not bucketed/downsampled - see fuelStatus.js's
+  // computeStatusSegments/collapseIsolatedBlips) as a proportional-width
+  // bar. Replaces two things this card used to draw separately: the old
+  // "Последние отключения" bar list (this ribbon already shows exactly
+  // when/how long each outage was, at a glance) and the old "История по
+  // видам топлива" section (downsampleEvenly'd to ~40 points regardless of
+  // how much real history existed, one crude strip per type) - same
+  // underlying data, one real view instead of two approximate ones.
+  if (history?.length) {
     if (draw) {
       ctx.fillStyle = '#0f172a';
       ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('Лента статусов за 7 дней (АИ-92, АИ-95)', PADDING, y);
+      ctx.fillText('Лента статусов за 7 дней', PADDING, y);
     }
-    y += 20;
+    y += 24;
 
-    const rangeStart = new Date(ribbonSegments[0].start).getTime();
-    const rangeEnd = new Date(ribbonSegments[ribbonSegments.length - 1].end).getTime();
+    const rangeStart = new Date(history[0].polledAt).getTime();
+    const rangeEnd = new Date(history[history.length - 1].polledAt).getTime();
     const totalMs = Math.max(1, rangeEnd - rangeStart);
-    const ribbonHeight = 32;
+    const rowHeight = 24;
+    const rowGap = 8;
+    const rowLabelWidth = 70;
+    const barAreaWidth = contentWidth - rowLabelWidth;
 
-    if (draw) {
-      ctx.save();
-      roundRect(ctx, PADDING, y, contentWidth, ribbonHeight, 6);
-      ctx.clip();
-      let sx = PADDING;
-      for (const seg of ribbonSegments) {
-        const segWidth = ((new Date(seg.end).getTime() - new Date(seg.start).getTime()) / totalMs) * contentWidth;
-        ctx.fillStyle = statusMeta(seg.status).color;
-        ctx.fillRect(sx, y, Math.max(segWidth, 0.5), ribbonHeight);
-        sx += segWidth;
+    for (const fuelType of CORE_FUEL_TYPES) {
+      const rowSegments = collapseIsolatedBlips(computeStatusSegments(history, [fuelType]));
+      if (draw) {
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '600 20px -apple-system, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(fuelTypeLabel(fuelType), PADDING, y + rowHeight - 6);
+
+        ctx.save();
+        roundRect(ctx, PADDING + rowLabelWidth, y, barAreaWidth, rowHeight, 5);
+        ctx.clip();
+        let sx = PADDING + rowLabelWidth;
+        for (const seg of rowSegments) {
+          const segWidth = ((new Date(seg.end).getTime() - new Date(seg.start).getTime()) / totalMs) * barAreaWidth;
+          ctx.fillStyle = statusMeta(seg.status).color;
+          ctx.fillRect(sx, y, Math.max(segWidth, 0.5), rowHeight);
+          sx += segWidth;
+        }
+        ctx.restore();
       }
-      ctx.restore();
+      y += rowHeight + rowGap;
     }
-    y += ribbonHeight + 22;
+    y += 14;
 
     // Day-boundary tick labels for orientation, same approach as the live
     // ribbon - positioned by percentage along the range, not tied to
@@ -258,71 +256,18 @@ function layoutCard(ctx, { station, reliability, forecast, history }, draw) {
       const d = new Date(rangeStart);
       d.setHours(24, 0, 0, 0);
       while (d.getTime() < rangeEnd) {
-        const tx = PADDING + ((d.getTime() - rangeStart) / totalMs) * contentWidth;
+        const tx = PADDING + rowLabelWidth + ((d.getTime() - rangeStart) / totalMs) * barAreaWidth;
         const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
         const labelWidth = ctx.measureText(label).width;
-        const clampedX = Math.min(Math.max(tx - labelWidth / 2, PADDING), PADDING + contentWidth - labelWidth);
+        const clampedX = Math.min(
+          Math.max(tx - labelWidth / 2, PADDING + rowLabelWidth),
+          PADDING + contentWidth - labelWidth
+        );
         ctx.fillText(label, clampedX, y);
         d.setDate(d.getDate() + 1);
       }
     }
     y += 36;
-  }
-
-  // Compact fuel history: one horizontal strip per fuel type, each segment a
-  // status color in chronological order (oldest -> newest, left -> right).
-  // Deliberately not a full axis-and-legend line chart like
-  // StationHistoryChart.vue - this needs to read at a glance in a shared
-  // image, not be analyzed, so it trades precision for compactness.
-  //
-  // Gasoline only, same CORE_FUEL_TYPES default as everywhere else (see
-  // metricsService.js's own doc comment) - unlike the live page's own
-  // history chart (StationHistoryChart.vue), a static shared image has no
-  // clickable legend to bring the other fuel types back, so they're left
-  // off entirely here rather than drawn hidden. Fixed order (92 before 95),
-  // not history's own insertion order, for a consistent shared image
-  // regardless of which type happened to be seen first in this window.
-  const fuelSeries = buildFuelSeries(history);
-  const coreFuelEntries = CORE_FUEL_TYPES.filter((t) => fuelSeries.has(t)).map((t) => [t, fuelSeries.get(t)]);
-  if (coreFuelEntries.length) {
-    if (draw) {
-      ctx.fillStyle = '#0f172a';
-      ctx.font = '600 28px -apple-system, "Segoe UI", Roboto, sans-serif';
-      ctx.fillText('История по видам топлива (АИ-92, АИ-95)', PADDING, y);
-    }
-    y += 20;
-
-    const stripHeight = 22;
-    const labelWidth = 90;
-    const stripAreaWidth = contentWidth - labelWidth;
-    const segGap = 3;
-
-    for (const [fuelType, series] of coreFuelEntries) {
-      y += 36;
-      const sampled = downsampleEvenly(series, MAX_STRIP_SEGMENTS);
-      if (draw) {
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '600 22px -apple-system, "Segoe UI", Roboto, sans-serif';
-        ctx.fillText(fuelTypeLabel(fuelType), PADDING, y + stripHeight - 4);
-
-        const segWidth = (stripAreaWidth - segGap * (sampled.length - 1)) / sampled.length;
-        sampled.forEach((point, i) => {
-          const sx = PADDING + labelWidth + i * (segWidth + segGap);
-          ctx.fillStyle = statusMeta(point.status).color;
-          roundRect(ctx, sx, y, Math.max(segWidth, 1), stripHeight, 3);
-          ctx.fill();
-        });
-      }
-      y += stripHeight;
-    }
-
-    if (draw && history?.length) {
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '20px -apple-system, "Segoe UI", Roboto, sans-serif';
-      const rangeLabel = `${formatDateTime(history[0].polledAt)} — ${formatDateTime(history[history.length - 1].polledAt)}`;
-      ctx.fillText(rangeLabel, PADDING + labelWidth, y + 26);
-    }
-    y += 40;
   }
 
   // Footer: pinned right after the content, not at a fixed canvas bottom.
