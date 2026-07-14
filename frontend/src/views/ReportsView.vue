@@ -11,6 +11,7 @@ import TrendChart from '../components/TrendChart.vue';
 import RecoveryTrendChart from '../components/RecoveryTrendChart.vue';
 import BrandsChart from '../components/BrandsChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
+import StationHighlightCards from '../components/StationHighlightCards.vue';
 import StationsTable from '../components/StationsTable.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 
@@ -470,40 +471,38 @@ onMounted(async () => {
       </p>
     </div>
 
-    <div class="two-col">
-      <div class="card section">
-        <div class="section-header">
-          <h2>{{ stationsSort === 'best' ? 'Лучшие станции' : 'Худшие станции' }}</h2>
-          <div class="sort-toggle">
-            <button
-              class="btn secondary"
-              :class="{ active: stationsSort === 'best' }"
-              @click="stationsSort = 'best'"
-            >
-              Лучшие
-            </button>
-            <button
-              class="btn secondary"
-              :class="{ active: stationsSort === 'worst' }"
-              @click="stationsSort = 'worst'"
-            >
-              Худшие
-            </button>
-          </div>
+    <div class="card section">
+      <div class="section-header">
+        <h2>{{ stationsSort === 'best' ? 'Лучшие станции' : 'Худшие станции' }}</h2>
+        <div class="sort-toggle">
+          <button
+            class="btn secondary"
+            :class="{ active: stationsSort === 'best' }"
+            @click="stationsSort = 'best'"
+          >
+            Лучшие
+          </button>
+          <button
+            class="btn secondary"
+            :class="{ active: stationsSort === 'worst' }"
+            @click="stationsSort = 'worst'"
+          >
+            Худшие
+          </button>
         </div>
-        <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
-        <StationsTable
-          :stations="highlightedStations"
-          :default-sort-dir="stationsSort === 'best' ? 'desc' : 'asc'"
-          :loading-station-id="detailLoadingId"
-          @select="openStationDetail"
-        />
       </div>
-      <div class="card section">
-        <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
-        <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
-        <BrandsChart :brands="brands" />
-      </div>
+      <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
+      <StationHighlightCards
+        :stations="highlightedStations"
+        :loading-station-id="detailLoadingId"
+        @select="openStationDetail"
+      />
+    </div>
+
+    <div class="card section">
+      <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
+      <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
+      <BrandsChart :brands="brands" />
     </div>
 
     <div class="card section">
@@ -600,28 +599,5 @@ onMounted(async () => {
 
 .hint.small {
   font-size: 12px;
-}
-
-.two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-/* Grid items default to min-width: auto, which refuses to shrink narrower
-   than their content's intrinsic size - a station table with several
-   columns wants to be wider than a phone screen, and without this the
-   whole card (not just the table) balloons out to fit it, dragging the
-   entire page into horizontal scroll. min-width: 0 lets the grid item
-   shrink to its track's actual width, so the table's own overflow-x: auto
-   (see StationsTable.vue's .table-wrap) is what scrolls, not the page. */
-.two-col > * {
-  min-width: 0;
-}
-
-@media (max-width: 900px) {
-  .two-col {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
