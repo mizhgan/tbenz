@@ -418,49 +418,84 @@ function computeOutages(history) {
 async function getStationMetricsUncached(regionId, { from, to }) {
   const match = buildMatch(regionId, from, to);
 
-  const countRows = await StationSnapshot.aggregate([
-    { $match: match },
-    ...CORE_FUEL_UNWIND_STAGES,
-    { $group: { _id: '$station', ...STATUS_COUNTS_GROUP } },
-  ]);
-  if (!countRows.length) return [];
-
-  // Outage/recovery-time below is deliberately still based on each
-  // snapshot's one blanket overall `status`, not CORE_FUEL_TYPES - "how long
-  // was the station down" is a per-station timeline question (a discrete
-  // start/end streak), and there's no settled answer yet for what a
-  // per-fuel-type version of the same question would even mean (does 92
-  // going down while 95 stays up count as an outage?) - a separate design
-  // question from availablePct above, left alone for now.
-  const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1 })
+  // One fetch, not two: this used to run a separate $unwind+$group
+  // aggregation for the per-fuel-type counts *and* a full raw find() for
+  // computeOutages's own sequential scan - both reading the exact same
+  // ~region x date-range set of documents (measured live on a 7-day/101-
+  // station region: ~66k docs, ~900ms for the raw find alone, the
+  // aggregation pass comparable). The raw docs already carry everything
+  // both steps need, so this reads them once and does the unwind-equivalent
+  // counting in-process instead of paying for a second Mongo round trip
+  // over the same data - this was the single biggest contributor to the
+  // reports page's slow first load (see this function's own git history).
+  const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1, fuelStatuses: 1 })
     .sort({ station: 1, polledAt: 1 })
     .lean();
+  if (!historyRows.length) return [];
 
-  const historyByStation = new Map();
+  const byStation = new Map();
   for (const row of historyRows) {
     const key = String(row.station);
-    if (!historyByStation.has(key)) historyByStation.set(key, []);
-    historyByStation.get(key).push(row);
+    let bucket = byStation.get(key);
+    if (!bucket) {
+      bucket = {
+        stationId: row.station,
+        // Outage/recovery-time below is deliberately still based on each
+        // snapshot's one blanket overall `status`, not CORE_FUEL_TYPES -
+        // "how long was the station down" is a per-station timeline
+        // question (a discrete start/end streak), and there's no settled
+        // answer yet for what a per-fuel-type version of the same question
+        // would even mean (does 92 going down while 95 stays up count as
+        // an outage?) - a separate design question from availablePct
+        // below, left alone for now.
+        history: [],
+        counts: { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 },
+      };
+      byStation.set(key, bucket);
+    }
+    bucket.history.push(row);
+    // Same "one vote per core-fuel-type reading, zero votes for a snapshot
+    // with no 92/95 reading at all" rule CORE_FUEL_UNWIND_STAGES used to
+    // enforce via $unwind - a diesel/propane-only snapshot contributes
+    // nothing here either.
+    for (const f of row.fuelStatuses || []) {
+      if (!CORE_FUEL_TYPES.includes(f.fuelType)) continue;
+      bucket.counts.total += 1;
+      if (f.status === 'available') bucket.counts.available += 1;
+      else if (f.status === 'maybe_available') bucket.counts.maybeAvailable += 1;
+      else if (f.status === 'not_available') bucket.counts.notAvailable += 1;
+      else if (f.status === 'no_data') bucket.counts.noData += 1;
+    }
   }
 
-  const stationDocs = await Station.find(
-    { _id: { $in: countRows.map((r) => r._id) } },
-    { name: 1, address: 1 }
-  ).lean();
+  // A station with zero core-fuel-type readings across the whole range
+  // (sells only diesel/propane, say) produced zero rows through the old
+  // $unwind and so never appeared in its $group output either - matched
+  // here by dropping any bucket whose counts.total never left 0, rather
+  // than returning it with an all-null availability line that never used
+  // to exist.
+  const stationIds = [];
+  for (const [key, bucket] of byStation) {
+    if (bucket.counts.total === 0) byStation.delete(key);
+    else stationIds.push(bucket.stationId);
+  }
+  if (!stationIds.length) return [];
+
+  const stationDocs = await Station.find({ _id: { $in: stationIds } }, { name: 1, address: 1 }).lean();
   const stationInfoById = new Map(stationDocs.map((s) => [String(s._id), s]));
 
-  return countRows.map((row) => {
-    const key = String(row._id);
+  return [...byStation.values()].map((bucket) => {
+    const key = String(bucket.stationId);
     const info = stationInfoById.get(key);
-    const { outageCount, avgOutageMinutes } = computeOutages(historyByStation.get(key) || []);
+    const { outageCount, avgOutageMinutes } = computeOutages(bucket.history);
     return {
-      stationId: row._id,
+      stationId: bucket.stationId,
       name: info?.name ?? null,
       address: info?.address ?? null,
-      totalPolls: row.total,
+      totalPolls: bucket.counts.total,
       outageCount,
       avgOutageMinutes,
-      ...withKnownPct(row),
+      ...withKnownPct(bucket.counts),
     };
   });
 }

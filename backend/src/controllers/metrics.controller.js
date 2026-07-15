@@ -11,6 +11,22 @@ const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 // reports page's own presets (up to 30 days) with headroom.
 const MAX_RANGE_MS = 92 * 24 * 60 * 60 * 1000;
 
+// Matches metricsService.js's own METRICS_CACHE_TTL_MS and this file's own
+// Cache-Control max-age below - both were already built assuming requests
+// within the same 5-minute window would share a cache entry, but the
+// reports page always sends a fresh millisecond-precision "now" as `to`
+// (and, transitively, a fresh `from`), so every single page load got its
+// own unique cache key and neither cache ever actually hit for real
+// traffic - measured live, a cold getStationMetrics call over a 7-day/
+// 101-station region takes ~2.7s, every time, for every visitor. Rounding
+// both endpoints down to this boundary means every visitor within the same
+// window shares one cached computation instead.
+const RANGE_ROUND_MS = 5 * 60 * 1000;
+
+function roundDown(date) {
+  return new Date(Math.floor(date.getTime() / RANGE_ROUND_MS) * RANGE_ROUND_MS);
+}
+
 function parseRange(query) {
   const to = query.to ? new Date(query.to) : new Date();
   const from = query.from ? new Date(query.from) : new Date(to.getTime() - DEFAULT_RANGE_MS);
@@ -23,7 +39,16 @@ function parseRange(query) {
   if (to.getTime() - from.getTime() > MAX_RANGE_MS) {
     throw new HttpError(400, `Range too wide - max ${MAX_RANGE_MS / (24 * 60 * 60 * 1000)} days`);
   }
-  return { from, to };
+  const roundedFrom = roundDown(from);
+  const roundedTo = roundDown(to);
+  // Only every requested range on this app is at least 24h (the reports
+  // page's shortest preset) - rounding both down by up to RANGE_ROUND_MS
+  // each can't realistically collapse one, but this guards the
+  // theoretical edge case (a very short custom range straddling one
+  // rounding bucket) by falling back to the exact, unrounded values rather
+  // than ever returning an inverted or empty range.
+  if (roundedFrom >= roundedTo) return { from, to };
+  return { from: roundedFrom, to: roundedTo };
 }
 
 function parseBucketHours(query) {
