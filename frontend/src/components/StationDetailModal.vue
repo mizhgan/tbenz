@@ -8,8 +8,6 @@ import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard
 import { canShareFile } from '../utils/mapExport';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 import { useAuthStore } from '../store/auth';
-import StationForecast from './StationForecast.vue';
-import StationHistoryChart from './StationHistoryChart.vue';
 import StationReliabilityTimeline from './StationReliabilityTimeline.vue';
 
 const props = defineProps({
@@ -450,12 +448,6 @@ onBeforeUnmount(() => {
 
         <h4>Лента статусов за 7 дней</h4>
         <StationReliabilityTimeline :station-id="station.stationId" />
-
-        <h4>Прогноз на ближайшие часы</h4>
-        <StationForecast :station-id="station.stationId" />
-
-        <h4>История по видам топлива</h4>
-        <StationHistoryChart :station-id="station.stationId" />
 
         <h4>Карточка для шаринга</h4>
         <p class="hint">
