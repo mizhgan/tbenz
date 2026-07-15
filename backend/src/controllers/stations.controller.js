@@ -4,6 +4,11 @@ const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
 const { getStationForecast } = require('../services/forecastService');
 const { getSource } = require('../services/sourceRegistry');
+const { getSingleStationMetrics } = require('../services/metricsService');
+const { parseRange } = require('../utils/dateRange');
+
+const METRICS_DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
+const METRICS_MAX_RANGE_MS = 92 * 24 * 60 * 60 * 1000;
 
 // Doubles as the admin UI's station-watchlist picker (small `q`+`limit`
 // searches, the original use) and the "Станции" browse page's fuller list
@@ -202,4 +207,32 @@ const getForecast = asyncHandler(async (req, res) => {
   res.json(forecast);
 });
 
-module.exports = { listStations, getStation, updateStationDetails, getStationHistory, getForecast };
+/**
+ * The same availability/outage numbers StationDetailModal.vue's
+ * "Надёжность" tiles show, scoped to just this one station - see
+ * metricsService.getSingleStationMetrics's own doc comment for why this
+ * exists instead of the modal picking its station out of the region-wide
+ * /regions/:id/metrics/stations response (that endpoint computes all ~100
+ * stations' history to answer a question about one of them).
+ */
+const getStationReliability = asyncHandler(async (req, res) => {
+  const station = await Station.findById(req.params.id, { _id: 1 }).lean();
+  if (!station) throw new HttpError(404, 'Station not found');
+
+  const { from, to } = parseRange(req.query, {
+    defaultRangeMs: METRICS_DEFAULT_RANGE_MS,
+    maxRangeMs: METRICS_MAX_RANGE_MS,
+  });
+  const reliability = await getSingleStationMetrics(station._id, { from, to });
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ from, to, reliability });
+});
+
+module.exports = {
+  listStations,
+  getStation,
+  updateStationDetails,
+  getStationHistory,
+  getForecast,
+  getStationReliability,
+};

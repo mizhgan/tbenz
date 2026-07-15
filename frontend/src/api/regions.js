@@ -24,4 +24,5 @@ export const stationsApi = {
   update: (id, payload) => http.put(`/stations/${id}`, payload).then((r) => r.data),
   history: (id, params) => http.get(`/stations/${id}/history`, { params }).then((r) => r.data),
   forecast: (id, params) => http.get(`/stations/${id}/forecast`, { params }).then((r) => r.data),
+  reliability: (id, params) => http.get(`/stations/${id}/reliability`, { params }).then((r) => r.data),
 };

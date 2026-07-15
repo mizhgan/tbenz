@@ -5,6 +5,7 @@ const {
   updateStationDetails,
   getStationHistory,
   getForecast,
+  getStationReliability,
 } = require('../controllers/stations.controller');
 const { requireAuth, requireAdmin } = require('../middleware/auth.middleware');
 
@@ -17,6 +18,7 @@ router.get('/', listStations);
 router.get('/:id', getStation);
 router.get('/:id/history', getStationHistory);
 router.get('/:id/forecast', getForecast);
+router.get('/:id/reliability', getStationReliability);
 
 router.put('/:id', requireAuth, requireAdmin, updateStationDetails);
 

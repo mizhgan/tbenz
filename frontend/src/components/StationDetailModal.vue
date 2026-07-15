@@ -1,7 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import L from 'leaflet';
-import { metricsApi } from '../api/metrics';
 import { stationsApi } from '../api/regions';
 import { statusMeta, fuelTypeLabel, formatRelativeAge, bestFuelStatus } from '../utils/fuelStatus';
 import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale';
@@ -139,11 +138,16 @@ async function loadReliability() {
   try {
     const to = new Date();
     const from = new Date(to.getTime() - 7 * 24 * 3600 * 1000);
-    const { stations } = await metricsApi.stations(props.regionId, {
+    // Scoped to just this one station (see stations.controller.js's
+    // getStationReliability doc comment) - this used to call the
+    // region-wide /metrics/stations endpoint just to pick one entry out of
+    // it, computing all ~100 other stations' history for nothing every
+    // time this modal opened.
+    const { reliability: result } = await stationsApi.reliability(props.station.stationId, {
       from: from.toISOString(),
       to: to.toISOString(),
     });
-    reliability.value = stations.find((s) => String(s.stationId) === String(props.station.stationId)) || null;
+    reliability.value = result;
   } catch (err) {
     reliabilityError.value = 'Не удалось загрузить статистику надёжности';
   } finally {

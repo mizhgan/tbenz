@@ -506,6 +506,59 @@ const getStationMetrics = memoizeAsync(getStationMetricsUncached, {
 });
 
 /**
+ * Same reliability numbers as one row of getStationMetrics, but scoped to a
+ * single station instead of a whole region - StationDetailModal.vue used to
+ * call getStationMetrics for the station's *whole region* (up to ~101
+ * stations' worth of raw history, ~2.7s cold on this region) just to pick
+ * out one entry by id. Filtering by station instead of region hits the
+ * pre-existing {station:1, polledAt:-1} index and only ever touches that
+ * one station's own (much smaller) history.
+ */
+async function getSingleStationMetricsUncached(stationId, { from, to }) {
+  const match = { station: stationId };
+  if (from || to) {
+    match.polledAt = {};
+    if (from) match.polledAt.$gte = from;
+    if (to) match.polledAt.$lte = to;
+  }
+
+  const history = await StationSnapshot.find(match, { polledAt: 1, status: 1, fuelStatuses: 1 })
+    .sort({ polledAt: 1 })
+    .lean();
+  if (!history.length) return null;
+
+  const counts = { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
+  for (const row of history) {
+    for (const f of row.fuelStatuses || []) {
+      if (!CORE_FUEL_TYPES.includes(f.fuelType)) continue;
+      counts.total += 1;
+      if (f.status === 'available') counts.available += 1;
+      else if (f.status === 'maybe_available') counts.maybeAvailable += 1;
+      else if (f.status === 'not_available') counts.notAvailable += 1;
+      else if (f.status === 'no_data') counts.noData += 1;
+    }
+  }
+  // Same "no core-fuel-type reading at all in range" exclusion
+  // getStationMetrics applies - a diesel/propane-only station has nothing
+  // meaningful to show here either.
+  if (counts.total === 0) return null;
+
+  const { outageCount, avgOutageMinutes } = computeOutages(history);
+  return {
+    stationId,
+    totalPolls: counts.total,
+    outageCount,
+    avgOutageMinutes,
+    ...withKnownPct(counts),
+  };
+}
+
+const getSingleStationMetrics = memoizeAsync(getSingleStationMetricsUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (stationId, opts) => rangeKey(stationId, opts),
+});
+
+/**
  * Availability grouped by station "name" (the source's brand/network field,
  * e.g. "Лукойл", "Роснефть") - built on top of per-station metrics rather
  * than a separate query, since the grouping key lives on Station, not the
@@ -666,6 +719,7 @@ module.exports = {
   getStationTrend,
   getAvailabilitySeries,
   getStationMetrics,
+  getSingleStationMetrics,
   getBrandMetrics,
   getHeatmap,
   getRecoveryTrend,
