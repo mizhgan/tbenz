@@ -30,6 +30,21 @@ function buildMatch(regionId, from, to) {
 // couldn't determine a status (not that fuel was confirmed absent) - mixing
 // it into the denominator would unfairly punish stations with sparse
 // transaction history.
+//
+// availablePct here is deliberately *strict* (available alone, not
+// available+maybe_available) - this is the shared building block for both
+// kinds of consumer this file has: stacked/multi-series ones
+// (getAvailabilityTrend/getAvailabilitySeries feed TrendChart.vue and the
+// Telegram digest sparkline, both of which explicitly add availablePct and
+// maybeAvailablePct themselves to get a combined line - redefining
+// availablePct here would silently double-count maybe_available in both),
+// and single-headline-number ones (getStationMetrics/getSingleStationMetrics/
+// getHeatmap, where a station or cell needs exactly one "доступность"
+// figure). Single-number call sites that want maybe_available folded in -
+// matching the live map's own currentSummary/availablePct convention - use
+// combinedAvailablePct below instead, applied as an explicit override right
+// where they build their return value, not baked in here where it would
+// leak into the stacked consumers too.
 function withKnownPct(row) {
   const known = row.total - row.noData;
   const pct = (count) => (known > 0 ? (count / known) * 100 : null);
@@ -39,6 +54,15 @@ function withKnownPct(row) {
     notAvailablePct: pct(row.notAvailable),
     noDataPct: row.total > 0 ? (row.noData / row.total) * 100 : null,
   };
+}
+
+// See withKnownPct's own doc comment above for when to use this instead -
+// "available or possibly available" as one figure, same definition
+// MapView.vue's currentSummary and telegramAlertMapImage's stats strip
+// already use for the live/current badge.
+function combinedAvailablePct(row) {
+  const known = row.total - row.noData;
+  return known > 0 ? ((row.available + row.maybeAvailable) / known) * 100 : null;
 }
 
 // Gasoline only (92/95) - not diesel or gas conversions (propane/methane).
@@ -496,6 +520,12 @@ async function getStationMetricsUncached(regionId, { from, to }) {
       outageCount,
       avgOutageMinutes,
       ...withKnownPct(bucket.counts),
+      // Overrides withKnownPct's own (strict) availablePct - this is a
+      // single per-station headline number (the reports page's ranking/
+      // "Доступность" column), not a stacked chart series, so it should
+      // use the same "available or maybe_available" convention the live
+      // map's badge already does. See withKnownPct's own doc comment.
+      availablePct: combinedAvailablePct(bucket.counts),
     };
   });
 }
@@ -550,6 +580,9 @@ async function getSingleStationMetricsUncached(stationId, { from, to }) {
     outageCount,
     avgOutageMinutes,
     ...withKnownPct(counts),
+    // See getStationMetricsUncached's identical override just above -
+    // same single-headline-number case.
+    availablePct: combinedAvailablePct(counts),
   };
 }
 
@@ -619,6 +652,11 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
     hour: row._id.hour,
     samples: row.total,
     ...withKnownPct(row),
+    // Each cell is one standalone headline number (AvailabilityHeatmap.vue
+    // colors/labels it alone, never stacked against maybeAvailablePct) -
+    // same override as getStationMetricsUncached above, for the same
+    // reason.
+    availablePct: combinedAvailablePct(row),
   }));
 }
 
