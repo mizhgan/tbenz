@@ -65,13 +65,22 @@ function withKnownPct(row) {
 // this constant's git history for the worked examples).
 const MAYBE_AVAILABLE_WEIGHT = 0.7;
 
-// How many "known" readings count as enough evidence to mostly trust a
-// station/cell's own raw rate over the regional average - see
-// scoreAvailability's own doc comment. 60 is roughly a third of a typical
-// station's full-day known-reading count (~180, two core fuel types polled
-// every ~15min) - a full day of data is barely pulled toward the prior,
-// a couple of hours' worth is pulled hard.
-const AVAILABILITY_SHRINKAGE_M = 60;
+// What fraction of an entity's (station's, or heatmap cell's) own "typical"
+// sample size for the queried period counts as enough evidence to mostly
+// trust its raw rate over the regional average - see scoreAvailability's
+// own doc comment. Expressed as a *fraction* of the period's own average
+// known-reading count (via shrinkageM below), not a fixed reading count -
+// an early version hardcoded m=60 (calibrated for a 24h digest's ~180
+// known readings per station), which was fine for daily/reports-page
+// queries but silently gutted the *hourly* Telegram digest: an hour only
+// gives each station ~6 known readings, so weight = 6/(6+60) = 9% - every
+// station's own hourly behavior got drowned out by the regional average,
+// and the "most available" ranking degenerated into everyone showing
+// nearly the same number regardless of how that specific hour actually
+// went (reported live: 5 different stations all reading 29-30%). 1/3
+// reproduces the original m=60 behavior for a 24h period while scaling
+// down correctly for shorter ones.
+const AVAILABILITY_SHRINKAGE_FRACTION = 1 / 3;
 
 // The "one number that matters" version of a status breakdown - every
 // single-headline-number consumer (getStationMetrics/getSingleStationMetrics/
@@ -89,11 +98,13 @@ const AVAILABILITY_SHRINKAGE_M = 60;
 //    rating uses). Without this, a station with a week of no_data followed
 //    by one hour of available scored 100% - all the way to the extreme -
 //    off a single observation. `prior` should be the region's own overall
-//    rate for the same period (see getRegionAvailabilityPrior below);
-//    omitting `prior` returns the plain unshrunk rate, which is what
-//    getRegionAvailabilityPrior itself uses to compute that regional
-//    baseline in the first place (it can't shrink towards itself).
-function scoreAvailability(row, { prior = null, m = AVAILABILITY_SHRINKAGE_M } = {}) {
+//    rate for the same period, and `m` should be shrinkageM's own output
+//    for that same period/entity type (see getRegionAvailabilityPrior and
+//    each call site below) - omitting `prior` returns the plain unshrunk
+//    rate, which is what getRegionAvailabilityPrior itself uses to compute
+//    that regional baseline in the first place (it can't shrink towards
+//    itself).
+function scoreAvailability(row, { prior = null, m = 0 } = {}) {
   const known = row.total - row.noData;
   if (known <= 0) return prior;
   const raw = ((row.available + MAYBE_AVAILABLE_WEIGHT * row.maybeAvailable) / known) * 100;
@@ -102,11 +113,19 @@ function scoreAvailability(row, { prior = null, m = AVAILABILITY_SHRINKAGE_M } =
   return weight * raw + (1 - weight) * prior;
 }
 
+// See AVAILABILITY_SHRINKAGE_FRACTION's own doc comment - `avgKnownPerEntity`
+// is that same period's own average known-reading count per station (or per
+// heatmap cell), so short queries automatically get a proportionally
+// smaller, less-punishing m instead of one calibrated for a whole day.
+function shrinkageM(avgKnownPerEntity) {
+  return AVAILABILITY_SHRINKAGE_FRACTION * Math.max(0, avgKnownPerEntity);
+}
+
 /**
- * The region's own overall availability rate (same scoreAvailability
- * formula, unshrunk) for a period - the shrinkage target every per-station/
- * per-cell score in this file pulls toward when it doesn't have much
- * evidence of its own. Deliberately a *separate*, cheap, single-row
+ * The region's own overall availability rate for a period (same
+ * scoreAvailability formula, unshrunk) plus the shrinkage `m` every
+ * per-station score in this file pulls toward it with - both derived from
+ * one cheap, cached aggregation. Deliberately a *separate*, single-row
  * aggregation (server-side $group, not a raw per-document fetch) rather
  * than reusing getStationMetrics's own per-station breakdown - computing
  * this from getSingleStationMetrics would mean scanning the whole region
@@ -117,13 +136,19 @@ function scoreAvailability(row, { prior = null, m = AVAILABILITY_SHRINKAGE_M } =
  */
 async function getRegionAvailabilityPriorUncached(regionId, { from, to }) {
   const match = buildMatch(regionId, from, to);
-  const [row] = await StationSnapshot.aggregate([
-    { $match: match },
-    ...CORE_FUEL_UNWIND_STAGES,
-    { $group: { _id: null, ...STATUS_COUNTS_GROUP } },
+  const [[row], stationCount] = await Promise.all([
+    StationSnapshot.aggregate([
+      { $match: match },
+      ...CORE_FUEL_UNWIND_STAGES,
+      { $group: { _id: null, ...STATUS_COUNTS_GROUP } },
+    ]),
+    Station.countDocuments({ regions: regionId }),
   ]);
-  if (!row) return null;
-  return scoreAvailability(row);
+  if (!row || !stationCount) return null;
+  return {
+    pct: scoreAvailability(row),
+    m: shrinkageM((row.total - row.noData) / stationCount),
+  };
 }
 
 const getRegionAvailabilityPrior = memoizeAsync(getRegionAvailabilityPriorUncached, {
@@ -589,6 +614,11 @@ async function getStationMetricsUncached(regionId, { from, to }) {
     regionTotals.noData += bucket.counts.noData;
   }
   const regionPrior = scoreAvailability(regionTotals);
+  // Proportional to *this* query's own average known-reading count per
+  // station (see AVAILABILITY_SHRINKAGE_FRACTION's doc comment) - an hourly
+  // digest's ~6 known readings/station gets a correspondingly small m
+  // instead of one calibrated for a 24h period's ~180.
+  const shrinkM = shrinkageM((regionTotals.total - regionTotals.noData) / byStation.size);
 
   return [...byStation.values()].map((bucket) => {
     const key = String(bucket.stationId);
@@ -608,7 +638,7 @@ async function getStationMetricsUncached(regionId, { from, to }) {
       // full scoring treatment: maybe_available at partial weight, shrunk
       // toward the region's own rate when this station doesn't have much
       // evidence of its own. See scoreAvailability's own doc comment.
-      availablePct: scoreAvailability(bucket.counts, { prior: regionPrior }),
+      availablePct: scoreAvailability(bucket.counts, { prior: regionPrior, m: shrinkM }),
     };
   });
 }
@@ -670,8 +700,10 @@ async function getSingleStationMetricsUncached(stationId, regionId, { from, to }
     avgOutageMinutes,
     ...withKnownPct(counts),
     // See getStationMetricsUncached's identical override just above -
-    // same single-headline-number case.
-    availablePct: scoreAvailability(counts, { prior: regionPrior }),
+    // same single-headline-number case. regionPrior is null only if the
+    // region has no data at all for this period, which can't happen here
+    // (this station itself already has `history`, so the region does too).
+    availablePct: scoreAvailability(counts, { prior: regionPrior?.pct ?? null, m: regionPrior?.m ?? 0 }),
   };
 }
 
@@ -749,6 +781,10 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
     regionTotals.noData += row.noData;
   }
   const regionPrior = scoreAvailability(regionTotals);
+  // Proportional to this query's own average known-reading count per cell
+  // (up to 7*24=168 weekday/hour cells) - see AVAILABILITY_SHRINKAGE_FRACTION's
+  // doc comment.
+  const shrinkM = shrinkageM((regionTotals.total - regionTotals.noData) / Math.max(1, rows.length));
 
   return rows.map((row) => ({
     weekday: row._id.weekday,
@@ -760,7 +796,7 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
     // same scoring+shrinkage as getStationMetricsUncached above, for the
     // same reason (a specific weekday+hour cell can easily have a small
     // sample too).
-    availablePct: scoreAvailability(row, { prior: regionPrior }),
+    availablePct: scoreAvailability(row, { prior: regionPrior, m: shrinkM }),
   }));
 }
 
