@@ -72,7 +72,15 @@ async function buildRegionDigestData(region, { from, to, spanMs, sparklineBucket
     }
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
-  const currentPct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
+  // Same MAYBE_AVAILABLE_WEIGHT every other single-number "доступность"
+  // figure in the app uses now (see metricsService.js's own doc comment) -
+  // this one is cross-sectional (many stations at one instant, not one
+  // station's history), so it doesn't need scoreAvailability's shrinkage,
+  // just the same weight for consistency with the reports page/live map.
+  const currentPct =
+    known > 0
+      ? ((counts.available + metricsService.MAYBE_AVAILABLE_WEIGHT * counts.maybe_available) / known) * 100
+      : null;
 
   // One status per station (best-of among 92/95, via the same
   // deriveCoreStatus used for the map marker dot, predictive alerts and the

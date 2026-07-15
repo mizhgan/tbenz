@@ -6,7 +6,14 @@ import { regionsApi } from '../api/regions';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
-import { statusMeta, fuelTypeLabel, sortFuelTypes, bestFuelStatus, CORE_FUEL_TYPES } from '../utils/fuelStatus';
+import {
+  statusMeta,
+  fuelTypeLabel,
+  sortFuelTypes,
+  bestFuelStatus,
+  CORE_FUEL_TYPES,
+  MAYBE_AVAILABLE_WEIGHT,
+} from '../utils/fuelStatus';
 import { formatPct, availabilityColor } from '../utils/colorScale';
 import { renderMapShareCard, MAP_CONTENT_WIDTH } from '../utils/mapShareCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
@@ -147,7 +154,12 @@ const currentSummary = computed(() => {
     }
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
-  const availablePct = known > 0 ? ((counts.available + counts.maybe_available) / known) * 100 : null;
+  // Same MAYBE_AVAILABLE_WEIGHT every other single-number "доступность"
+  // figure in the app now uses (reports ranking, heatmap, Telegram
+  // digest/alerts - see metricsService.js's own doc comment) - this badge
+  // used to give maybe_available full credit, same as available.
+  const availablePct =
+    known > 0 ? ((counts.available + MAYBE_AVAILABLE_WEIGHT * counts.maybe_available) / known) * 100 : null;
 
   // One status per station (bestFuelStatus, same as the marker dots and
   // StationDetailModal's own badge) - sums to exactly stations.value.length,

@@ -19,7 +19,7 @@
  */
 const sharp = require('sharp');
 const browserFetchService = require('./browserFetchService');
-const { deriveCoreStatus } = require('./metricsService');
+const { deriveCoreStatus, MAYBE_AVAILABLE_WEIGHT } = require('./metricsService');
 const logger = require('../utils/logger');
 const {
   FONT,
@@ -123,10 +123,11 @@ function statChip(x, y, dotColor, count, label) {
   `;
 }
 
-// Same "available + maybe_available over available + maybe_available +
-// not_available" definition MapView.vue's currentSummary and
-// telegramDigestImage's card use - no_data is excluded from the
-// denominator (it's "we don't know", not "it's not there"). Each station's
+// Same "available + MAYBE_AVAILABLE_WEIGHT*maybe_available over
+// available + maybe_available + not_available" definition MapView.vue's
+// currentSummary and telegramDigestData's currentPct use - no_data is
+// excluded from the denominator (it's "we don't know", not "it's not
+// there"). Each station's
 // own coreStatus (best-of among gasoline - see metricsService.deriveCoreStatus)
 // is what's counted here, not lastStatus (blanket overall status) - same
 // "gasoline is the real shortage, not diesel/gas" call as everywhere else.
@@ -139,7 +140,10 @@ async function renderStatsStrip(stations) {
     counts[st] = (counts[st] || 0) + 1;
   }
   const known = counts.available + counts.maybe_available + counts.not_available;
-  const pct = known > 0 ? Math.round(((counts.available + counts.maybe_available) / known) * 100) : null;
+  const pct =
+    known > 0
+      ? Math.round(((counts.available + MAYBE_AVAILABLE_WEIGHT * counts.maybe_available) / known) * 100)
+      : null;
   const pctText = pct === null ? '—' : `${pct}%`;
   const color = pctColorFor(pct);
 

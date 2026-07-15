@@ -12,6 +12,15 @@ export const STATUS_ORDER = ['not_available', 'no_data', 'maybe_available', 'ava
 // station history chart, shareable station card.
 export const CORE_FUEL_TYPES = ['92', '95'];
 
+// How much a maybe_available reading counts toward a single "доступность"
+// percentage (MapView.vue's live badge) - mirrors the backend's own
+// MAYBE_AVAILABLE_WEIGHT (metricsService.js), which every other
+// single-number availability figure in the app (reports ranking, heatmap,
+// Telegram digest/alerts) now uses. Kept in sync by hand since the frontend
+// and backend don't share a module - if this value changes, change
+// MAYBE_AVAILABLE_WEIGHT too.
+export const MAYBE_AVAILABLE_WEIGHT = 0.7;
+
 export const STATUS_META = {
   available: { label: 'Есть', color: '#16a34a' },
   maybe_available: { label: 'Возможно есть', color: '#d97706' },

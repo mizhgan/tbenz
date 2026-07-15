@@ -216,14 +216,17 @@ const getForecast = asyncHandler(async (req, res) => {
  * stations' history to answer a question about one of them).
  */
 const getStationReliability = asyncHandler(async (req, res) => {
-  const station = await Station.findById(req.params.id, { _id: 1 }).lean();
+  const station = await Station.findById(req.params.id, { _id: 1, regions: 1 }).lean();
   if (!station) throw new HttpError(404, 'Station not found');
 
   const { from, to } = parseRange(req.query, {
     defaultRangeMs: METRICS_DEFAULT_RANGE_MS,
     maxRangeMs: METRICS_MAX_RANGE_MS,
   });
-  const reliability = await getSingleStationMetrics(station._id, { from, to });
+  // regions[0]: this app only ever has stations in exactly one region today
+  // (see getSingleStationMetrics's own doc comment) - only used to look up
+  // the cheap, cached regional shrinkage prior, not to re-scan anything.
+  const reliability = await getSingleStationMetrics(station._id, station.regions?.[0], { from, to });
   res.set('Cache-Control', 'public, max-age=300');
   res.json({ from, to, reliability });
 });

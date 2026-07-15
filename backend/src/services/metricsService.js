@@ -40,11 +40,10 @@ function buildMatch(regionId, from, to) {
 // availablePct here would silently double-count maybe_available in both),
 // and single-headline-number ones (getStationMetrics/getSingleStationMetrics/
 // getHeatmap, where a station or cell needs exactly one "доступность"
-// figure). Single-number call sites that want maybe_available folded in -
-// matching the live map's own currentSummary/availablePct convention - use
-// combinedAvailablePct below instead, applied as an explicit override right
-// where they build their return value, not baked in here where it would
-// leak into the stacked consumers too.
+// figure). Single-number call sites use scoreAvailability below instead,
+// applied as an explicit override right where they build their return
+// value, not baked in here where it would leak into the stacked consumers
+// too.
 function withKnownPct(row) {
   const known = row.total - row.noData;
   const pct = (count) => (known > 0 ? (count / known) * 100 : null);
@@ -56,14 +55,81 @@ function withKnownPct(row) {
   };
 }
 
-// See withKnownPct's own doc comment above for when to use this instead -
-// "available or possibly available" as one figure, same definition
-// MapView.vue's currentSummary and telegramAlertMapImage's stats strip
-// already use for the live/current badge.
-function combinedAvailablePct(row) {
+// How much a maybe_available reading counts toward availability, everywhere
+// a single "доступность" score is computed (not the raw stacked-chart
+// breakdown, see withKnownPct's own doc comment) - full credit (1.0) let a
+// station that has *never once* been confirmed available (all its "known"
+// time split between maybe_available and not_available) still score
+// respectably; 0 credit is too harsh given maybe_available genuinely means
+// "probably there". 0.7 was chosen after comparing real stations live (see
+// this constant's git history for the worked examples).
+const MAYBE_AVAILABLE_WEIGHT = 0.7;
+
+// How many "known" readings count as enough evidence to mostly trust a
+// station/cell's own raw rate over the regional average - see
+// scoreAvailability's own doc comment. 60 is roughly a third of a typical
+// station's full-day known-reading count (~180, two core fuel types polled
+// every ~15min) - a full day of data is barely pulled toward the prior,
+// a couple of hours' worth is pulled hard.
+const AVAILABILITY_SHRINKAGE_M = 60;
+
+// The "one number that matters" version of a status breakdown - every
+// single-headline-number consumer (getStationMetrics/getSingleStationMetrics/
+// getHeatmap's per-cell score, MapView.vue's live badge, the Telegram
+// digest/alert images) should read as the same thing, unlike the raw
+// stacked-chart breakdown (withKnownPct's own strict fields).
+//
+// Two corrections on top of the naive "(available+maybe)/known" percentage:
+//
+// 1. maybe_available gets partial (MAYBE_AVAILABLE_WEIGHT), not full,
+//    credit - see that constant's own comment.
+// 2. When `prior` is given, the raw rate is shrunk toward it in proportion
+//    to how little evidence (`known` readings) actually backs it up - the
+//    classic small-sample-leaderboard fix (same idea IMDb's own weighted
+//    rating uses). Without this, a station with a week of no_data followed
+//    by one hour of available scored 100% - all the way to the extreme -
+//    off a single observation. `prior` should be the region's own overall
+//    rate for the same period (see getRegionAvailabilityPrior below);
+//    omitting `prior` returns the plain unshrunk rate, which is what
+//    getRegionAvailabilityPrior itself uses to compute that regional
+//    baseline in the first place (it can't shrink towards itself).
+function scoreAvailability(row, { prior = null, m = AVAILABILITY_SHRINKAGE_M } = {}) {
   const known = row.total - row.noData;
-  return known > 0 ? ((row.available + row.maybeAvailable) / known) * 100 : null;
+  if (known <= 0) return prior;
+  const raw = ((row.available + MAYBE_AVAILABLE_WEIGHT * row.maybeAvailable) / known) * 100;
+  if (prior === null) return raw;
+  const weight = known / (known + m);
+  return weight * raw + (1 - weight) * prior;
 }
+
+/**
+ * The region's own overall availability rate (same scoreAvailability
+ * formula, unshrunk) for a period - the shrinkage target every per-station/
+ * per-cell score in this file pulls toward when it doesn't have much
+ * evidence of its own. Deliberately a *separate*, cheap, single-row
+ * aggregation (server-side $group, not a raw per-document fetch) rather
+ * than reusing getStationMetrics's own per-station breakdown - computing
+ * this from getSingleStationMetrics would mean scanning the whole region
+ * just to answer one station's question again, exactly the cost that
+ * function exists to avoid (see its own doc comment). Memoized on the same
+ * rounded region+range key as everything else in this file, so in practice
+ * it's a cache hit for all but the first caller in any 5-minute window.
+ */
+async function getRegionAvailabilityPriorUncached(regionId, { from, to }) {
+  const match = buildMatch(regionId, from, to);
+  const [row] = await StationSnapshot.aggregate([
+    { $match: match },
+    ...CORE_FUEL_UNWIND_STAGES,
+    { $group: { _id: null, ...STATUS_COUNTS_GROUP } },
+  ]);
+  if (!row) return null;
+  return scoreAvailability(row);
+}
+
+const getRegionAvailabilityPrior = memoizeAsync(getRegionAvailabilityPriorUncached, {
+  ttlMs: METRICS_CACHE_TTL_MS,
+  keyFn: (regionId, opts) => rangeKey(regionId, opts),
+});
 
 // Gasoline only (92/95) - not diesel or gas conversions (propane/methane).
 // Deliberate, explicit call: gasoline is where this region's real shortage
@@ -508,6 +574,22 @@ async function getStationMetricsUncached(regionId, { from, to }) {
   const stationDocs = await Station.find({ _id: { $in: stationIds } }, { name: 1, address: 1 }).lean();
   const stationInfoById = new Map(stationDocs.map((s) => [String(s._id), s]));
 
+  // The shrinkage target every station's own score below pulls toward (see
+  // scoreAvailability's doc comment) - computed by pooling the exact same
+  // per-station counts already sitting in `byStation` rather than issuing a
+  // second aggregation for the same data (unlike getSingleStationMetrics/
+  // getHeatmap, which don't already have the whole region's raw rows in
+  // memory and go through the cached getRegionAvailabilityPrior instead).
+  const regionTotals = { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
+  for (const bucket of byStation.values()) {
+    regionTotals.total += bucket.counts.total;
+    regionTotals.available += bucket.counts.available;
+    regionTotals.maybeAvailable += bucket.counts.maybeAvailable;
+    regionTotals.notAvailable += bucket.counts.notAvailable;
+    regionTotals.noData += bucket.counts.noData;
+  }
+  const regionPrior = scoreAvailability(regionTotals);
+
   return [...byStation.values()].map((bucket) => {
     const key = String(bucket.stationId);
     const info = stationInfoById.get(key);
@@ -522,10 +604,11 @@ async function getStationMetricsUncached(regionId, { from, to }) {
       ...withKnownPct(bucket.counts),
       // Overrides withKnownPct's own (strict) availablePct - this is a
       // single per-station headline number (the reports page's ranking/
-      // "Доступность" column), not a stacked chart series, so it should
-      // use the same "available or maybe_available" convention the live
-      // map's badge already does. See withKnownPct's own doc comment.
-      availablePct: combinedAvailablePct(bucket.counts),
+      // "Доступность" column), not a stacked chart series, so it gets the
+      // full scoring treatment: maybe_available at partial weight, shrunk
+      // toward the region's own rate when this station doesn't have much
+      // evidence of its own. See scoreAvailability's own doc comment.
+      availablePct: scoreAvailability(bucket.counts, { prior: regionPrior }),
     };
   });
 }
@@ -543,8 +626,13 @@ const getStationMetrics = memoizeAsync(getStationMetricsUncached, {
  * out one entry by id. Filtering by station instead of region hits the
  * pre-existing {station:1, polledAt:-1} index and only ever touches that
  * one station's own (much smaller) history.
+ *
+ * `regionId` is only used to look up the shrinkage prior (see
+ * scoreAvailability/getRegionAvailabilityPrior) - that's a separate, cheap,
+ * cached aggregation, not a re-scan of the region's raw history, so this
+ * still doesn't pay getStationMetrics's own cost.
  */
-async function getSingleStationMetricsUncached(stationId, { from, to }) {
+async function getSingleStationMetricsUncached(stationId, regionId, { from, to }) {
   const match = { station: stationId };
   if (from || to) {
     match.polledAt = {};
@@ -552,9 +640,10 @@ async function getSingleStationMetricsUncached(stationId, { from, to }) {
     if (to) match.polledAt.$lte = to;
   }
 
-  const history = await StationSnapshot.find(match, { polledAt: 1, status: 1, fuelStatuses: 1 })
-    .sort({ polledAt: 1 })
-    .lean();
+  const [history, regionPrior] = await Promise.all([
+    StationSnapshot.find(match, { polledAt: 1, status: 1, fuelStatuses: 1 }).sort({ polledAt: 1 }).lean(),
+    getRegionAvailabilityPrior(regionId, { from, to }),
+  ]);
   if (!history.length) return null;
 
   const counts = { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
@@ -582,13 +671,13 @@ async function getSingleStationMetricsUncached(stationId, { from, to }) {
     ...withKnownPct(counts),
     // See getStationMetricsUncached's identical override just above -
     // same single-headline-number case.
-    availablePct: combinedAvailablePct(counts),
+    availablePct: scoreAvailability(counts, { prior: regionPrior }),
   };
 }
 
 const getSingleStationMetrics = memoizeAsync(getSingleStationMetricsUncached, {
   ttlMs: METRICS_CACHE_TTL_MS,
-  keyFn: (stationId, opts) => rangeKey(stationId, opts),
+  keyFn: (stationId, regionId, opts) => `${rangeKey(stationId, opts)}:${String(regionId)}`,
 });
 
 /**
@@ -647,6 +736,20 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
     { $sort: { '_id.weekday': 1, '_id.hour': 1 } },
   ]);
 
+  // Same "pool what's already in hand instead of a second query" approach
+  // getStationMetricsUncached uses for its own regionPrior - these rows
+  // already cover the whole region's data for the period, just grouped by
+  // weekday/hour instead of by station.
+  const regionTotals = { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
+  for (const row of rows) {
+    regionTotals.total += row.total;
+    regionTotals.available += row.available;
+    regionTotals.maybeAvailable += row.maybeAvailable;
+    regionTotals.notAvailable += row.notAvailable;
+    regionTotals.noData += row.noData;
+  }
+  const regionPrior = scoreAvailability(regionTotals);
+
   return rows.map((row) => ({
     weekday: row._id.weekday,
     hour: row._id.hour,
@@ -654,9 +757,10 @@ async function getHeatmapUncached(regionId, { from, to, tz = DEFAULT_TZ }) {
     ...withKnownPct(row),
     // Each cell is one standalone headline number (AvailabilityHeatmap.vue
     // colors/labels it alone, never stacked against maybeAvailablePct) -
-    // same override as getStationMetricsUncached above, for the same
-    // reason.
-    availablePct: combinedAvailablePct(row),
+    // same scoring+shrinkage as getStationMetricsUncached above, for the
+    // same reason (a specific weekday+hour cell can easily have a small
+    // sample too).
+    availablePct: scoreAvailability(row, { prior: regionPrior }),
   }));
 }
 
@@ -766,4 +870,13 @@ module.exports = {
   deriveCoreStatus,
   METRICS_CACHE_TTL_MS,
   truncateToBucketStart,
+  // Exported so every other "one number that matters" availability
+  // computation in the app (telegramDigestData.js/telegramAlertMapImage.js's
+  // current-snapshot percentages today) uses the exact same
+  // maybe_available weight instead of a second hardcoded 0.7 that could
+  // drift from this one - see MAYBE_AVAILABLE_WEIGHT's own doc comment for
+  // why 0.7. Those particular call sites are cross-sectional (many
+  // stations at one instant, not one entity's history), so they don't need
+  // scoreAvailability's shrinkage - just the same weight.
+  MAYBE_AVAILABLE_WEIGHT,
 };

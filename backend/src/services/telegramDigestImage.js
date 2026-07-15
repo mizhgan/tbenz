@@ -1,4 +1,5 @@
 const sharp = require('sharp');
+const { MAYBE_AVAILABLE_WEIGHT } = require('./metricsService');
 const {
   FONT,
   COLOR_BG,
@@ -39,11 +40,18 @@ function trendLabel(trend, deltaPct, periodLabel) {
   return { arrow: meta.arrow, deltaText: `${sign}${deltaPct.toFixed(0)}%`, suffixText: `к ${periodLabel}`, color: meta.color };
 }
 
-// Combined "available-like" pct per sparkline bucket (available + maybe),
-// or null for a bucket with no known data at all - drawn as a gap.
+// Combined "available-like" pct per sparkline bucket, or null for a bucket
+// with no known data at all - drawn as a gap. bucket.availablePct/
+// maybeAvailablePct themselves stay strict (getAvailabilitySeries feeds
+// this from the same buckets TrendChart.vue-style stacked series would use,
+// see metricsService.js's own doc comment on why those two fields can't be
+// redefined) - the MAYBE_AVAILABLE_WEIGHT is applied right here instead,
+// same weight every other single-number "доступность" figure in the app
+// uses, so this sparkline reads consistently with the reports page/live map
+// rather than the old implicit full-credit sum.
 function bucketCombinedPct(bucket) {
   if (bucket.availablePct === null && bucket.maybeAvailablePct === null) return null;
-  return (bucket.availablePct ?? 0) + (bucket.maybeAvailablePct ?? 0);
+  return (bucket.availablePct ?? 0) + MAYBE_AVAILABLE_WEIGHT * (bucket.maybeAvailablePct ?? 0);
 }
 
 function sparklineSvg(series, x, y, width, height, color) {
