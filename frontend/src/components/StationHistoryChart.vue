@@ -1,6 +1,15 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
+// Registers Chart.js's 'time' scale adapter (date-fns under the hood) -
+// needed so the x-axis below can be a real time scale instead of a
+// category scale. See this component's own git history for why: a
+// category axis treated every one of up to 500 raw poll timestamps as its
+// own evenly-spaced label, so irregular polling gaps rendered as equal
+// width and the tick text (a full "14.07.2026, 09:15:23" per point) turned
+// into unreadable overlapping mush. A time scale spaces points by real
+// elapsed time and picks its own clean, evenly-spaced ticks.
+import 'chartjs-adapter-date-fns';
 import { stationsApi } from '../api/regions';
 import { STATUS_ORDER, statusMeta, statusOrdinal, fuelTypeLabel, CORE_FUEL_TYPES } from '../utils/fuelStatus';
 import { useFuelColorsStore } from '../store/fuelColors';
@@ -26,12 +35,14 @@ const fuelColors = useFuelColorsStore();
 
 function renderChart(snapshots) {
   const fuelTypes = [...new Set(snapshots.flatMap((s) => s.fuelStatuses.map((f) => f.fuelType)))];
-  const labels = snapshots.map((s) => new Date(s.polledAt).toLocaleString('ru-RU'));
+  // {x, y} points (real timestamps), not a shared labels array - lets the
+  // time scale below place each point at its actual polledAt instead of
+  // spacing every point evenly regardless of real polling gaps.
   const datasets = fuelTypes.map((fuelType) => ({
     label: fuelTypeLabel(fuelType),
     data: snapshots.map((s) => {
       const entry = s.fuelStatuses.find((f) => f.fuelType === fuelType);
-      return entry ? statusOrdinal(entry.status) : null;
+      return { x: new Date(s.polledAt).getTime(), y: entry ? statusOrdinal(entry.status) : null };
     }),
     borderColor: fuelColors.colorFor(fuelType),
     backgroundColor: fuelColors.colorFor(fuelType),
@@ -43,7 +54,7 @@ function renderChart(snapshots) {
   if (chart) chart.destroy();
   chart = new Chart(canvasRef.value, {
     type: 'line',
-    data: { labels, datasets },
+    data: { datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -51,11 +62,17 @@ function renderChart(snapshots) {
       plugins: {
         tooltip: {
           callbacks: {
+            title: (items) => (items.length ? new Date(items[0].parsed.x).toLocaleString('ru-RU') : ''),
             label: (ctx) => `${ctx.dataset.label}: ${statusMeta(STATUS_ORDER[ctx.parsed.y]).label}`,
           },
         },
       },
       scales: {
+        x: {
+          type: 'time',
+          time: { tooltipFormat: 'dd.MM.yyyy HH:mm', displayFormats: { hour: 'dd.MM HH:mm', day: 'dd.MM', week: 'dd.MM', month: 'MM.yyyy' } },
+          ticks: { autoSkip: true, maxRotation: 0 },
+        },
         y: {
           min: 0,
           max: STATUS_ORDER.length - 1,
