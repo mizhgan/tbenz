@@ -2,12 +2,14 @@ import { defineStore } from 'pinia';
 
 const STORAGE_KEY = 'mapBasemapStyle';
 
-// Two tile providers, picked from the header switcher (App.vue) - kept
-// here (not local to MapView.vue) so the choice persists across
+// Tile providers, picked from the header switcher (App.vue) - kept here
+// (not local to MapView.vue) so the choice persists across
 // navigation/reloads and so the header control and the map itself share
-// one source of truth without prop-drilling through the router. See
+// one source of truth without prop-drilling through the router. App.vue's
+// v-for over this object is what actually renders the switcher's buttons -
+// adding an entry here is enough, no template change needed. See
 // MapView.vue's own doc comment on why each style needs different tile
-// handling (one filters OSM's own tiles, the other swaps providers
+// handling (one filters OSM's own tiles, the others swap providers
 // entirely).
 export const BASEMAP_STYLES = {
   desaturated: {
@@ -22,6 +24,13 @@ export const BASEMAP_STYLES = {
   light: {
     label: 'Светлая',
     url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: 'abcd',
+    filtered: false,
+  },
+  dark: {
+    label: 'Тёмная',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: 'abcd',
     filtered: false,
