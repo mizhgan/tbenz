@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
+import { useMapBasemapStore, BASEMAP_STYLES } from '../store/mapBasemap';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
@@ -32,6 +33,7 @@ import {
 window.L = L;
 
 const route = useRoute();
+const basemapStore = useMapBasemapStore();
 
 const STATUS_KEYS = ['available', 'maybe_available', 'not_available', 'no_data'];
 
@@ -306,6 +308,13 @@ let shareCardFile = null;
 const mapContainer = ref(null);
 let map = null;
 let markersLayer = null;
+let tileLayer = null;
+// Drives the CSS filter (see .leaflet-map--filtered in this file's own
+// <style>) - a plain ref rather than reading basemapStore.style directly
+// in the template, since only BASEMAP_STYLES[style].filtered actually
+// matters for the class, not the style key itself (adding a third,
+// already-muted provider later shouldn't require touching this template).
+const basemapFiltered = ref(BASEMAP_STYLES[basemapStore.style].filtered);
 let liveTimer = null;
 let sliderDebounceTimer = null;
 let snapshotRequestId = 0;
@@ -478,6 +487,24 @@ function updateMarkerRadii() {
   if (!map || !markersLayer) return;
   const radius = markerRadiusForZoom(map.getZoom());
   markersLayer.eachLayer((marker) => marker.setRadius(radius));
+}
+
+// Swaps the whole tile provider rather than just re-filtering the existing
+// one - the header switcher (App.vue/store/mapBasemap.js) compares
+// filtering OSM's own tiles against an already-muted provider (Carto's
+// Positron), which needs a different URL/attribution entirely, not just a
+// different CSS filter value on the same tiles.
+function applyBasemapStyle(styleKey) {
+  if (!map) return;
+  const cfg = BASEMAP_STYLES[styleKey] || BASEMAP_STYLES.desaturated;
+  if (tileLayer) tileLayer.remove();
+  tileLayer = L.tileLayer(cfg.url, {
+    attribution: cfg.attribution,
+    subdomains: cfg.subdomains,
+    maxZoom: 19,
+    crossOrigin: true,
+  }).addTo(map);
+  basemapFiltered.value = cfg.filtered;
 }
 
 function renderMarkers() {
@@ -864,11 +891,12 @@ onMounted(async () => {
   // attribution added by the tile layer below stays: it's required by OSM's
   // tile usage policy for their free tiles, unlike the Leaflet prefix.
   map.attributionControl.setPrefix(false);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 19,
-    crossOrigin: true,
-  }).addTo(map);
+  applyBasemapStyle(basemapStore.style);
+  // Live-reacts to the header switcher (App.vue) even while already looking
+  // at the map - registered here (not at module scope) so it can safely
+  // assume `map` already exists; watch() only fires on *future* changes
+  // (no `immediate`), so there's no risk of it running before that.
+  watch(() => basemapStore.style, applyBasemapStyle);
   markersLayer = L.layerGroup().addTo(map);
   map.on('zoomend', updateMarkerRadii);
 
@@ -927,7 +955,7 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
     <div class="map-wrap">
-      <div ref="mapContainer" class="leaflet-map"></div>
+      <div ref="mapContainer" class="leaflet-map" :class="{ 'leaflet-map--filtered': basemapFiltered }"></div>
 
       <!-- Always-visible entry point into the drawer below - region,
            slider, export/share etc. still live behind it, so the map
@@ -1546,8 +1574,11 @@ onBeforeUnmount(() => {
    (not the markers/popups - :deep() targets .leaflet-tile-pane
    specifically, a sibling of the marker/popup panes, not an ancestor of
    them) lets the status colors read as the one saturated thing on the
-   whole map instead of competing with it. */
-.leaflet-map :deep(.leaflet-tile-pane) {
+   whole map instead of competing with it. Gated on --filtered (see
+   basemapFiltered/applyBasemapStyle) rather than applying unconditionally -
+   the header's "light" option (store/mapBasemap.js) swaps to an
+   already-muted provider instead, which doesn't need this on top. */
+.leaflet-map--filtered :deep(.leaflet-tile-pane) {
   filter: saturate(0.4) brightness(1.1);
 }
 

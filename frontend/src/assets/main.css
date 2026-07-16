@@ -121,6 +121,38 @@ body {
   padding: 0;
 }
 
+/* A/B basemap-style experiment (see App.vue/store/mapBasemap.js) - visible
+   in the header for every visitor regardless of auth state or which page
+   they're on, same reasoning as .telegram-link below, even though it only
+   visibly does anything once you're looking at the map itself. */
+.basemap-switch {
+  display: flex;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.basemap-switch__btn {
+  background: none;
+  border: none;
+  color: #cdd6e3;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.basemap-switch__btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.basemap-switch__btn--active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-weight: 600;
+}
+
 /* Official channel link - always visible regardless of auth state (unlike
    the admin nav links), so it lives in .user rather than .nav. Telegram's
    own brand blue rather than the app's usual link-btn blue, so it reads as

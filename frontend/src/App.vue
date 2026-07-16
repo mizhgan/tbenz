@@ -2,11 +2,21 @@
 import { computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './store/auth';
+import { useMapBasemapStore, BASEMAP_STYLES } from './store/mapBasemap';
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 const isAuthenticated = computed(() => auth.isAuthenticated);
+// Global (not map-page-local) and visible to every visitor, logged in or
+// not - a deliberate "let's just try it and see" experiment comparing two
+// approaches to the same problem (markers getting lost in busy street-level
+// tiles - see MapView.vue's own doc comment): filtering OSM's own tiles vs.
+// swapping to an already-muted provider. Lives in the header rather than
+// the map's own filter drawer so it's discoverable regardless of which
+// page you land on first, even though it only visibly does anything once
+// you're looking at the map itself.
+const basemap = useMapBasemapStore();
 // The map page wants to fill the viewport edge-to-edge below the header
 // (see .content--full-bleed) - every other page keeps .content's normal
 // padding.
@@ -43,6 +53,18 @@ function handleLogout() {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="user">
+        <div class="basemap-switch" title="Стиль подложки карты">
+          <button
+            v-for="(cfg, key) in BASEMAP_STYLES"
+            :key="key"
+            type="button"
+            class="basemap-switch__btn"
+            :class="{ 'basemap-switch__btn--active': basemap.style === key }"
+            @click="basemap.setStyle(key)"
+          >
+            {{ cfg.label }}
+          </button>
+        </div>
         <a
           class="telegram-link"
           href="https://t.me/tbenzin"
