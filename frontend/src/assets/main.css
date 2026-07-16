@@ -184,6 +184,19 @@ body {
   .telegram-link__label {
     display: none;
   }
+
+  /* .user's own content (both pill-switches + telegram + username + role
+     badge + logout) doesn't wrap and needs ~514px - confirmed live on a
+     375px viewport that without this, the row simply overflows past the
+     screen edge, pushing the username/role/logout controls off-screen and
+     out of reach entirely (not just cramped - genuinely unusable). The
+     basemap switch is the one to drop: it only visibly does anything on
+     the map page itself (see the shared .pill-switch doc comment above),
+     unlike the site-wide theme switch or the always-relevant admin
+     identity/logout controls next to it. */
+  .pill-switch--basemap {
+    display: none;
+  }
 }
 
 .content {

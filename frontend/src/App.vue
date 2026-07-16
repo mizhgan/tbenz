@@ -69,7 +69,7 @@ function handleLogout() {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="user">
-        <div class="pill-switch" title="Стиль подложки карты">
+        <div class="pill-switch pill-switch--basemap" title="Стиль подложки карты">
           <button
             v-for="(cfg, key) in BASEMAP_STYLES"
             :key="key"
