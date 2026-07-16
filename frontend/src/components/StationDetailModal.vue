@@ -574,6 +574,12 @@ onBeforeUnmount(() => {
   max-width: 720px;
   max-height: calc(100vh - 80px);
   overflow-y: auto;
+  /* .card's own shorthand padding still covers left/right/bottom; top is
+     zeroed here so .modal-header (below) can own that inset itself and sit
+     flush against the actual top of this scroll area - required for its
+     sticky positioning to pin correctly instead of stopping short by the
+     padding amount. */
+  padding-top: 0;
 }
 
 .modal-header {
@@ -581,6 +587,24 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  /* Pinned to the top of .modal-card's own scroll area (not the viewport) -
+     the name/address is the only thing telling you which station a long
+     scroll of fuel-type/source/reliability tables belongs to. Owns the
+     top/bottom padding .modal-card would otherwise supply (see its own
+     padding-top:0 above) since a negative margin trick to reclaim that
+     padding turned out not to interact well with sticky positioning
+     (verified live: the header's static position didn't shift as
+     expected, leaving its top portion clipped above the scroll area). The
+     bottom border only becomes visually meaningful once content has
+     scrolled under the header, since at rest it just sits flush above the
+     status line below. */
+  position: sticky;
+  top: 0;
+  padding: 20px 0 12px;
+  margin-bottom: 12px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  z-index: 1;
 }
 
 .modal-header h2 {
@@ -622,6 +646,14 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   overflow: hidden;
   margin: 12px 0;
+  /* Leaflet's own internal panes go up to z-index:700+ (popup/control
+     layers) - without this, since the container itself never gets an
+     explicit z-index, those values aren't contained to the map and are
+     compared directly against sibling elements outside it (like the sticky
+     .modal-header, z-index:1), painting the map on top of the header
+     despite coming later in DOM order. Verified live: the map visibly
+     overlapped the pinned name/address while scrolling. */
+  isolation: isolate;
 }
 
 .fuel-list {

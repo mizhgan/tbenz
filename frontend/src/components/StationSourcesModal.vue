@@ -489,6 +489,9 @@ onBeforeUnmount(() => {
   max-width: 720px;
   max-height: calc(100vh - 80px);
   overflow-y: auto;
+  /* See StationDetailModal.vue's identical rule - lets .modal-header own
+     the top inset itself so its sticky positioning pins flush. */
+  padding-top: 0;
 }
 
 .modal-header {
@@ -496,6 +499,16 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  /* Pinned to the top of .modal-card's own scroll area - see
+     StationDetailModal.vue's identical rule for the full rationale (name/
+     address stays visible while scrolling past the fuel-type table below). */
+  position: sticky;
+  top: 0;
+  padding: 20px 0 12px;
+  margin-bottom: 12px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+  z-index: 1;
 }
 
 .modal-header h2 {
@@ -537,6 +550,10 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   overflow: hidden;
   margin: 12px 0 4px;
+  /* See StationDetailModal.vue's identical rule - contains Leaflet's own
+     internal pane z-indices (up to 700+) so they don't leak out and paint
+     over the sticky .modal-header sibling. */
+  isolation: isolate;
 }
 
 .distance-note {
