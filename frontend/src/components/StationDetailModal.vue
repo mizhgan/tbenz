@@ -672,9 +672,6 @@ onBeforeUnmount(() => {
 
 .fuel-list-active {
   background: #eff6ff;
-  margin: 0 -8px;
-  padding-left: 8px;
-  padding-right: 8px;
   border-radius: 4px;
 }
 
