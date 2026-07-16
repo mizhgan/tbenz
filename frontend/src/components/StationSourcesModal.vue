@@ -95,6 +95,19 @@ const sourceDistanceMeters = computed(() => {
 // StationDetailModal.vue via composables/useSourceFuelRows.js.
 const fuelRows = useSourceFuelRows(station);
 
+// Same as StationDetailModal.vue's identical computed - which secondary
+// sources have a genuine per-fuel-type timestamp to show per cell (today:
+// only alfabank). The rest (tbank/sberazs/gdebenz) only know "when was
+// this station as a whole last seen" - shown in the table's column header
+// for those instead of leaving their column with no recency info at all.
+const sourceHasPerFuelTiming = computed(() => {
+  const result = {};
+  for (const s of station.value?.sources || []) {
+    result[s.key] = fuelRows.value.some((row) => row.bySource[s.key]?.lastTransactionAt);
+  }
+  return result;
+});
+
 async function load() {
   loading.value = true;
   errorMessage.value = '';
@@ -314,9 +327,27 @@ onBeforeUnmount(() => {
               <thead>
                 <tr>
                   <th>Вид топлива</th>
-                  <th>tbank</th>
-                  <th v-for="s in station.sources" :key="s.key">{{ s.label }}</th>
-                  <th>Итог</th>
+                  <th>
+                    tbank
+                    <div v-if="formatRelativeAge(station.tbankLastSeenAt)" class="hint small header-age">
+                      {{ formatRelativeAge(station.tbankLastSeenAt) }}
+                    </div>
+                  </th>
+                  <th v-for="s in station.sources" :key="s.key">
+                    {{ s.label }}
+                    <div
+                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(s.lastSeenAt)"
+                      class="hint small header-age"
+                    >
+                      {{ formatRelativeAge(s.lastSeenAt) }}
+                    </div>
+                  </th>
+                  <th>
+                    Итог
+                    <div v-if="formatRelativeAge(station.lastSeenAt)" class="hint small header-age">
+                      {{ formatRelativeAge(station.lastSeenAt) }}
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -501,6 +532,11 @@ onBeforeUnmount(() => {
 }
 
 .fuel-cell-age {
+  white-space: nowrap;
+}
+
+.header-age {
+  font-weight: normal;
   white-space: nowrap;
 }
 

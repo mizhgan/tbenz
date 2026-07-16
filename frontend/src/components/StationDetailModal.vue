@@ -59,6 +59,22 @@ const sourceDoc = ref(null);
 // shared with StationSourcesModal.vue via composables/useSourceFuelRows.js.
 const sourceFuelRows = useSourceFuelRows(sourceDoc);
 
+// Which secondary sources actually have a genuine per-fuel-type timestamp
+// to show per cell (today: only alfabank - see useSourceFuelRows.js's
+// resolveSourceFuelReading) - tbank/sberazs/gdebenz only ever know "when
+// was this station as a whole last seen", not "when was this specific
+// fuel type last confirmed", so there's nothing to put in their own table
+// cells. For those, the table's column header carries that one
+// station-level timestamp instead (see the template below) rather than
+// silently having no recency info at all next to their column.
+const sourceHasPerFuelTiming = computed(() => {
+  const result = {};
+  for (const s of sourceDoc.value?.sources || []) {
+    result[s.key] = sourceFuelRows.value.some((row) => row.bySource[s.key]?.lastTransactionAt);
+  }
+  return result;
+});
+
 async function loadSources() {
   sourcesLoading.value = true;
   sourcesError.value = '';
@@ -379,9 +395,27 @@ onBeforeUnmount(() => {
               <thead>
                 <tr>
                   <th>Вид топлива</th>
-                  <th>tbank</th>
-                  <th v-for="s in sourceDoc.sources" :key="s.key">{{ s.label }}</th>
-                  <th>Итог</th>
+                  <th>
+                    tbank
+                    <div v-if="formatRelativeAge(sourceDoc.tbankLastSeenAt)" class="hint small header-age">
+                      {{ formatRelativeAge(sourceDoc.tbankLastSeenAt) }}
+                    </div>
+                  </th>
+                  <th v-for="s in sourceDoc.sources" :key="s.key">
+                    {{ s.label }}
+                    <div
+                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(s.lastSeenAt)"
+                      class="hint small header-age"
+                    >
+                      {{ formatRelativeAge(s.lastSeenAt) }}
+                    </div>
+                  </th>
+                  <th>
+                    Итог
+                    <div v-if="formatRelativeAge(sourceDoc.lastSeenAt)" class="hint small header-age">
+                      {{ formatRelativeAge(sourceDoc.lastSeenAt) }}
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -670,6 +704,11 @@ onBeforeUnmount(() => {
 }
 
 .fuel-cell-age {
+  white-space: nowrap;
+}
+
+.header-age {
+  font-weight: normal;
   white-space: nowrap;
 }
 
