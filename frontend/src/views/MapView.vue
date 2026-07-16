@@ -1539,6 +1539,18 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+/* OSM's standard tile style is heavily saturated on its own (yellow roads,
+   purple industrial zones, green parks) - busy enough at street level that
+   no amount of marker outline/size tuning fully separates a colored status
+   dot from an equally colorful tile underneath it. Muting the base tiles
+   (not the markers/popups - :deep() targets .leaflet-tile-pane
+   specifically, a sibling of the marker/popup panes, not an ancestor of
+   them) lets the status colors read as the one saturated thing on the
+   whole map instead of competing with it. */
+.leaflet-map :deep(.leaflet-tile-pane) {
+  filter: saturate(0.4) brightness(1.1);
+}
+
 .map-wrap {
   position: relative;
   flex: 1;
