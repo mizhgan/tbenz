@@ -48,7 +48,6 @@ async function openStationDetail(stationId) {
       lon: doc.lon,
       status: doc.lastStatus,
       fuelStatuses: doc.lastFuelStatuses || [],
-      lastTransactionAt: doc.lastTransactionAt,
       overallLastTransactionAt: doc.overallLastTransactionAt,
       polledAt: doc.lastSeenAt,
     };
