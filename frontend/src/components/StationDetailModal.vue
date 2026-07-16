@@ -364,13 +364,20 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </form>
-          <button type="button" class="link-btn close-btn" @click="emit('close')">✕</button>
+          <div class="header-side">
+            <span
+              class="status-pill"
+              :style="{
+                color: statusMeta(badgeStatus).color,
+                background: `color-mix(in srgb, ${statusMeta(badgeStatus).color} 15%, white)`,
+              }"
+            >
+              <span class="badge-dot" :style="{ background: statusMeta(badgeStatus).color }"></span>
+              {{ statusMeta(badgeStatus).label }}
+            </span>
+            <button type="button" class="link-btn close-btn" @click="emit('close')">✕</button>
+          </div>
         </div>
-
-        <p>
-          <span class="badge-dot" :style="{ background: statusMeta(badgeStatus).color }"></span>
-          {{ statusMeta(badgeStatus).label }}
-        </p>
 
         <div ref="miniMapContainer" class="mini-map"></div>
 
@@ -620,10 +627,27 @@ onBeforeUnmount(() => {
   vertical-align: middle;
 }
 
+.header-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .close-btn {
   font-size: 18px;
   line-height: 1;
   padding: 4px 8px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .edit-details-form {
