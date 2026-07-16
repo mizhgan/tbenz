@@ -46,6 +46,11 @@ async function storeSecondaryStation(sourceConfig, parsed, region, polledAt) {
         // an unknown path silently on save rather than erroring (GdebenzStation
         // has no fuelStatuses field in its own schema).
         fuelStatuses: parsed.fuelStatuses,
+        // Same "only some sources' parsers produce this" story - only
+        // sberazs's parser sets it (see sberazsParser.js); undefined and
+        // silently dropped for gdebenz/alfabank, neither of which has this
+        // field in their own schema.
+        lastTransactionAt: parsed.lastTransactionAt,
         conflict: parsed.conflict,
         lastRaw: parsed.raw,
       },

@@ -78,19 +78,17 @@ const sourceHasPerFuelTiming = computed(() => {
 // actually meant "when did we last ask"). Verified live: sberazs's own
 // raw.updatedAt was identical across every single station in the region -
 // a whole-feed batch timestamp, not per-station freshness - and gdebenz's
-// payload has no timestamp field of any kind. Only two genuine
-// source-reported times exist anywhere in this data: tbank's own
-// station-level lastTransactionAt, and each secondary source's per-fuel
-// lastTransactionAt (already alfabank's per-cell values above) - so a
-// secondary source's header only ever shows something for a source that
-// actually has per-fuel timing of its own (alfabank, though it doesn't
-// need it either, already shown per cell); sberazs/gdebenz correctly show
-// nothing at all rather than a misleading poll time.
+// payload has no timestamp field of any kind. Genuine source-reported
+// times come in two shapes: per-fuel-type (alfabank's fuelStatuses -
+// already shown per cell above) and station-level (sberazs's own
+// lastPaymentAt, surfaced as s.lastTransactionAt by GET /stations/:id -
+// see SberazsStation.js's doc comment) - this takes the freshest of
+// whichever shape a given source actually has, so gdebenz (neither) still
+// correctly shows nothing.
 const sourceHeaderTransactionAt = computed(() => {
   const result = {};
   for (const s of sourceDoc.value?.sources || []) {
-    const times = (s.fuelStatuses || [])
-      .map((f) => f.lastTransactionAt)
+    const times = [...(s.fuelStatuses || []).map((f) => f.lastTransactionAt), s.lastTransactionAt]
       .filter(Boolean)
       .map((t) => new Date(t).getTime());
     result[s.key] = times.length ? new Date(Math.max(...times)) : null;

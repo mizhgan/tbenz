@@ -39,6 +39,15 @@ const sberazsStationSchema = new Schema(
         status: { type: String },
       },
     ],
+    // Station-level (this source has no per-fuel-type equivalent) - the raw
+    // payload's own `lastPaymentAt`, a genuine last-card-payment timestamp,
+    // not this app's own poll bookkeeping (see lastSeenAt above, and
+    // sberazsParser.js's own doc comment on why `updatedAt` right next to
+    // it in the payload isn't usable for this - identical across every
+    // station in a poll). Same role as Station.lastTransactionAt (tbank) -
+    // GET /stations/:id surfaces this per matched source so the fuel-table
+    // column header can show it instead of lastSeenAt.
+    lastTransactionAt: { type: Date, default: null },
     // sberazs's own crowd-vote layer (positiveVotes/negativeVotes/confidence,
     // see crowdState in the raw payload) - currently unpopulated across the
     // whole dataset, so not folded into `status` yet; kept in lastRaw only,

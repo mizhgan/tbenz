@@ -9,11 +9,18 @@
  *     "stations": [{ "id": "70000001032870486", "branchId": "...",
  *       "name": "АГЗС", "address": "...",
  *       "location": { "lat": 58.33, "lon": 48.41, "address": "..." },
- *       "availabilityStatus": "unknown", "updatedAt": "...",
- *       "fuels": [{ "type": "propane" }],
+ *       "availabilityStatus": "unknown", "lastPaymentAt": "2026-07-16T10:49:56+03:00",
+ *       "updatedAt": "...", "fuels": [{ "type": "propane" }],
  *       "externalIds": { "twoGisBranchId": "70000001032870486" },
  *       "crowdState": { "status": "insufficient_data", "confidence": 0,
  *         "positiveVotes": 0, "negativeVotes": 0 } }, ...] }
+ *
+ * `lastPaymentAt` (station-level, not per-fuel) only appears on stations
+ * that have ever recorded a card payment - ~86/110 in one real region -
+ * and, verified live, genuinely varies per station (unlike `updatedAt`
+ * right next to it, which is identical across every station in a poll - a
+ * whole-feed batch stamp, not per-station freshness). The one real
+ * source-reported transaction time this source has.
  *
  * Structural differences from tbank's payload (stationParser.js) that shape
  * everything downstream:
@@ -116,6 +123,12 @@ function extractStationsArray(payload) {
   return Array.isArray(payload.stations) ? payload.stations : [];
 }
 
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function parseStation(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const lat = Number(raw.location?.lat);
@@ -135,6 +148,15 @@ function parseStation(raw) {
     status: mapStatus(raw.availabilityStatus),
     fuelTypes: parseFuels(raw.fuels),
     fuelStatuses: parseFuelStatuses(raw.fuels),
+    // Station-level (not per-fuel-type, unlike tbank/alfabank) - a genuine
+    // last-card-payment timestamp, present for stations that have ever seen
+    // one and absent otherwise (not every station has it - see this file's
+    // own live-verified coverage: ~86/110 in one real region). Distinct from
+    // `raw.updatedAt` right below it in the payload, which is identical
+    // across every single station in a poll (a whole-feed batch stamp, not
+    // per-station freshness) - confirmed live before wiring this in, so that
+    // mistake wasn't repeated here.
+    lastTransactionAt: parseDate(raw.lastPaymentAt),
     conflict: null,
     raw,
   };

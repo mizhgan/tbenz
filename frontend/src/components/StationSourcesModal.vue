@@ -111,14 +111,15 @@ const sourceHasPerFuelTiming = computed(() => {
 // poll, regardless of whether the underlying data changed) - verified live
 // that sberazs's own raw.updatedAt is identical across every station in
 // the region (a whole-feed batch stamp, not per-station freshness) and
-// gdebenz's payload has no timestamp field at all, so only tbank's own
-// station-level lastTransactionAt and a secondary source's own per-fuel
-// lastTransactionAt values are genuine.
+// gdebenz's payload has no timestamp field at all. Genuine source-reported
+// times come in two shapes: per-fuel-type (alfabank's fuelStatuses -
+// already shown per cell) and station-level (sberazs's own lastPaymentAt,
+// surfaced as s.lastTransactionAt - see SberazsStation.js's doc comment) -
+// this takes the freshest of whichever shape a source actually has.
 const sourceHeaderTransactionAt = computed(() => {
   const result = {};
   for (const s of station.value?.sources || []) {
-    const times = (s.fuelStatuses || [])
-      .map((f) => f.lastTransactionAt)
+    const times = [...(s.fuelStatuses || []).map((f) => f.lastTransactionAt), s.lastTransactionAt]
       .filter(Boolean)
       .map((t) => new Date(t).getTime());
     result[s.key] = times.length ? new Date(Math.max(...times)) : null;

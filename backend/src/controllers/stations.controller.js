@@ -115,6 +115,13 @@ const getStation = asyncHandler(async (req, res) => {
       fuelStatuses: doc.fuelStatuses || [],
       conflict: doc.conflict,
       lastSeenAt: doc.lastSeenAt,
+      // Station-level genuine transaction time (sberazs's own lastPaymentAt
+      // today - see SberazsStation.js's doc comment) - null/undefined for a
+      // source with no such concept (gdebenz has no timestamp at all,
+      // alfabank's is per-fuel already covered by fuelStatuses above).
+      // Distinct from lastSeenAt right above it, which is this app's own
+      // poll bookkeeping, not anything the source itself reported.
+      lastTransactionAt: doc.lastTransactionAt ?? null,
     });
   }
 
