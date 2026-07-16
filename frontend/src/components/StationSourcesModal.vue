@@ -141,6 +141,12 @@ function sourceHeaderSummary(status, transactionAt) {
   return age ? `${statusMeta(status).label} · ${age}` : statusMeta(status).label;
 }
 
+// See StationDetailModal.vue's identical helper for the full rationale
+// (table-header-only shortening, s.label itself untouched elsewhere).
+function shortSourceLabel(label) {
+  return (label || '').replace(/\.ru$/, '');
+}
+
 async function load() {
   loading.value = true;
   errorMessage.value = '';
@@ -330,8 +336,10 @@ onBeforeUnmount(() => {
                 <tr>
                   <th>Вид топлива</th>
                   <th>
-                    <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
-                    tbank
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
+                      tbank
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="station.lastTransactionAt ? formatDate(station.lastTransactionAt) : null"
@@ -340,8 +348,10 @@ onBeforeUnmount(() => {
                     </div>
                   </th>
                   <th v-for="s in station.sources" :key="s.key">
-                    <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
-                    {{ s.label }}
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
+                      {{ shortSourceLabel(s.label) }}
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="
@@ -354,8 +364,10 @@ onBeforeUnmount(() => {
                     </div>
                   </th>
                   <th>
-                    <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
-                    Итог
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
+                      Итог
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="station.overallLastTransactionAt ? formatDate(station.overallLastTransactionAt) : null"
@@ -592,6 +604,25 @@ onBeforeUnmount(() => {
 
 .fuel-table {
   margin-bottom: 8px;
+  /* See StationDetailModal.vue's identical rule for the full rationale -
+     lets the table grow past the card's own width and engage
+     .table-wrap's horizontal scroll instead of squeezing a source name
+     into an ugly multi-line wrap once .header-meta's own nowrap status
+     line claims the space it needs. */
+  width: auto;
+  min-width: 100%;
+}
+
+.fuel-table th {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 8px;
+  white-space: nowrap;
+}
+
+.source-name {
+  display: inline-flex;
+  align-items: center;
 }
 
 .gdebenz-info {

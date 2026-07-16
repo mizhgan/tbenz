@@ -113,6 +113,16 @@ function sourceHeaderSummary(status, transactionAt) {
   return age ? `${statusMeta(status).label} · ${age}` : statusMeta(status).label;
 }
 
+// Table-header-only shortening (s.label itself is left untouched - it's
+// also used for the "Сопоставлено с: ..." text elsewhere, where the full
+// domain reads better) - dropping the redundant ".ru" TLD saves just
+// enough width to keep a source name from wrapping onto its own line
+// above the status/age line below it, matching "tbank"/"Итог"'s own
+// suffix-free style.
+function shortSourceLabel(label) {
+  return (label || '').replace(/\.ru$/, '');
+}
+
 async function loadSources() {
   sourcesLoading.value = true;
   sourcesError.value = '';
@@ -416,8 +426,10 @@ onBeforeUnmount(() => {
                 <tr>
                   <th>Вид топлива</th>
                   <th>
-                    <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
-                    tbank
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
+                      tbank
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="sourceDoc.lastTransactionAt ? formatDateTime(sourceDoc.lastTransactionAt) : null"
@@ -426,8 +438,10 @@ onBeforeUnmount(() => {
                     </div>
                   </th>
                   <th v-for="s in sourceDoc.sources" :key="s.key">
-                    <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
-                    {{ s.label }}
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
+                      {{ shortSourceLabel(s.label) }}
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="
@@ -440,8 +454,10 @@ onBeforeUnmount(() => {
                     </div>
                   </th>
                   <th>
-                    <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
-                    Итог
+                    <span class="source-name">
+                      <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
+                      Итог
+                    </span>
                     <div
                       class="hint small header-meta"
                       :title="sourceDoc.overallLastTransactionAt ? formatDateTime(sourceDoc.overallLastTransactionAt) : null"
@@ -712,6 +728,34 @@ onBeforeUnmount(() => {
 
 .fuel-table {
   margin-bottom: 8px;
+  /* Overrides main.css's plain `table { width: 100% }` - with 6 columns
+     (Вид топлива/tbank/3 sources/Итог) squeezing into exactly the card's
+     width forced the source name and its status/age line to fight for the
+     same horizontal space, and since .header-meta's white-space:nowrap
+     protects the status line from wrapping, the *name* wrapped instead
+     (confirmed live: "alfabank.ru" broke across 2-3 lines). min-width:100%
+     keeps the table filling the card when everything fits comfortably, but
+     lets it grow past that and engage .table-wrap's own horizontal scroll
+     once it doesn't, instead of compressing content into an ugly wrap. */
+  width: auto;
+  min-width: 100%;
+}
+
+.fuel-table th {
+  /* Lighter and a touch smaller than the app's default th (14px/600) -
+     this table crams more columns into less width than any other table in
+     the app, so a slightly quieter header reads as a deliberate, compact
+     style rather than just "too tight to fit". */
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 8px;
+  white-space: nowrap;
+}
+
+.source-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .reliability-grid {
