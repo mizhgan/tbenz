@@ -95,17 +95,46 @@ const sourceDistanceMeters = computed(() => {
 // StationDetailModal.vue via composables/useSourceFuelRows.js.
 const fuelRows = useSourceFuelRows(station);
 
-// Same as StationDetailModal.vue's identical computed - which secondary
-// sources have a genuine per-fuel-type timestamp to show per cell (today:
-// only alfabank). The rest (tbank/sberazs/gdebenz) only know "when was
-// this station as a whole last seen" - shown in the table's column header
-// for those instead of leaving their column with no recency info at all.
+// Same as StationDetailModal.vue's identical computeds - see that file's
+// own doc comments for the full rationale. Which secondary sources have a
+// genuine per-fuel-type timestamp to show per cell (today: only alfabank).
 const sourceHasPerFuelTiming = computed(() => {
   const result = {};
   for (const s of station.value?.sources || []) {
     result[s.key] = fuelRows.value.some((row) => row.bySource[s.key]?.lastTransactionAt);
   }
   return result;
+});
+
+// A column header's timestamp must be the source's *own reported
+// transaction time*, not tbankLastSeenAt/s.lastSeenAt (when we happened to
+// poll, regardless of whether the underlying data changed) - verified live
+// that sberazs's own raw.updatedAt is identical across every station in
+// the region (a whole-feed batch stamp, not per-station freshness) and
+// gdebenz's payload has no timestamp field at all, so only tbank's own
+// station-level lastTransactionAt and a secondary source's own per-fuel
+// lastTransactionAt values are genuine.
+const sourceHeaderTransactionAt = computed(() => {
+  const result = {};
+  for (const s of station.value?.sources || []) {
+    const times = (s.fuelStatuses || [])
+      .map((f) => f.lastTransactionAt)
+      .filter(Boolean)
+      .map((t) => new Date(t).getTime());
+    result[s.key] = times.length ? new Date(Math.max(...times)) : null;
+  }
+  return result;
+});
+
+// "Итог"'s own header: the freshest genuine transaction evidence behind
+// whatever the merge concluded, across tbank and every secondary source.
+const overallLastTransactionAt = computed(() => {
+  const doc = station.value;
+  if (!doc) return null;
+  const candidates = [doc.lastTransactionAt, ...Object.values(sourceHeaderTransactionAt.value)]
+    .filter(Boolean)
+    .map((t) => new Date(t).getTime());
+  return candidates.length ? new Date(Math.max(...candidates)) : null;
 });
 
 async function load() {
@@ -329,23 +358,23 @@ onBeforeUnmount(() => {
                   <th>Вид топлива</th>
                   <th>
                     tbank
-                    <div v-if="formatRelativeAge(station.tbankLastSeenAt)" class="hint small header-age">
-                      {{ formatRelativeAge(station.tbankLastSeenAt) }}
+                    <div v-if="formatRelativeAge(station.lastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(station.lastTransactionAt) }}
                     </div>
                   </th>
                   <th v-for="s in station.sources" :key="s.key">
                     {{ s.label }}
                     <div
-                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(s.lastSeenAt)"
+                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(sourceHeaderTransactionAt[s.key])"
                       class="hint small header-age"
                     >
-                      {{ formatRelativeAge(s.lastSeenAt) }}
+                      {{ formatRelativeAge(sourceHeaderTransactionAt[s.key]) }}
                     </div>
                   </th>
                   <th>
                     Итог
-                    <div v-if="formatRelativeAge(station.lastSeenAt)" class="hint small header-age">
-                      {{ formatRelativeAge(station.lastSeenAt) }}
+                    <div v-if="formatRelativeAge(overallLastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>

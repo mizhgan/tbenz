@@ -61,18 +61,54 @@ const sourceFuelRows = useSourceFuelRows(sourceDoc);
 
 // Which secondary sources actually have a genuine per-fuel-type timestamp
 // to show per cell (today: only alfabank - see useSourceFuelRows.js's
-// resolveSourceFuelReading) - tbank/sberazs/gdebenz only ever know "when
-// was this station as a whole last seen", not "when was this specific
-// fuel type last confirmed", so there's nothing to put in their own table
-// cells. For those, the table's column header carries that one
-// station-level timestamp instead (see the template below) rather than
-// silently having no recency info at all next to their column.
+// resolveSourceFuelReading) - the rest have nothing to put in their own
+// table cells.
 const sourceHasPerFuelTiming = computed(() => {
   const result = {};
   for (const s of sourceDoc.value?.sources || []) {
     result[s.key] = sourceFuelRows.value.some((row) => row.bySource[s.key]?.lastTransactionAt);
   }
   return result;
+});
+
+// A column header's timestamp must be *the source's own reported
+// transaction time*, not tbankLastSeenAt/s.lastSeenAt (when we happened to
+// poll - the same regardless of whether the underlying data changed at
+// all, so printing it there read as "when did the data come from" but
+// actually meant "when did we last ask"). Verified live: sberazs's own
+// raw.updatedAt was identical across every single station in the region -
+// a whole-feed batch timestamp, not per-station freshness - and gdebenz's
+// payload has no timestamp field of any kind. Only two genuine
+// source-reported times exist anywhere in this data: tbank's own
+// station-level lastTransactionAt, and each secondary source's per-fuel
+// lastTransactionAt (already alfabank's per-cell values above) - so a
+// secondary source's header only ever shows something for a source that
+// actually has per-fuel timing of its own (alfabank, though it doesn't
+// need it either, already shown per cell); sberazs/gdebenz correctly show
+// nothing at all rather than a misleading poll time.
+const sourceHeaderTransactionAt = computed(() => {
+  const result = {};
+  for (const s of sourceDoc.value?.sources || []) {
+    const times = (s.fuelStatuses || [])
+      .map((f) => f.lastTransactionAt)
+      .filter(Boolean)
+      .map((t) => new Date(t).getTime());
+    result[s.key] = times.length ? new Date(Math.max(...times)) : null;
+  }
+  return result;
+});
+
+// "Итог"'s own header: the freshest genuine transaction evidence behind
+// whatever the merge concluded, across tbank and every secondary source -
+// not a timestamp of its own (the merge is a status blend computed on the
+// fly, not a fresh data pull).
+const overallLastTransactionAt = computed(() => {
+  const doc = sourceDoc.value;
+  if (!doc) return null;
+  const candidates = [doc.lastTransactionAt, ...Object.values(sourceHeaderTransactionAt.value)]
+    .filter(Boolean)
+    .map((t) => new Date(t).getTime());
+  return candidates.length ? new Date(Math.max(...candidates)) : null;
 });
 
 async function loadSources() {
@@ -397,23 +433,23 @@ onBeforeUnmount(() => {
                   <th>Вид топлива</th>
                   <th>
                     tbank
-                    <div v-if="formatRelativeAge(sourceDoc.tbankLastSeenAt)" class="hint small header-age">
-                      {{ formatRelativeAge(sourceDoc.tbankLastSeenAt) }}
+                    <div v-if="formatRelativeAge(sourceDoc.lastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(sourceDoc.lastTransactionAt) }}
                     </div>
                   </th>
                   <th v-for="s in sourceDoc.sources" :key="s.key">
                     {{ s.label }}
                     <div
-                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(s.lastSeenAt)"
+                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(sourceHeaderTransactionAt[s.key])"
                       class="hint small header-age"
                     >
-                      {{ formatRelativeAge(s.lastSeenAt) }}
+                      {{ formatRelativeAge(sourceHeaderTransactionAt[s.key]) }}
                     </div>
                   </th>
                   <th>
                     Итог
-                    <div v-if="formatRelativeAge(sourceDoc.lastSeenAt)" class="hint small header-age">
-                      {{ formatRelativeAge(sourceDoc.lastSeenAt) }}
+                    <div v-if="formatRelativeAge(overallLastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>
