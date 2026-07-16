@@ -5,6 +5,13 @@
 const STATUS_SCORE = { available: 1, maybe_available: 0, not_available: -1 };
 const CONFIRM_THRESHOLD = 0.5;
 
+// Mirrors secondarySourceIngestService.js's own AVAILABLE_LIKE (kept as a
+// separate copy rather than a shared import - this module is the pure,
+// dependency-free one the other one's doc comments explicitly point to for
+// unit testing, and pulling in a sibling service just for one Set isn't
+// worth losing that).
+const AVAILABLE_LIKE_STATUSES = new Set(['available', 'maybe_available']);
+
 /**
  * N-way weighted-vote resolver: takes any number of `{status, weight}`
  * readings (a source with nothing to say simply isn't in the list - see
@@ -114,6 +121,20 @@ function projectStationStatusOntoFuelType(status, fuelTypes, fuelType) {
  * absent") whenever at least one equipment-list reading has real data to
  * check against.
  */
+// Every fuel type at least one equipment-list source (sberazs today) has
+// actually reported as a physical pump - shared between mergeStationFuelStatuses
+// and mergeStationOverallStatus below, since an uncorroborated claim should
+// be discounted the same way whether it shows up as a specific fuel type's
+// merged status or as the station's own blanket overall status.
+function deriveKnownEquipment(secondaryReadings) {
+  const knownEquipment = new Set();
+  for (const r of secondaryReadings) {
+    if (!r.isEquipmentList) continue;
+    for (const fuelType of r.fuelTypes || []) knownEquipment.add(fuelType);
+  }
+  return knownEquipment;
+}
+
 function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
   const byType = new Map((tbankFuelStatuses || []).map((f) => [f.fuelType, f.status]));
   const allTypes = new Set(byType.keys());
@@ -122,23 +143,47 @@ function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
     for (const f of r.fuelStatuses || []) allTypes.add(f.fuelType);
   }
 
-  const knownEquipment = new Set();
-  for (const r of secondaryReadings) {
-    if (!r.isEquipmentList) continue;
-    for (const fuelType of r.fuelTypes || []) knownEquipment.add(fuelType);
-  }
+  const knownEquipment = deriveKnownEquipment(secondaryReadings);
 
   const merged = [];
   for (const fuelType of allTypes) {
-    const tbankUncorroborated = knownEquipment.size > 0 && !knownEquipment.has(fuelType);
-    const votes = [{ status: tbankUncorroborated ? undefined : byType.get(fuelType), weight: 1 }];
+    // Once at least one equipment-list source (sberazs today) has reported
+    // its actual pumps, a fuel type it doesn't list is positive evidence
+    // the station simply doesn't have that pump - so a *blanket, projected*
+    // claim about that type (tbank's fixed baseline below, or a secondary
+    // source's own station-level status+fuelTypes guess via
+    // projectStationStatusOntoFuelType) is dropped here rather than trusted.
+    // A source's *genuine* per-fuel-type reading (a real fuelStatuses entry
+    // - alfabank always, sberazs once upgraded) is NOT dropped by this: it's
+    // real transaction-derived evidence for that exact type, not a guess
+    // smeared across whatever the source's fuelTypes list happens to say,
+    // and an equipment list that's silent (or stale/incomplete) on that type
+    // isn't grounds to override it - confirmed live on a real multi-fuel
+    // "Движение" station (Кировская область, Зуевский район, деревня Зуи):
+    // sberazs's equipment list only knew about its propane/methane pumps,
+    // but alfabank had genuine, hours-fresh transaction data for 92/ДТ at
+    // the same station - an earlier version of this fix wrongly silenced
+    // that real evidence too. Equipment-list sources themselves are always
+    // exempt - they're what defines knownEquipment in the first place. The
+    // *projected* path is exactly what let a real bug through before any of
+    // this existed: a pure-propane АГЗС ("АГЗС Пропан", Киров, ЖК Слобода
+    // Курочкины) had gdebenz - a crowdsourced source people manually mark
+    // fuel availability on, with no real per-fuel data behind it - wrongly
+    // claiming 92/95/ДТ available (a mis-tag), which sberazs's equipment
+    // list (fuelTypes:["propane"]) should have overridden but didn't:
+    // only tbank's baseline was being dropped this way, so gdebenz's lone
+    // uncorroborated projected claim alone was enough to swing the merged
+    // result to "available".
+    const uncorroborated = knownEquipment.size > 0 && !knownEquipment.has(fuelType);
+    const votes = [{ status: uncorroborated ? undefined : byType.get(fuelType), weight: 1 }];
     for (const r of secondaryReadings) {
       const perFuelEntry = (r.fuelStatuses || []).find((f) => f.fuelType === fuelType);
       if (perFuelEntry) {
         votes.push({ status: perFuelEntry.status, weight: r.fuelStatusWeight ?? r.weight });
-      } else {
-        votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
+        continue;
       }
+      if (!r.isEquipmentList && uncorroborated) continue;
+      votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
     }
     merged.push({ fuelType, status: resolveVotes(votes).status });
   }
@@ -150,11 +195,41 @@ function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
 // its own value from the source, not derived from the per-fuel breakdown) -
 // so the merged overall status is likewise a vote across every source's own
 // overall reading, not re-derived from mergeStationFuelStatuses' output.
+//
+// A non-equipment-list reading's "available"/"maybe_available" overall
+// claim is dropped here under the same condition mergeStationFuelStatuses
+// drops it per-type: at least one equipment-list source has reported real
+// pumps, and none of *this* reading's own claimed fuelTypes are among them
+// - i.e. every fuel type it's claiming available is one the station
+// provably doesn't have, so the claim has nothing genuine behind it. Only
+// applies to a reading with no genuine `fuelStatuses` backing at all
+// (gdebenz-shaped) - one with real per-fuel entries (alfabank; see
+// mergeStationFuelStatuses' own doc comment for why) is exempt here too,
+// same reasoning: an incomplete/stale equipment list isn't grounds to
+// override real transaction evidence. A "not_available" claim is left alone
+// (it doesn't need a specific fuel type to be meaningful - see
+// projectStationStatusOntoFuelType's own doc comment), and equipment-list
+// sources' own overall vote is exempt (already weight-0 for sberazs
+// regardless - see sourceRegistry.js). tbank's blanket overall status isn't
+// checked against knownEquipment here: unlike its per-fuel breakdown
+// (tbankLastFuelStatuses, handled in mergeStationFuelStatuses), this
+// function only ever sees tbank's single summary string, with no per-fuel
+// scope to check corroboration against.
 function mergeStationOverallStatus(tbankStatus, secondaryReadings) {
-  return resolveVotes([
-    { status: tbankStatus, weight: 1 },
-    ...secondaryReadings.map((r) => ({ status: r.status, weight: r.weight })),
-  ]).status;
+  const knownEquipment = deriveKnownEquipment(secondaryReadings);
+  const votes = [{ status: tbankStatus, weight: 1 }];
+  for (const r of secondaryReadings) {
+    const claimsOnlyUncorroboratedTypes =
+      !r.isEquipmentList &&
+      !(r.fuelStatuses || []).length &&
+      knownEquipment.size > 0 &&
+      AVAILABLE_LIKE_STATUSES.has(r.status) &&
+      (r.fuelTypes || []).length > 0 &&
+      !(r.fuelTypes || []).some((t) => knownEquipment.has(t));
+    if (claimsOnlyUncorroboratedTypes) continue;
+    votes.push({ status: r.status, weight: r.weight });
+  }
+  return resolveVotes(votes).status;
 }
 
 /**

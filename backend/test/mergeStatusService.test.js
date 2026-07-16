@@ -10,6 +10,7 @@ const {
   mergeFuelStatuses,
   mergeOverallStatus,
   mergeStationFuelStatuses,
+  mergeStationOverallStatus,
   resolveVotes,
 } = require('../src/services/mergeStatusService');
 
@@ -273,4 +274,98 @@ test('mergeStationFuelStatuses: no equipment-list evidence at all leaves tbank f
   );
   const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
   assert.equal(byType['92'], 'maybe_available'); // unchanged from the pre-existing test above
+});
+
+// Real case found live: "АГЗС Пропан" (Киров, ЖК Слобода Курочкины) is a
+// pure-propane station - tbank has no per-fuel opinion on 92/95/ДТ at all,
+// sberazs's equipment list says only ["propane"], but gdebenz (crowdsourced
+// - people manually mark stations as having fuel) wrongly claimed
+// 92/95/ДТ available. Before this fix, gdebenz's lone uncorroborated vote
+// wasn't dropped (only tbank's baseline was), so it single-handedly swung
+// both the per-fuel breakdown and the station's blanket overall status to
+// "available" for fuel types the station provably doesn't sell.
+test('mergeStationFuelStatuses: an uncorroborated claim from a non-equipment source (gdebenz) is dropped, not just tbank\'s', () => {
+  const merged = mergeStationFuelStatuses(
+    [], // tbank has no per-fuel opinion here at all for this station
+    [
+      { status: 'available', fuelTypes: ['92', '95', 'ДТ'], weight: 1, isEquipmentList: false }, // gdebenz
+      { status: 'no_data', fuelTypes: ['propane'], weight: 0, isEquipmentList: true }, // sberazs
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['92'], 'no_data');
+  assert.equal(byType['95'], 'no_data');
+  assert.equal(byType['ДТ'], 'no_data');
+  // propane itself: in the equipment list, but nothing actually confirms
+  // it's available (sberazs's blanket vote is weight-0 by design) - stays
+  // no_data, same pre-existing rule as the earlier equipment-list tests.
+  assert.equal(byType['propane'], 'no_data');
+});
+
+// Real case found live: "Движение" (Кировская область, Зуевский район,
+// деревня Зуи) is a multi-fuel station - sberazs's equipment list only
+// knows about its propane/methane pumps, but alfabank had genuine,
+// hours-fresh transaction data (real fuelStatuses entries, not a
+// station-level guess) showing ДТ available. An earlier version of this
+// fix wrongly dropped alfabank's vote here too (same treatment as gdebenz's
+// blanket claim), silencing real evidence just because one equipment list
+// happened to be incomplete for this station.
+test('mergeStationFuelStatuses: alfabank\'s genuine per-fuel claim survives even when the equipment list doesn\'t mention that type', () => {
+  const merged = mergeStationFuelStatuses(
+    [],
+    [
+      { status: 'available', fuelTypes: ['ДТ'], weight: 1, fuelStatuses: [{ fuelType: 'ДТ', status: 'available' }] }, // alfabank
+      { status: 'no_data', fuelTypes: ['propane'], weight: 0, isEquipmentList: true }, // sberazs
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['ДТ'], 'available');
+});
+
+test('mergeStationOverallStatus: an uncorroborated available-like claim (gdebenz) is dropped from the blanket status vote too', () => {
+  const status = mergeStationOverallStatus('no_data', [
+    { status: 'available', fuelTypes: ['92', '95', 'ДТ'], weight: 1, isEquipmentList: false },
+    { status: 'no_data', fuelTypes: ['propane'], weight: 0, isEquipmentList: true },
+  ]);
+  assert.equal(status, 'no_data');
+});
+
+test('mergeStationOverallStatus: a not_available claim still counts even when uncorroborated (no fuel type needed to mean "nothing here")', () => {
+  const status = mergeStationOverallStatus('no_data', [
+    { status: 'not_available', fuelTypes: ['92', '95'], weight: 1, isEquipmentList: false },
+    { status: 'no_data', fuelTypes: ['propane'], weight: 0, isEquipmentList: true },
+  ]);
+  assert.equal(status, 'not_available');
+});
+
+test('mergeStationOverallStatus: a claim naming at least one corroborated type still counts in full', () => {
+  const status = mergeStationOverallStatus('no_data', [
+    { status: 'available', fuelTypes: ['propane', '92'], weight: 1, isEquipmentList: false }, // partially corroborated
+    { status: 'no_data', fuelTypes: ['propane'], weight: 0, isEquipmentList: true },
+  ]);
+  assert.equal(status, 'available');
+});
+
+// Same Зуи station as mergeStationFuelStatuses' own test above, at the
+// overall-status level: alfabank's genuine per-fuel evidence (real
+// fuelStatuses entries) must keep voting even though none of its claimed
+// types are in sberazs's (incomplete, propane/methane-only) equipment list.
+test('mergeStationOverallStatus: alfabank\'s genuine claim survives the equipment-list check too', () => {
+  const status = mergeStationOverallStatus('no_data', [
+    {
+      status: 'available',
+      fuelTypes: ['92', 'ДТ'],
+      weight: 1,
+      fuelStatuses: [
+        { fuelType: '92', status: 'available' },
+        { fuelType: 'ДТ', status: 'available' },
+      ],
+    }, // alfabank
+    { status: 'not_available', fuelTypes: [], weight: 1 }, // gdebenz
+    { status: 'no_data', fuelTypes: ['propane', 'methane'], weight: 0, isEquipmentList: true }, // sberazs
+  ]);
+  // alfabank (available) vs gdebenz (not_available), both real votes at
+  // equal weight -> genuine conflict -> maybe_available, same as before
+  // this whole equipment-list check existed for overall status.
+  assert.equal(status, 'maybe_available');
 });
