@@ -311,12 +311,20 @@ const mapContainer = ref(null);
 let map = null;
 let markersLayer = null;
 let tileLayer = null;
-// Drives the CSS filter (see .leaflet-map--filtered in this file's own
-// <style>) - a plain ref rather than reading basemapStore.style directly
-// in the template, since only BASEMAP_STYLES[style].filtered actually
-// matters for the class, not the style key itself (adding a third,
-// already-muted provider later shouldn't require touching this template).
-const basemapFiltered = ref(BASEMAP_STYLES[basemapStore.style].filtered);
+// Drives which CSS filter, if any, applies to the tile pane (see
+// .leaflet-map--filter-light/--filter-dark in this file's own <style>) -
+// 'none' | 'light' | 'dark'. A plain ref rather than reading
+// basemapStore.style/themeStore.theme directly in the template, since only
+// this derived combination actually matters for the class, not the two
+// source values separately. Needed because "Обычная" (OSM's own tiles) is
+// the one style with no dark-native variant to switch to the way
+// "Контрастная" swaps to Carto's dark_all - without this, picking dark
+// site theme while still on "Обычная" left a bright light-mode map sitting
+// in the middle of an otherwise-dark page. The desaturate-only filter used
+// for light theme doesn't work for dark (barely tones down bright tiles,
+// doesn't darken them) - dark mode uses the standard invert-based trick
+// instead (see applyBasemapStyle's own comment on the exact values).
+const basemapFilterMode = ref('none');
 let liveTimer = null;
 let sliderDebounceTimer = null;
 let snapshotRequestId = 0;
@@ -511,7 +519,13 @@ function applyBasemapStyle() {
     maxZoom: 19,
     crossOrigin: true,
   }).addTo(map);
-  basemapFiltered.value = cfg.filtered;
+  // "Контрастная" needs no filter at all regardless of theme (it already
+  // swapped to the matching Carto variant above) - only "Обычная" (OSM's
+  // fixed light-mode tiles) needs one, and which one depends on the site
+  // theme: the light desaturate-only filter doesn't darken anything, so
+  // dark theme needs the separate invert-based approximation instead (see
+  // .leaflet-map--filter-dark's own doc comment).
+  basemapFilterMode.value = cfg.filtered ? themeStore.theme : 'none';
 }
 
 function renderMarkers() {
@@ -963,7 +977,14 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
     <div class="map-wrap">
-      <div ref="mapContainer" class="leaflet-map" :class="{ 'leaflet-map--filtered': basemapFiltered }"></div>
+      <div
+        ref="mapContainer"
+        class="leaflet-map"
+        :class="{
+          'leaflet-map--filter-light': basemapFilterMode === 'light',
+          'leaflet-map--filter-dark': basemapFilterMode === 'dark',
+        }"
+      ></div>
 
       <!-- Always-visible entry point into the drawer below - region,
            slider, export/share etc. still live behind it, so the map
@@ -1582,12 +1603,29 @@ onBeforeUnmount(() => {
    (not the markers/popups - :deep() targets .leaflet-tile-pane
    specifically, a sibling of the marker/popup panes, not an ancestor of
    them) lets the status colors read as the one saturated thing on the
-   whole map instead of competing with it. Gated on --filtered (see
-   basemapFiltered/applyBasemapStyle) rather than applying unconditionally -
-   the header's "light" option (store/mapBasemap.js) swaps to an
+   whole map instead of competing with it. Gated on basemapFilterMode
+   (see applyBasemapStyle) rather than applying unconditionally - the
+   header's "Контрастная" option (store/mapBasemap.js) swaps to an
    already-muted provider instead, which doesn't need this on top. */
-.leaflet-map--filtered :deep(.leaflet-tile-pane) {
+.leaflet-map--filter-light :deep(.leaflet-tile-pane) {
   filter: saturate(0.4) brightness(1.1);
+}
+
+/* Dark-theme counterpart for "Обычная" - unlike "Контрастная" (which just
+   swaps to Carto's own dark_all tiles), OSM has no dark-native variant to
+   switch to, so picking dark site theme while still on this style used to
+   leave a bright light-mode map sitting in the middle of an otherwise-dark
+   page. The light filter above doesn't help here - desaturating a bright
+   tile still leaves it bright. Uses the standard CSS "invert the whole
+   tile" trick instead (invert flips light<->dark; hue-rotate(180deg)
+   un-does the resulting hue shift the invert causes, e.g. keeps roads
+   looking roughly road-colored instead of inverted-cyan; saturate/contrast
+   tone down the result so it reads as a muted dark map, not a harsh
+   photo-negative). Imperfect - a real dark-styled tileset (like Carto's
+   dark_all) always looks better - but a reasonable approximation for the
+   one style that doesn't have one. */
+.leaflet-map--filter-dark :deep(.leaflet-tile-pane) {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
 }
 
 .map-wrap {
