@@ -456,14 +456,44 @@ function sourcesSummaryHtml(s) {
   `;
 }
 
+// Fixed screen-pixel radius (unchanged below zoom 14) means markers stay
+// the same visual size while the base tiles reveal more and more colored
+// detail (building fills, industrial-zone polygons, parking icons) as you
+// zoom in - confirmed live: at street level a plain 7px dot gets lost
+// against OSM's own busy styling. Growing the radius past zoom 14 keeps
+// markers' visual weight roughly in step with that increasing density,
+// capped so they don't turn into oversized blobs at max zoom.
+const MARKER_BASE_RADIUS = 7;
+const MARKER_GROW_FROM_ZOOM = 14;
+const MARKER_MAX_RADIUS = 10;
+function markerRadiusForZoom(zoom) {
+  if (zoom <= MARKER_GROW_FROM_ZOOM) return MARKER_BASE_RADIUS;
+  return Math.min(MARKER_MAX_RADIUS, MARKER_BASE_RADIUS + (zoom - MARKER_GROW_FROM_ZOOM));
+}
+
+// Re-sizes markers in place on zoom change rather than calling
+// renderMarkers() again - that clears and rebuilds the whole layer, which
+// would close any popup the user has open mid-zoom for no reason.
+function updateMarkerRadii() {
+  if (!map || !markersLayer) return;
+  const radius = markerRadiusForZoom(map.getZoom());
+  markersLayer.eachLayer((marker) => marker.setRadius(radius));
+}
+
 function renderMarkers() {
   if (!map) return;
   markersLayer.clearLayers();
+  const radius = markerRadiusForZoom(map.getZoom());
   for (const s of filteredStations.value) {
     const meta = statusMeta(effectiveStatus(s));
     const marker = L.circleMarker([s.lat, s.lon], {
-      radius: 7,
-      color: meta.color,
+      radius,
+      // White outline independent of the status color (previously `color`
+      // matched `fillColor`, so the "stroke" was invisible as a stroke) -
+      // guarantees separation from whatever's directly underneath, since a
+      // same-color-as-fill edge blends into equally-colored map features
+      // (a red marker over a red/orange road, a green one over a park).
+      color: '#fff',
       fillColor: meta.color,
       fillOpacity: 0.85,
       weight: 2,
@@ -840,6 +870,7 @@ onMounted(async () => {
     crossOrigin: true,
   }).addTo(map);
   markersLayer = L.layerGroup().addTo(map);
+  map.on('zoomend', updateMarkerRadii);
 
   // The map's container is stretched by flex layout to match the sidebar's
   // height (see .map-body), which grows when a station is selected (more
