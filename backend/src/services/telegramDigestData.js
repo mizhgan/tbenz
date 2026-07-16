@@ -17,10 +17,19 @@ function weightedAvgAvailablePct(stationMetrics) {
 // The most reliable stations over the period (highest availability share),
 // with their address - a "here's where fuel is reliably there" highlight,
 // rather than dwelling on what's currently broken.
+//
+// Selects/orders by rankScore (shrunk toward the region's own rate,
+// protecting against a station with barely any evidence this period
+// winning purely on luck), but the printed number is availablePct (plain,
+// unshrunk) - reported live: an hourly digest showed three different
+// stations all reading 84% despite each having a literal 100%
+// (zero-interruption) hour, because the *shrunk* score was being printed
+// as if it were the station's own observed rate. See metricsService.js's
+// getStationMetricsUncached for the full rationale.
 function topAvailableStations(periodStations) {
   return periodStations
-    .filter((s) => s.availablePct !== null)
-    .sort((a, b) => b.availablePct - a.availablePct)
+    .filter((s) => s.rankScore !== null)
+    .sort((a, b) => b.rankScore - a.rankScore)
     .slice(0, TOP_AVAILABLE_LIMIT)
     .map((s) => ({ name: s.name, address: s.address, availablePct: s.availablePct }));
 }

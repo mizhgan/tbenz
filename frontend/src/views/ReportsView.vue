@@ -165,11 +165,19 @@ const summary = computed(() => {
   };
 });
 
+// Sorted/selected by rankScore (shrunk toward the region's own rate, so a
+// station with barely any evidence this period can't win "лучшая"/"худшая"
+// purely on a lucky or unlucky small sample), but every printed
+// availablePct stays the plain, unshrunk rate - see metricsService.js's
+// getStationMetricsUncached for the full rationale (reported live: a
+// station with zero interruptions the whole period was printing less than
+// 100%, which reads as a bug, not a nuance, since a reader has no way to
+// know the number they're looking at was silently adjusted).
 const highlightedStations = computed(() => {
   const dir = stationsSort.value === 'best' ? -1 : 1;
   return [...stations.value]
-    .filter((s) => s.availablePct !== null)
-    .sort((a, b) => dir * (a.availablePct - b.availablePct))
+    .filter((s) => s.rankScore !== null)
+    .sort((a, b) => dir * (a.rankScore - b.rankScore))
     .slice(0, 5);
 });
 
