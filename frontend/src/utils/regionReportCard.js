@@ -67,6 +67,59 @@ function fillGaps(values) {
   return out.map((v) => v ?? 0);
 }
 
+// Sparse x-axis tick labels shared by drawStackedTrend/drawRecoveryBars -
+// one label per bucket's own bucketStart, at that *same* bucket's own x
+// position (via the caller's own xAt, not a separately-computed
+// proportional timeline). Both charts below space their buckets evenly by
+// array index, not by real elapsed time (a bucket with zero data just
+// doesn't exist in the array at all, rather than leaving a stretched-out
+// gap) - same convention TrendChart.vue/RecoveryTrendChart.vue already use
+// live on the page, so labels positioned any other way would drift out of
+// alignment with the bars/points they're meant to describe.
+//
+// Picks hour-of-day labels ("14:00") for a span under ~36h, day labels
+// ("14.07") otherwise - mirrors StationHistoryChart.vue's own Chart.js
+// time-scale unit choice, just hand-rolled since this is plain Canvas 2D.
+function bucketTickLabels(buckets) {
+  if (buckets.length < 2) return [];
+  const first = new Date(buckets[0].bucketStart).getTime();
+  const last = new Date(buckets[buckets.length - 1].bucketStart).getTime();
+  const useHours = last - first <= 36 * 3600 * 1000;
+  return buckets.map((b) => {
+    const d = new Date(b.bucketStart);
+    return useHours
+      ? d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  });
+}
+
+// How many buckets to skip between labels so the widest one in `labels`
+// never collides with its neighbor, given each bucket only has
+// `perBucketWidth` px of its own (bar+gap, or point spacing). Exposed
+// separately from the actual drawing (below) so drawRecoveryBars can fold
+// its value labels' own width into the same step its time-axis labels use -
+// one consistent, evenly-spaced subset of bars gets *both* callouts,
+// instead of two independently-skipped sets that would look like a
+// scattered mismatch.
+function computeLabelStep(ctx, labels, perBucketWidth) {
+  if (!labels.length) return 1;
+  const maxLabelWidth = Math.max(...labels.map((l) => ctx.measureText(l).width));
+  return Math.max(1, Math.ceil((maxLabelWidth + 14) / perBucketWidth));
+}
+
+// `xAt(i)` should return bucket i's own x-CENTER (matching how the caller
+// already positions its bars/points).
+function drawBucketAxisLabels(ctx, buckets, labels, xAt, step, y, chartX, chartWidth, font, color = '#94a3b8') {
+  if (buckets.length < 2) return;
+  ctx.font = font;
+  ctx.fillStyle = color;
+  for (let i = 0; i < buckets.length; i += step) {
+    const labelWidth = ctx.measureText(labels[i]).width;
+    const clampedX = Math.min(Math.max(xAt(i) - labelWidth / 2, chartX), chartX + chartWidth - labelWidth);
+    ctx.fillText(labels[i], clampedX, y);
+  }
+}
+
 // Stacked-area mini chart (available/maybe/not_available bands, bottom to
 // top) plus a dashed forecast continuation - the compact equivalent of
 // TrendChart.vue's full chart, not a single arbitrary-colored trend line:
@@ -81,8 +134,8 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
   const histLen = trendBuckets.length;
   const forecastLen = forecastBuckets.length;
   const totalPoints = histLen + forecastLen;
-  const step = width / Math.max(1, totalPoints - 1);
-  const xAt = (i) => x + i * step;
+  const xStep = width / Math.max(1, totalPoints - 1);
+  const xAt = (i) => x + i * xStep;
 
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
@@ -143,6 +196,16 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
     ctx.stroke();
     ctx.restore();
   }
+
+  // Time-axis labels below the chart, positioned at each historical
+  // bucket's own xAt(i) - see drawBucketAxisLabels's own doc comment for
+  // why (not the forecast portion: it's already visually set apart by the
+  // dashing/color, and doesn't need its own ticks to read clearly).
+  const axisFont = '14px -apple-system, "Segoe UI", Roboto, sans-serif';
+  ctx.font = axisFont;
+  const tickLabels = bucketTickLabels(trendBuckets);
+  const tickStep = computeLabelStep(ctx, tickLabels, xStep);
+  drawBucketAxisLabels(ctx, trendBuckets, tickLabels, xAt, tickStep, y + height + 20, x, width, axisFont);
 }
 
 // Simple bar chart for average recovery time per bucket - same underlying
@@ -151,12 +214,35 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
 // per-bar date labels (unlike the on-page version) - with up to ~19 bars
 // for a 24h/hourly selection there isn't room to keep them legible at this
 // card's fixed width, and the header/footer already carry the period's own
-// date range.
+// date range. Both per-bar value labels ("5.2 ч") and a time-axis row below
+// now share one auto-skipped subset of bars (see computeLabelStep's own
+// doc comment) rather than trying to caption every single bar - with up to
+// ~30 for a 30-day/daily selection there still isn't room for all of them
+// individually, but a readable handful beats none.
 function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
   if (!draw || !buckets.length) return;
-  const maxMinutes = Math.max(1, ...buckets.map((b) => b.avgRecoveryMinutes));
   const gap = Math.min(8, width / buckets.length / 4);
   const barWidth = (width - gap * (buckets.length - 1)) / buckets.length;
+  const perBucketWidth = barWidth + gap;
+  const xAt = (i) => x + i * perBucketWidth + barWidth / 2;
+
+  // Headroom above the bars for their own value labels - the tallest bar
+  // stops short of the very top of `height` instead of reaching it, so its
+  // label has somewhere to sit without colliding with whatever's drawn
+  // above this chart.
+  const valueLabelSpace = 22;
+  const barsAreaHeight = height - valueLabelSpace;
+  const maxMinutes = Math.max(1, ...buckets.map((b) => b.avgRecoveryMinutes));
+
+  const valueFont = '600 14px -apple-system, "Segoe UI", Roboto, sans-serif';
+  const axisFont = '14px -apple-system, "Segoe UI", Roboto, sans-serif';
+  const valueLabels = buckets.map((b) => formatMinutes(b.avgRecoveryMinutes));
+  const tickLabels = bucketTickLabels(buckets);
+  ctx.font = valueFont;
+  const valueStep = computeLabelStep(ctx, valueLabels, perBucketWidth);
+  ctx.font = axisFont;
+  const tickStep = computeLabelStep(ctx, tickLabels, perBucketWidth);
+  const step = Math.max(valueStep, tickStep);
 
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
@@ -165,14 +251,24 @@ function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
   ctx.lineTo(x + width, y + height);
   ctx.stroke();
 
+  ctx.textAlign = 'center';
   buckets.forEach((b, i) => {
-    const barHeight = Math.max(3, (b.avgRecoveryMinutes / maxMinutes) * height);
-    const bx = x + i * (barWidth + gap);
+    const barHeight = Math.max(3, (b.avgRecoveryMinutes / maxMinutes) * barsAreaHeight);
+    const bx = x + i * perBucketWidth;
     const by = y + height - barHeight;
     ctx.fillStyle = 'rgba(37, 99, 235, 0.75)';
     roundRect(ctx, bx, by, Math.max(1, barWidth), barHeight, Math.min(3, barWidth / 2));
     ctx.fill();
+
+    if (i % step === 0) {
+      ctx.fillStyle = '#1e3a8a';
+      ctx.font = valueFont;
+      ctx.fillText(valueLabels[i], bx + barWidth / 2, by - 6);
+    }
   });
+  ctx.textAlign = 'left';
+
+  drawBucketAxisLabels(ctx, buckets, tickLabels, xAt, step, y + height + 20, x, width, axisFont);
 }
 
 // Runs the full layout against `ctx`; when `draw` is false, drawing calls
@@ -298,7 +394,10 @@ function layoutCard(
     const delta = computeTrendDelta(trendBuckets);
     const sparkColor = delta === null ? '#6b7280' : delta > 1 ? '#16a34a' : delta < -1 ? '#dc2626' : '#6b7280';
     drawStackedTrend(ctx, trendBuckets, forecastBuckets || [], PADDING, y, contentWidth, sparkHeight, draw);
-    y += sparkHeight + 28;
+    // +24 over the old spacing to fit the new time-axis label row drawn
+    // just below the chart (see drawStackedTrend's own call to
+    // drawBucketAxisLabels) before the delta text below it.
+    y += sparkHeight + 52;
 
     if (draw && delta !== null) {
       const sign = delta > 0 ? '+' : '';
@@ -340,7 +439,8 @@ function layoutCard(
   if (recoveryTrendBuckets.length) {
     const barsHeight = 90;
     drawRecoveryBars(ctx, recoveryTrendBuckets, PADDING, y, contentWidth, barsHeight, draw);
-    y += barsHeight + 28;
+    // Same +24 as drawStackedTrend above, for its own new time-axis label row.
+    y += barsHeight + 52;
 
     if (draw) {
       const worst = recoveryTrendBuckets.reduce((a, b) => (b.avgRecoveryMinutes > a.avgRecoveryMinutes ? b : a));
