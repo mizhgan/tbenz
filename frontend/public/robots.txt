@@ -1,0 +1,15 @@
+User-agent: *
+Allow: /map
+Allow: /reports
+Disallow: /login
+Disallow: /settings
+Disallow: /regions
+Disallow: /users
+Disallow: /proxies
+Disallow: /telegram
+Disallow: /stations
+Disallow: /station-matching
+Disallow: /raw-data
+Disallow: /api/
+
+Sitemap: https://tbenz.in/sitemap.xml

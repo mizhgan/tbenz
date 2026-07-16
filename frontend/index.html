@@ -3,7 +3,44 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Топливо — Мониторинг</title>
+    <title>Топливо-Мониторинг — наличие бензина и дизеля на АЗС Кирова</title>
+    <meta
+      name="description"
+      content="Онлайн-карта заправок Кирова, Кирово-Чепецка и Слободского: актуальное наличие АИ-92, АИ-95, дизеля и газа на АЗС в реальном времени, статистика надёжности станций."
+    />
+    <meta name="keywords" content="АЗС Киров, наличие топлива, бензин Киров, дизель Киров, заправки Кирова, топливо онлайн" />
+    <!-- Static baseline for whoever/whatever hits index.html directly
+         without executing router.afterEach's per-route overrides (see
+         router/index.js's updateSeoTags) - crawlers that skip JS entirely,
+         social-card unfurlers, etc. Real visitors get the more specific
+         per-route title/description within a tick of navigation. -->
+    <link rel="canonical" href="https://tbenz.in/map" />
+    <meta name="robots" content="index, follow" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Топливо-Мониторинг" />
+    <meta property="og:title" content="Топливо-Мониторинг — наличие бензина и дизеля на АЗС Кирова" />
+    <meta
+      property="og:description"
+      content="Онлайн-карта заправок Кирова, Кирово-Чепецка и Слободского: актуальное наличие АИ-92, АИ-95, дизеля и газа на АЗС в реальном времени."
+    />
+    <meta property="og:url" content="https://tbenz.in/map" />
+    <meta property="og:locale" content="ru_RU" />
+    <!-- apple-touch-icon.png doubles as the share-card image - it's a
+         square app icon rather than a proper 1200x630 social banner, which
+         is why the card type below is "summary" (small icon + text) and
+         not "summary_large_image" (would stretch/crop a square icon
+         awkwardly). Worth swapping for a real banner image later. -->
+    <meta property="og:image" content="https://tbenz.in/apple-touch-icon.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Топливо-Мониторинг — наличие бензина и дизеля на АЗС Кирова" />
+    <meta
+      name="twitter:description"
+      content="Онлайн-карта заправок Кирова, Кирово-Чепецка и Слободского: актуальное наличие топлива на АЗС в реальном времени."
+    />
+    <meta name="twitter:image" content="https://tbenz.in/apple-touch-icon.png" />
+
+    <meta name="theme-color" content="#14213d" />
     <!-- SVG favicon renders crisply at any size in every current browser;
          the PNGs are fallbacks for contexts that don't support SVG icons
          (older Safari, some bookmark/home-screen surfaces). -->
@@ -13,6 +50,10 @@
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      Для работы карты и списка АЗС в браузере должен быть включён JavaScript.
+      Топливо-Мониторинг — актуальное наличие бензина, дизеля и газа на заправках Кирова, Кирово-Чепецка и Слободского.
+    </noscript>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
