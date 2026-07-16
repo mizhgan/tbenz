@@ -71,20 +71,22 @@ const sourceHasPerFuelTiming = computed(() => {
   return result;
 });
 
-// A column header's timestamp must be *the source's own reported
-// transaction time*, not tbankLastSeenAt/s.lastSeenAt (when we happened to
-// poll - the same regardless of whether the underlying data changed at
-// all, so printing it there read as "when did the data come from" but
-// actually meant "when did we last ask"). Verified live: sberazs's own
-// raw.updatedAt was identical across every single station in the region -
-// a whole-feed batch timestamp, not per-station freshness - and gdebenz's
-// payload has no timestamp field of any kind. Genuine source-reported
-// times come in two shapes: per-fuel-type (alfabank's fuelStatuses -
-// already shown per cell above) and station-level (sberazs's own
-// lastPaymentAt, surfaced as s.lastTransactionAt by GET /stations/:id -
-// see SberazsStation.js's doc comment) - this takes the freshest of
-// whichever shape a given source actually has, so gdebenz (neither) still
-// correctly shows nothing.
+// Any "when was this actually current" timestamp shown for a source - the
+// table's column headers below *and* the source-summary tiles just above
+// them ("Обновлено: ...") - must be *the source's own reported transaction
+// time*, not tbankLastSeenAt/s.lastSeenAt (when we happened to poll - the
+// same regardless of whether the underlying data changed at all, so
+// printing it read as "when did the data come from" but actually meant
+// "when did we last ask"). Verified live: sberazs's own raw.updatedAt was
+// identical across every single station in the region - a whole-feed
+// batch timestamp, not per-station freshness - and gdebenz's payload has
+// no timestamp field of any kind. Genuine source-reported times come in
+// two shapes: per-fuel-type (alfabank's fuelStatuses - already shown per
+// cell in the table) and station-level (sberazs's own lastPaymentAt,
+// surfaced as s.lastTransactionAt by GET /stations/:id - see
+// SberazsStation.js's doc comment) - this takes the freshest of whichever
+// shape a given source actually has, so gdebenz (neither) correctly shows
+// nothing in either place.
 const sourceHeaderTransactionAt = computed(() => {
   const result = {};
   for (const s of sourceDoc.value?.sources || []) {
@@ -96,10 +98,10 @@ const sourceHeaderTransactionAt = computed(() => {
   return result;
 });
 
-// "Итог"'s own header: the freshest genuine transaction evidence behind
-// whatever the merge concluded, across tbank and every secondary source -
-// not a timestamp of its own (the merge is a status blend computed on the
-// fly, not a fresh data pull).
+// "Итог"'s own timestamp (table header and tile alike): the freshest
+// genuine transaction evidence behind whatever the merge concluded, across
+// tbank and every secondary source - not a timestamp of its own (the merge
+// is a status blend computed on the fly, not a fresh data pull).
 const overallLastTransactionAt = computed(() => {
   const doc = sourceDoc.value;
   if (!doc) return null;
@@ -400,7 +402,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
                 {{ statusMeta(sourceDoc.tbankLastStatus).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDateTime(sourceDoc.tbankLastSeenAt) }}</div>
+              <div v-if="sourceDoc.lastTransactionAt" class="hint small">
+                Обновлено: {{ formatDateTime(sourceDoc.lastTransactionAt) }}
+              </div>
             </div>
             <div v-for="s in sourceDoc.sources" :key="s.key" class="source-tile">
               <div class="source-label">{{ s.label }}</div>
@@ -408,7 +412,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
                 {{ statusMeta(s.status).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDateTime(s.lastSeenAt) }}</div>
+              <div v-if="sourceHeaderTransactionAt[s.key]" class="hint small">
+                Обновлено: {{ formatDateTime(sourceHeaderTransactionAt[s.key]) }}
+              </div>
             </div>
             <div v-if="!sourceDoc.sources.length" class="source-tile">
               <div class="source-label">Другие источники</div>
@@ -420,7 +426,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
                 {{ statusMeta(sourceDoc.lastStatus).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDateTime(sourceDoc.lastSeenAt) }}</div>
+              <div v-if="overallLastTransactionAt" class="hint small">
+                Обновлено: {{ formatDateTime(overallLastTransactionAt) }}
+              </div>
             </div>
           </div>
 

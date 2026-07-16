@@ -327,7 +327,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
                 {{ statusMeta(station.tbankLastStatus).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDate(station.tbankLastSeenAt) }}</div>
+              <div v-if="station.lastTransactionAt" class="hint small">
+                Обновлено: {{ formatDate(station.lastTransactionAt) }}
+              </div>
             </div>
             <div v-for="s in station.sources" :key="s.key" class="source-tile">
               <div class="source-label">{{ s.label }}</div>
@@ -335,7 +337,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
                 {{ statusMeta(s.status).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDate(s.lastSeenAt) }}</div>
+              <div v-if="sourceHeaderTransactionAt[s.key]" class="hint small">
+                Обновлено: {{ formatDate(sourceHeaderTransactionAt[s.key]) }}
+              </div>
             </div>
             <div v-if="!station.sources.length" class="source-tile">
               <div class="source-label">Второй источник</div>
@@ -347,7 +351,9 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
                 {{ statusMeta(station.lastStatus).label }}
               </div>
-              <div class="hint small">Обновлено: {{ formatDate(station.lastSeenAt) }}</div>
+              <div v-if="overallLastTransactionAt" class="hint small">
+                Обновлено: {{ formatDate(overallLastTransactionAt) }}
+              </div>
             </div>
           </div>
 
@@ -427,7 +433,9 @@ onBeforeUnmount(() => {
               <p v-if="matchedSource.conflict" class="hint small conflict-note">
                 у {{ matchedSource.label }} есть внутреннее расхождение отчётов: «{{ matchedSource.conflict }}»
               </p>
-              <p class="hint small">Обновлено: {{ formatDate(matchedSource.lastSeenAt) }}</p>
+              <p v-if="sourceHeaderTransactionAt[SOURCE_KEY]" class="hint small">
+                Обновлено: {{ formatDate(sourceHeaderTransactionAt[SOURCE_KEY]) }}
+              </p>
             </div>
             <button type="button" class="btn secondary" :disabled="actionBusy" @click="handleUnmatch">
               Отменить сопоставление
