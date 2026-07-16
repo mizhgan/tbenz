@@ -127,16 +127,10 @@ const sourceHeaderTransactionAt = computed(() => {
   return result;
 });
 
-// "Итог"'s own header: the freshest genuine transaction evidence behind
-// whatever the merge concluded, across tbank and every secondary source.
-const overallLastTransactionAt = computed(() => {
-  const doc = station.value;
-  if (!doc) return null;
-  const candidates = [doc.lastTransactionAt, ...Object.values(sourceHeaderTransactionAt.value)]
-    .filter(Boolean)
-    .map((t) => new Date(t).getTime());
-  return candidates.length ? new Date(Math.max(...candidates)) : null;
-});
+// "Итог"'s own timestamp (table header and tile alike) is now
+// station.overallLastTransactionAt directly - computed server-side (see
+// Station.js's own doc comment) at merge time, so no client-side
+// recomputation needed here.
 
 async function load() {
   loading.value = true;
@@ -351,8 +345,8 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
                 {{ statusMeta(station.lastStatus).label }}
               </div>
-              <div v-if="overallLastTransactionAt" class="hint small">
-                Обновлено: {{ formatDate(overallLastTransactionAt) }}
+              <div v-if="station.overallLastTransactionAt" class="hint small">
+                Обновлено: {{ formatDate(station.overallLastTransactionAt) }}
               </div>
             </div>
           </div>
@@ -380,8 +374,8 @@ onBeforeUnmount(() => {
                   </th>
                   <th>
                     Итог
-                    <div v-if="formatRelativeAge(overallLastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(overallLastTransactionAt) }}
+                    <div v-if="formatRelativeAge(station.overallLastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(station.overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>

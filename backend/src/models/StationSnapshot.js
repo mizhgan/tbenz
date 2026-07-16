@@ -18,6 +18,13 @@ const stationSnapshotSchema = new Schema(
       },
     ],
     lastTransactionAt: { type: Date, default: null },
+    // The freshest genuine transaction time across tbank and every matched
+    // secondary source - see Station.js's own doc comment on the identical
+    // field there (this is just this one poll tick's copy of it, the way
+    // every other per-snapshot field mirrors its Station-level counterpart
+    // at write time). What metricsService.getCurrentSnapshot actually
+    // returns as the map popup's "Последняя транзакция".
+    overallLastTransactionAt: { type: Date, default: null },
     raw: { type: Schema.Types.Mixed, default: null },
   },
   { timestamps: false }

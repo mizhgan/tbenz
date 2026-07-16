@@ -77,7 +77,28 @@ const stationSchema = new Schema(
     // station" instead of whichever source happened to poll most recently
     // in a merged cycle.
     tbankLastSeenAt: { type: Date, default: null },
+    // tbank's own reported transaction time - kept as-is (not repurposed)
+    // since the sources table's own "tbank" column/tile specifically needs
+    // tbank's own value, not a blend. overallLastTransactionAt just below
+    // is the "Последняя транзакция" figure actually shown to a viewer -
+    // see that field's own doc comment for why the two need to differ.
     lastTransactionAt: { type: Date, default: null },
+    // The freshest genuine transaction time across tbank *and* every
+    // matched secondary source (sberazs's own lastPaymentAt, alfabank's
+    // per-fuel-type ones - see secondarySourceIngestService.js's
+    // computeMergedStatusForStation) - what "Последняя транзакция" in the
+    // map popup and station modal actually shows now, and the same figure
+    // the sources table's "Итог" column already computed client-side.
+    // Reported live: a station last confirmed via tbank a week ago but
+    // seen by sberazs 6 hours ago was showing the week-old tbank-only date
+    // as its headline "last transaction", even though sberazs's own
+    // column right next to it already proved fresher evidence existed.
+    // Recomputed on every ingest/merge tick (see ingestService.storeStation
+    // and secondarySourceIngestService's applyMergeToStation(ForTick)) -
+    // starts equal to tbank's own value for a station with no secondary
+    // match yet (nothing else to compare against), then gets folded into
+    // the real max once a match exists.
+    overallLastTransactionAt: { type: Date, default: null },
     // "Last confirmed" per-fuel-type status for Telegram appeared/disappeared
     // alerts (see telegramNotifier.js's computeTransitions) - only ever
     // updated by a literal 'available' or 'not_available' reading; a

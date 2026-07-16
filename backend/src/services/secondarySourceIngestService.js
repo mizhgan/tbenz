@@ -93,8 +93,21 @@ function readingStatus(doc) {
   return doc.status;
 }
 
+// The freshest genuine transaction time across tbank and every matched
+// secondary source - see Station.js's overallLastTransactionAt doc comment
+// for why this needs to exist separately from tbank's own lastTransactionAt.
+// A source's own evidence can be station-level (sberazs's lastPaymentAt,
+// surfaced the same way as tbank's own field) or per-fuel-type (alfabank's
+// fuelStatuses) - both are checked, so a source with only one shape still
+// contributes correctly.
+function latestTransactionAt(candidates) {
+  const times = candidates.filter(Boolean).map((t) => new Date(t).getTime());
+  return times.length ? new Date(Math.max(...times)) : null;
+}
+
 async function computeMergedStatusForStation(station) {
   const secondaryReadings = [];
+  const transactionCandidates = [station.lastTransactionAt];
   for (const link of station.sourceLinks || []) {
     const sourceConfig = getSource(link.sourceKey);
     if (!sourceConfig) continue; // an unregistered/removed source's stale link - ignore, don't crash the merge
@@ -108,11 +121,13 @@ async function computeMergedStatusForStation(station) {
       fuelStatusWeight: sourceConfig.fuelStatusWeight,
       isEquipmentList: sourceConfig.isEquipmentList,
     });
+    transactionCandidates.push(doc.lastTransactionAt, ...(doc.fuelStatuses || []).map((f) => f.lastTransactionAt));
   }
 
   return {
     mergedFuelStatuses: mergeStationFuelStatuses(station.tbankLastFuelStatuses, secondaryReadings),
     mergedStatus: mergeStationOverallStatus(station.tbankLastStatus, secondaryReadings),
+    overallLastTransactionAt: latestTransactionAt(transactionCandidates),
   };
 }
 
@@ -137,7 +152,7 @@ async function computeMergedStatusForStation(station) {
 async function applyMergeToStation(station, region, polledAt) {
   const previousFuelStatuses = station.lastFuelStatuses;
   const previousConfirmedFuelStatuses = station.confirmedFuelStatuses;
-  const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
+  const { mergedFuelStatuses, mergedStatus, overallLastTransactionAt } = await computeMergedStatusForStation(station);
 
   const { transitions, nextConfirmedFuelStatuses } = telegramNotifier.computeTransitions(
     previousFuelStatuses,
@@ -147,6 +162,7 @@ async function applyMergeToStation(station, region, polledAt) {
 
   station.lastStatus = mergedStatus;
   station.lastFuelStatuses = mergedFuelStatuses;
+  station.overallLastTransactionAt = overallLastTransactionAt;
   // Kept in step with the region poll loop's own bookkeeping (see
   // ingestService.ingestRegion) even though this is a one-off, out-of-band
   // recompute - otherwise the next real poll tick would compare against a
@@ -166,6 +182,7 @@ async function applyMergeToStation(station, region, polledAt) {
     status: mergedStatus,
     fuelStatuses: mergedFuelStatuses,
     lastTransactionAt: station.lastTransactionAt,
+    overallLastTransactionAt,
     raw: { mergedFromSourceLinks: station.sourceLinks },
   });
 
@@ -188,10 +205,11 @@ async function applyMergeToStation(station, region, polledAt) {
 // loop computes transitions once per tick, after this write, instead of
 // per-write here.
 async function applyMergeToStationForTick(station, region, polledAt) {
-  const { mergedFuelStatuses, mergedStatus } = await computeMergedStatusForStation(station);
+  const { mergedFuelStatuses, mergedStatus, overallLastTransactionAt } = await computeMergedStatusForStation(station);
 
   station.lastStatus = mergedStatus;
   station.lastFuelStatuses = mergedFuelStatuses;
+  station.overallLastTransactionAt = overallLastTransactionAt;
   station.lastSeenAt = polledAt;
   await station.save();
 
@@ -205,6 +223,7 @@ async function applyMergeToStationForTick(station, region, polledAt) {
         status: mergedStatus,
         fuelStatuses: mergedFuelStatuses,
         lastTransactionAt: station.lastTransactionAt,
+        overallLastTransactionAt,
         raw: { mergedFromSourceLinks: station.sourceLinks },
       },
     },

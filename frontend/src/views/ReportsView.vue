@@ -49,6 +49,7 @@ async function openStationDetail(stationId) {
       status: doc.lastStatus,
       fuelStatuses: doc.lastFuelStatuses || [],
       lastTransactionAt: doc.lastTransactionAt,
+      overallLastTransactionAt: doc.overallLastTransactionAt,
       polledAt: doc.lastSeenAt,
     };
     showDetailModal.value = true;

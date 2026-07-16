@@ -395,8 +395,13 @@ function buildPopupHtml(s) {
       return `<div class="popup-fuel-row"><span class="popup-dot" style="background:${fm.color}"></span>${escapeHtml(fuelTypeLabel(f.fuelType))}: ${fm.label}</div>`;
     })
     .join('');
-  const lastTransactionLabel = s.lastTransactionAt
-    ? formatDateTime(new Date(s.lastTransactionAt).getTime())
+  // overallLastTransactionAt (freshest across tbank + every matched
+  // secondary source - see Station.js's own doc comment), not tbank's own
+  // lastTransactionAt alone - a station last confirmed via tbank a week ago
+  // but seen by sberazs 6 hours ago should read "6 hours ago" here, not the
+  // week-old tbank-only date.
+  const lastTransactionLabel = s.overallLastTransactionAt
+    ? formatDateTime(new Date(s.overallLastTransactionAt).getTime())
     : 'нет данных';
   return `
     <div class="station-popup">

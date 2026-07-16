@@ -266,6 +266,14 @@ async function getCurrentSnapshotUncached(regionId, at) {
       status: 1,
       fuelStatuses: 1,
       lastTransactionAt: 1,
+      // The freshest genuine transaction time across tbank *and* every
+      // matched secondary source - see Station.js's own doc comment. What
+      // MapView.vue's popup and StationDetailModal.vue's top line actually
+      // show as "Последняя транзакция" now, instead of tbank's own
+      // lastTransactionAt right above (kept, unchanged, for the sources
+      // table's own "tbank" column/tile, which specifically wants tbank's
+      // own reading).
+      overallLastTransactionAt: 1,
       name: '$stationInfo.name',
       address: '$stationInfo.address',
       yandexOrgId: '$stationInfo.yandexOrgId',

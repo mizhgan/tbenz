@@ -48,6 +48,12 @@ async function storeStation(parsed, region, polledAt) {
     tbankLastFuelStatuses: parsed.fuelStatuses,
     tbankLastSeenAt: polledAt,
     lastTransactionAt: parsed.lastTransactionAt,
+    // Starting point only - nothing to compare against yet at this point in
+    // the tick (secondary sources, if this station has any confirmed match,
+    // are ingested and merged right after - see ingestRegion below). A
+    // station with no secondary match keeps this value untouched from here
+    // on, correctly equal to tbank's own reading.
+    overallLastTransactionAt: parsed.lastTransactionAt,
     lastRaw: parsed.raw,
   };
   if (!previous?.nameEditedByAdmin) setFields.name = parsed.name;
@@ -72,6 +78,7 @@ async function storeStation(parsed, region, polledAt) {
     status: parsed.status,
     fuelStatuses: parsed.fuelStatuses,
     lastTransactionAt: parsed.lastTransactionAt,
+    overallLastTransactionAt: parsed.lastTransactionAt,
     raw: parsed.raw,
   });
 

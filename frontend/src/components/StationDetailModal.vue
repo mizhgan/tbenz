@@ -98,18 +98,6 @@ const sourceHeaderTransactionAt = computed(() => {
   return result;
 });
 
-// "Итог"'s own timestamp (table header and tile alike): the freshest
-// genuine transaction evidence behind whatever the merge concluded, across
-// tbank and every secondary source - not a timestamp of its own (the merge
-// is a status blend computed on the fly, not a fresh data pull).
-const overallLastTransactionAt = computed(() => {
-  const doc = sourceDoc.value;
-  if (!doc) return null;
-  const candidates = [doc.lastTransactionAt, ...Object.values(sourceHeaderTransactionAt.value)]
-    .filter(Boolean)
-    .map((t) => new Date(t).getTime());
-  return candidates.length ? new Date(Math.max(...candidates)) : null;
-});
 
 async function loadSources() {
   sourcesLoading.value = true;
@@ -387,7 +375,11 @@ onBeforeUnmount(() => {
 
         <p class="hint">
           Последняя транзакция:
-          {{ station.lastTransactionAt ? formatDateTime(new Date(station.lastTransactionAt).getTime()) : 'нет данных' }}
+          {{
+            station.overallLastTransactionAt
+              ? formatDateTime(new Date(station.overallLastTransactionAt).getTime())
+              : 'нет данных'
+          }}
         </p>
         <p class="hint">Снимок на момент: {{ formatDateTime(new Date(station.polledAt).getTime()) }}</p>
 
@@ -426,8 +418,8 @@ onBeforeUnmount(() => {
                 <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
                 {{ statusMeta(sourceDoc.lastStatus).label }}
               </div>
-              <div v-if="overallLastTransactionAt" class="hint small">
-                Обновлено: {{ formatDateTime(overallLastTransactionAt) }}
+              <div v-if="sourceDoc.overallLastTransactionAt" class="hint small">
+                Обновлено: {{ formatDateTime(sourceDoc.overallLastTransactionAt) }}
               </div>
             </div>
           </div>
@@ -454,8 +446,8 @@ onBeforeUnmount(() => {
                   </th>
                   <th>
                     Итог
-                    <div v-if="formatRelativeAge(overallLastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(overallLastTransactionAt) }}
+                    <div v-if="formatRelativeAge(sourceDoc.overallLastTransactionAt)" class="hint small header-age">
+                      {{ formatRelativeAge(sourceDoc.overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>
