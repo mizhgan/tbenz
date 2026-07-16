@@ -191,4 +191,12 @@ watch(() => [props.stationId, props.from, props.to], load);
   font-size: 11px;
   margin-top: 6px;
 }
+
+/* Phase 1 of the site's dark theme (store/theme.js) - see
+   StationDetailModal.vue's identical doc comment (this component only
+   ever renders inside that modal today). */
+[data-theme='dark'] .timeline-row-label,
+[data-theme='dark'] .timeline-ticks {
+  color: #94a3b8;
+}
 </style>

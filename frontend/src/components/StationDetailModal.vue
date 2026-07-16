@@ -810,6 +810,73 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/* Phase 1 of the site's dark theme (store/theme.js) - see MapView.vue's
+   identical doc comment for the full reasoning (scoped overrides of this
+   component's own classes, main.css's shared .card/table/.hint/.btn rules
+   left untouched so every other still-light page is unaffected). This
+   modal is <Teleport>-ed to <body>, but that's still a descendant of
+   <html> in the final DOM, so the [data-theme="dark"] ancestor selector
+   reaches it the same as anything else - no prop threading needed. */
+[data-theme='dark'] .modal-card {
+  background: #0f172a;
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+
+[data-theme='dark'] .modal-header {
+  background: #0f172a;
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] .edit-link {
+  color: #7dabf8;
+}
+
+[data-theme='dark'] .fuel-list li {
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] .fuel-list-active {
+  background: #1e3a5f;
+}
+
+[data-theme='dark'] table {
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] th,
+[data-theme='dark'] td {
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] th {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .reliability-tile {
+  background: #1e293b;
+}
+
+[data-theme='dark'] .reliability-label,
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .btn.secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .btn.secondary:hover {
+  background: #3f4d63;
+}
+
+[data-theme='dark'] .form-row input {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
 /* .card-preview/.card-actions moved to main.css - shared with the reports
    page's shareable report card. */
 </style>

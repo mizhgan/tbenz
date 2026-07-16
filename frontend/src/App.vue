@@ -1,8 +1,9 @@
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from './store/auth';
 import { useMapBasemapStore, BASEMAP_STYLES } from './store/mapBasemap';
+import { useThemeStore } from './store/theme';
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -17,6 +18,21 @@ const isAuthenticated = computed(() => auth.isAuthenticated);
 // page you land on first, even though it only visibly does anything once
 // you're looking at the map itself.
 const basemap = useMapBasemapStore();
+// Site-wide light/dark theme (store/theme.js) - reflected onto <html> via
+// data-theme below so both regular CSS (MapView.vue's own chrome) and
+// <Teleport>-ed content (StationDetailModal.vue, still a descendant of
+// <html> in the final DOM regardless of where it's teleported from) can
+// react to it with a plain [data-theme="dark"] ancestor selector. `immediate`
+// so a dark preference saved from a previous visit is applied on first
+// paint, not just on the next toggle.
+const theme = useThemeStore();
+watch(
+  () => theme.theme,
+  (value) => {
+    document.documentElement.setAttribute('data-theme', value);
+  },
+  { immediate: true }
+);
 // The map page wants to fill the viewport edge-to-edge below the header
 // (see .content--full-bleed) - every other page keeps .content's normal
 // padding.
@@ -53,16 +69,34 @@ function handleLogout() {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="user">
-        <div class="basemap-switch" title="Стиль подложки карты">
+        <div class="pill-switch" title="Стиль подложки карты">
           <button
             v-for="(cfg, key) in BASEMAP_STYLES"
             :key="key"
             type="button"
-            class="basemap-switch__btn"
-            :class="{ 'basemap-switch__btn--active': basemap.style === key }"
+            class="pill-switch__btn"
+            :class="{ 'pill-switch__btn--active': basemap.style === key }"
             @click="basemap.setStyle(key)"
           >
             {{ cfg.label }}
+          </button>
+        </div>
+        <div class="pill-switch" title="Тема сайта">
+          <button
+            type="button"
+            class="pill-switch__btn"
+            :class="{ 'pill-switch__btn--active': theme.theme === 'light' }"
+            @click="theme.setTheme('light')"
+          >
+            Светлая
+          </button>
+          <button
+            type="button"
+            class="pill-switch__btn"
+            :class="{ 'pill-switch__btn--active': theme.theme === 'dark' }"
+            @click="theme.setTheme('dark')"
+          >
+            Тёмная
           </button>
         </div>
         <a

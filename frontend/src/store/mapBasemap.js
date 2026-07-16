@@ -9,8 +9,16 @@ const STORAGE_KEY = 'mapBasemapStyle';
 // v-for over this object is what actually renders the switcher's buttons -
 // adding an entry here is enough, no template change needed. See
 // MapView.vue's own doc comment on why each style needs different tile
-// handling (one filters OSM's own tiles, the others swap providers
+// handling (one filters OSM's own tiles, the other swaps providers
 // entirely).
+//
+// "contrast" used to be two separate entries (a light Carto style and a
+// dark one) - folded into one now that the site has its own light/dark
+// theme toggle (store/theme.js): a *third*, independent axis for "which of
+// these two already-similar Carto styles" would have been one control too
+// many for what's really the same choice ("give me the muted, high-contrast
+// tiles") the site theme should already be answering. resolveBasemapUrl
+// below picks the matching Carto variant for whichever theme is active.
 export const BASEMAP_STYLES = {
   desaturated: {
     label: 'Обычная',
@@ -21,21 +29,27 @@ export const BASEMAP_STYLES = {
     // tiles are the saturated ones being toned down.
     filtered: true,
   },
-  light: {
-    label: 'Светлая',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
-    filtered: false,
-  },
-  dark: {
-    label: 'Тёмная',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  contrast: {
+    label: 'Контрастная',
+    urls: {
+      light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    },
     attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: 'abcd',
     filtered: false,
   },
 };
+
+// `desaturated` has one fixed url; `contrast` has one per site theme (see
+// the doc comment above) - this is the one place that difference gets
+// resolved, so MapView.vue's own tile-layer setup doesn't need to know
+// which shape a given style's URL config is in.
+export function resolveBasemapUrl(styleKey, theme) {
+  const cfg = BASEMAP_STYLES[styleKey] || BASEMAP_STYLES.desaturated;
+  if (cfg.url) return cfg.url;
+  return cfg.urls[theme] || cfg.urls.light;
+}
 
 function loadStyle() {
   try {

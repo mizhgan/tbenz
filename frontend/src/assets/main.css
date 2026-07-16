@@ -121,18 +121,21 @@ body {
   padding: 0;
 }
 
-/* A/B basemap-style experiment (see App.vue/store/mapBasemap.js) - visible
-   in the header for every visitor regardless of auth state or which page
-   they're on, same reasoning as .telegram-link below, even though it only
-   visibly does anything once you're looking at the map itself. */
-.basemap-switch {
+/* Shared small segmented-control look for the header's two independent
+   toggles (see App.vue): map basemap style (store/mapBasemap.js) and site
+   theme (store/theme.js). Visible for every visitor regardless of auth
+   state or which page they're on, same reasoning as .telegram-link below -
+   the basemap one only visibly does anything on the map page itself, but
+   the theme one is meant to be global (see store/theme.js's own doc
+   comment on how far that reach currently extends). */
+.pill-switch {
   display: flex;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.basemap-switch__btn {
+.pill-switch__btn {
   background: none;
   border: none;
   color: #cdd6e3;
@@ -143,11 +146,11 @@ body {
   white-space: nowrap;
 }
 
-.basemap-switch__btn:hover {
+.pill-switch__btn:hover {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.basemap-switch__btn--active {
+.pill-switch__btn--active {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
   font-weight: 600;

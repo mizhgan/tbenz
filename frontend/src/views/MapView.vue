@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router';
 import L from 'leaflet';
 import { regionsApi } from '../api/regions';
-import { useMapBasemapStore, BASEMAP_STYLES } from '../store/mapBasemap';
+import { useMapBasemapStore, BASEMAP_STYLES, resolveBasemapUrl } from '../store/mapBasemap';
+import { useThemeStore } from '../store/theme';
 import ExportPanel from '../components/ExportPanel.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
 import MapShareCardModal from '../components/MapShareCardModal.vue';
@@ -34,6 +35,7 @@ window.L = L;
 
 const route = useRoute();
 const basemapStore = useMapBasemapStore();
+const themeStore = useThemeStore();
 
 const STATUS_KEYS = ['available', 'maybe_available', 'not_available', 'no_data'];
 
@@ -491,14 +493,19 @@ function updateMarkerRadii() {
 
 // Swaps the whole tile provider rather than just re-filtering the existing
 // one - the header switcher (App.vue/store/mapBasemap.js) compares
-// filtering OSM's own tiles against an already-muted provider (Carto's
-// Positron), which needs a different URL/attribution entirely, not just a
-// different CSS filter value on the same tiles.
-function applyBasemapStyle(styleKey) {
+// filtering OSM's own tiles against an already-muted provider (Carto), which
+// needs a different URL/attribution entirely, not just a different CSS
+// filter value on the same tiles. Re-run whenever *either* the basemap
+// style or the site theme changes (see the two watchers in onMounted) -
+// "contrast" resolves to a different Carto variant per theme
+// (resolveBasemapUrl), so a theme flip needs to swap tiles even if the
+// style itself didn't change.
+function applyBasemapStyle() {
   if (!map) return;
+  const styleKey = basemapStore.style;
   const cfg = BASEMAP_STYLES[styleKey] || BASEMAP_STYLES.desaturated;
   if (tileLayer) tileLayer.remove();
-  tileLayer = L.tileLayer(cfg.url, {
+  tileLayer = L.tileLayer(resolveBasemapUrl(styleKey, themeStore.theme), {
     attribution: cfg.attribution,
     subdomains: cfg.subdomains,
     maxZoom: 19,
@@ -891,12 +898,13 @@ onMounted(async () => {
   // attribution added by the tile layer below stays: it's required by OSM's
   // tile usage policy for their free tiles, unlike the Leaflet prefix.
   map.attributionControl.setPrefix(false);
-  applyBasemapStyle(basemapStore.style);
-  // Live-reacts to the header switcher (App.vue) even while already looking
-  // at the map - registered here (not at module scope) so it can safely
-  // assume `map` already exists; watch() only fires on *future* changes
-  // (no `immediate`), so there's no risk of it running before that.
+  applyBasemapStyle();
+  // Live-reacts to the header switchers (App.vue) even while already
+  // looking at the map - registered here (not at module scope) so they can
+  // safely assume `map` already exists; watch() only fires on *future*
+  // changes (no `immediate`), so there's no risk of running before that.
   watch(() => basemapStore.style, applyBasemapStyle);
+  watch(() => themeStore.theme, applyBasemapStyle);
   markersLayer = L.layerGroup().addTo(map);
   map.on('zoomend', updateMarkerRadii);
 
@@ -1671,6 +1679,117 @@ onBeforeUnmount(() => {
 
 :deep(.popup-detail-btn) {
   width: 100%;
+}
+
+/* Phase 1 of the site's dark theme (store/theme.js) - this page's own
+   chrome plus the marker popup, not yet a site-wide pass (see the store's
+   own doc comment). Deliberately doesn't touch the shared .card/.btn/.hint
+   rules in main.css (every other, still-light page reuses those) - each
+   selector below overrides its own specific class instead, and since this
+   is a scoped <style> block, an override like `.hint` here only ever
+   matches .hint elements this component itself renders, never another
+   component's - safe to reuse the same class names without leaking styling
+   onto other pages. Gated on [data-theme="dark"] on <html> (set by
+   App.vue's watcher) rather than a local prop, so it also reaches the
+   marker popup's raw Leaflet-managed HTML the same way. */
+[data-theme='dark'] .drawer-toggle {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .drawer-toggle:hover {
+  background: #253449;
+}
+
+[data-theme='dark'] .drawer-toggle.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+[data-theme='dark'] .quick-status-filters {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .extra-filter-badge {
+  background: #422006;
+  color: #fdba74;
+  border-color: #7c4a12;
+}
+
+[data-theme='dark'] .extra-filter-badge:hover {
+  background: #52290a;
+}
+
+[data-theme='dark'] .status-badge {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .status-badge-spinner {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme='dark'] .drawer-backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='dark'] .drawer-panel {
+  background: #0f172a;
+  color: #e2e8f0;
+  /* Lets native form controls (the region <select>, checkboxes, the date
+     slider) pick reasonable dark-mode colors on their own instead of
+     staying styled for a light page around them - cheaper and more
+     consistent across browsers than manually reskinning each one. */
+  color-scheme: dark;
+}
+
+[data-theme='dark'] .drawer-header h2 {
+  color: #fff;
+}
+
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .region-select select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+[data-theme='dark'] .btn.secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .btn.secondary:hover {
+  background: #3f4d63;
+}
+
+[data-theme='dark'] :deep(.leaflet-popup-content-wrapper),
+[data-theme='dark'] :deep(.leaflet-popup-tip) {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] :deep(.leaflet-container a.leaflet-popup-close-button) {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] :deep(.popup-address),
+[data-theme='dark'] :deep(.popup-hint),
+[data-theme='dark'] :deep(.popup-sources) {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] :deep(.popup-fuel-list) {
+  border-top-color: #334155;
+}
+
+[data-theme='dark'] :deep(.popup-source-chip) {
+  background: #334155;
+  color: #e2e8f0;
 }
 
 .filter-block {
