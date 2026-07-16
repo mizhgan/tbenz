@@ -127,10 +127,19 @@ const sourceHeaderTransactionAt = computed(() => {
   return result;
 });
 
-// "Итог"'s own timestamp (table header and tile alike) is now
-// station.overallLastTransactionAt directly - computed server-side (see
-// Station.js's own doc comment) at merge time, so no client-side
-// recomputation needed here.
+// "Итог"'s own timestamp is station.overallLastTransactionAt directly -
+// computed server-side (see Station.js's own doc comment) at merge time,
+// so no client-side recomputation needed here.
+
+// Compact "status · relative age" table-header line - see
+// StationDetailModal.vue's identical helper for the full rationale (this
+// used to be a separate source-summary tile section above the table,
+// repeating the same status+recency info a second time; folded into the
+// header instead).
+function sourceHeaderSummary(status, transactionAt) {
+  const age = formatRelativeAge(transactionAt);
+  return age ? `${statusMeta(status).label} · ${age}` : statusMeta(status).label;
+}
 
 async function load() {
   loading.value = true;
@@ -313,69 +322,45 @@ onBeforeUnmount(() => {
             <span v-if="sourceDistanceMeters > 150" class="warn-note"> — заметно далеко, стоит перепроверить сопоставление</span>
           </p>
 
-          <h4>Статус по источникам</h4>
-          <div class="source-summary">
-            <div class="source-tile">
-              <div class="source-label">tbank</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
-                {{ statusMeta(station.tbankLastStatus).label }}
-              </div>
-              <div v-if="station.lastTransactionAt" class="hint small">
-                Обновлено: {{ formatDate(station.lastTransactionAt) }}
-              </div>
-            </div>
-            <div v-for="s in station.sources" :key="s.key" class="source-tile">
-              <div class="source-label">{{ s.label }}</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
-                {{ statusMeta(s.status).label }}
-              </div>
-              <div v-if="sourceHeaderTransactionAt[s.key]" class="hint small">
-                Обновлено: {{ formatDate(sourceHeaderTransactionAt[s.key]) }}
-              </div>
-            </div>
-            <div v-if="!station.sources.length" class="source-tile">
-              <div class="source-label">Второй источник</div>
-              <div class="hint small">не сопоставлено</div>
-            </div>
-            <div class="source-tile">
-              <div class="source-label">Итог (что видят метрики/бот)</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
-                {{ statusMeta(station.lastStatus).label }}
-              </div>
-              <div v-if="station.overallLastTransactionAt" class="hint small">
-                Обновлено: {{ formatDate(station.overallLastTransactionAt) }}
-              </div>
-            </div>
-          </div>
-
           <h4>По видам топлива</h4>
+          <p v-if="!station.sources.length" class="hint small">Второй источник не сопоставлен.</p>
           <div class="table-wrap">
             <table class="fuel-table">
               <thead>
                 <tr>
                   <th>Вид топлива</th>
                   <th>
+                    <span class="badge-dot" :style="{ background: statusMeta(station.tbankLastStatus).color }"></span>
                     tbank
-                    <div v-if="formatRelativeAge(station.lastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(station.lastTransactionAt) }}
+                    <div
+                      class="hint small header-meta"
+                      :title="station.lastTransactionAt ? formatDate(station.lastTransactionAt) : null"
+                    >
+                      {{ sourceHeaderSummary(station.tbankLastStatus, station.lastTransactionAt) }}
                     </div>
                   </th>
                   <th v-for="s in station.sources" :key="s.key">
+                    <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
                     {{ s.label }}
                     <div
-                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(sourceHeaderTransactionAt[s.key])"
-                      class="hint small header-age"
+                      class="hint small header-meta"
+                      :title="
+                        !sourceHasPerFuelTiming[s.key] && sourceHeaderTransactionAt[s.key]
+                          ? formatDate(sourceHeaderTransactionAt[s.key])
+                          : null
+                      "
                     >
-                      {{ formatRelativeAge(sourceHeaderTransactionAt[s.key]) }}
+                      {{ sourceHeaderSummary(s.status, sourceHasPerFuelTiming[s.key] ? null : sourceHeaderTransactionAt[s.key]) }}
                     </div>
                   </th>
                   <th>
+                    <span class="badge-dot" :style="{ background: statusMeta(station.lastStatus).color }"></span>
                     Итог
-                    <div v-if="formatRelativeAge(station.overallLastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(station.overallLastTransactionAt) }}
+                    <div
+                      class="hint small header-meta"
+                      :title="station.overallLastTransactionAt ? formatDate(station.overallLastTransactionAt) : null"
+                    >
+                      {{ sourceHeaderSummary(station.lastStatus, station.overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>
@@ -394,7 +379,11 @@ onBeforeUnmount(() => {
                       :style="{ background: statusMeta(row.bySource[s.key].status).color }"
                     ></span>
                     {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key].status).label : '—' }}
-                    <div v-if="row.bySource[s.key]?.lastTransactionAt" class="hint small fuel-cell-age">
+                    <div
+                      v-if="row.bySource[s.key]?.lastTransactionAt"
+                      class="hint small fuel-cell-age"
+                      :title="formatDate(row.bySource[s.key].lastTransactionAt)"
+                    >
                       {{ formatRelativeAge(row.bySource[s.key].lastTransactionAt) }}
                     </div>
                   </td>
@@ -567,37 +556,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.header-age {
+.header-meta {
   font-weight: normal;
   white-space: nowrap;
-}
-
-.source-summary {
-  display: grid;
-  /* auto-fit instead of a fixed N columns, same reasoning as
-     StationDetailModal.vue's own .source-summary - up to 5 tiles today
-     (tbank + up to 3 secondary sources + итог) shouldn't be forced onto one
-     unreadable row on mobile. */
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-  margin: 8px 0 16px;
-}
-
-.source-tile {
-  padding: 10px;
-  background: #f8fafc;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.source-label {
-  font-size: 11px;
-  color: #64748b;
-  margin-bottom: 4px;
-}
-
-.source-value {
-  font-weight: 600;
 }
 
 .badge-dot {

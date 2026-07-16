@@ -71,22 +71,23 @@ const sourceHasPerFuelTiming = computed(() => {
   return result;
 });
 
-// Any "when was this actually current" timestamp shown for a source - the
-// table's column headers below *and* the source-summary tiles just above
-// them ("Обновлено: ...") - must be *the source's own reported transaction
-// time*, not tbankLastSeenAt/s.lastSeenAt (when we happened to poll - the
-// same regardless of whether the underlying data changed at all, so
-// printing it read as "when did the data come from" but actually meant
-// "when did we last ask"). Verified live: sberazs's own raw.updatedAt was
-// identical across every single station in the region - a whole-feed
-// batch timestamp, not per-station freshness - and gdebenz's payload has
-// no timestamp field of any kind. Genuine source-reported times come in
-// two shapes: per-fuel-type (alfabank's fuelStatuses - already shown per
-// cell in the table) and station-level (sberazs's own lastPaymentAt,
-// surfaced as s.lastTransactionAt by GET /stations/:id - see
-// SberazsStation.js's doc comment) - this takes the freshest of whichever
-// shape a given source actually has, so gdebenz (neither) correctly shows
-// nothing in either place.
+// Any "when was this actually current" timestamp shown for a source (the
+// table's own column header, folded together with its status via
+// sourceHeaderSummary below - a source-summary tile section used to repeat
+// this same info above the table, since removed) must be *the source's own
+// reported transaction time*, not tbankLastSeenAt/s.lastSeenAt (when we
+// happened to poll - the same regardless of whether the underlying data
+// changed at all, so printing it read as "when did the data come from" but
+// actually meant "when did we last ask"). Verified live: sberazs's own
+// raw.updatedAt was identical across every single station in the region -
+// a whole-feed batch timestamp, not per-station freshness - and gdebenz's
+// payload has no timestamp field of any kind. Genuine source-reported
+// times come in two shapes: per-fuel-type (alfabank's fuelStatuses -
+// already shown per cell in the table) and station-level (sberazs's own
+// lastPaymentAt, surfaced as s.lastTransactionAt by GET /stations/:id -
+// see SberazsStation.js's doc comment) - this takes the freshest of
+// whichever shape a given source actually has, so gdebenz (neither)
+// correctly shows nothing.
 const sourceHeaderTransactionAt = computed(() => {
   const result = {};
   for (const s of sourceDoc.value?.sources || []) {
@@ -98,6 +99,19 @@ const sourceHeaderTransactionAt = computed(() => {
   return result;
 });
 
+
+// Compact "status · relative age" table-header line - replaces what used
+// to be two separate widgets (the source-summary tiles above the table,
+// and the table's own header subtitle) showing the same status+recency
+// info about each source twice. `transactionAt` is deliberately nullable
+// (gdebenz has no genuine transaction time at all, and a source with its
+// own per-cell timing - alfabank - passes null here on purpose so its
+// header doesn't repeat what every row already shows) - the status half
+// always renders regardless, since every source always has *some* status.
+function sourceHeaderSummary(status, transactionAt) {
+  const age = formatRelativeAge(transactionAt);
+  return age ? `${statusMeta(status).label} · ${age}` : statusMeta(status).label;
+}
 
 async function loadSources() {
   sourcesLoading.value = true;
@@ -387,42 +401,7 @@ onBeforeUnmount(() => {
         <p v-if="sourcesLoading" class="hint">Загрузка...</p>
         <p v-else-if="sourcesError" class="error-text">{{ sourcesError }}</p>
         <template v-else-if="sourceDoc">
-          <div class="source-summary">
-            <div class="source-tile">
-              <div class="source-label">tbank</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
-                {{ statusMeta(sourceDoc.tbankLastStatus).label }}
-              </div>
-              <div v-if="sourceDoc.lastTransactionAt" class="hint small">
-                Обновлено: {{ formatDateTime(sourceDoc.lastTransactionAt) }}
-              </div>
-            </div>
-            <div v-for="s in sourceDoc.sources" :key="s.key" class="source-tile">
-              <div class="source-label">{{ s.label }}</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
-                {{ statusMeta(s.status).label }}
-              </div>
-              <div v-if="sourceHeaderTransactionAt[s.key]" class="hint small">
-                Обновлено: {{ formatDateTime(sourceHeaderTransactionAt[s.key]) }}
-              </div>
-            </div>
-            <div v-if="!sourceDoc.sources.length" class="source-tile">
-              <div class="source-label">Другие источники</div>
-              <div class="hint small">не сопоставлено</div>
-            </div>
-            <div class="source-tile">
-              <div class="source-label">Итог (что видят метрики/бот)</div>
-              <div class="source-value">
-                <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
-                {{ statusMeta(sourceDoc.lastStatus).label }}
-              </div>
-              <div v-if="sourceDoc.overallLastTransactionAt" class="hint small">
-                Обновлено: {{ formatDateTime(sourceDoc.overallLastTransactionAt) }}
-              </div>
-            </div>
-          </div>
+          <p v-if="!sourceDoc.sources.length" class="hint small">Второй источник не сопоставлен.</p>
 
           <div class="table-wrap">
             <table class="fuel-table">
@@ -430,24 +409,37 @@ onBeforeUnmount(() => {
                 <tr>
                   <th>Вид топлива</th>
                   <th>
+                    <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.tbankLastStatus).color }"></span>
                     tbank
-                    <div v-if="formatRelativeAge(sourceDoc.lastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(sourceDoc.lastTransactionAt) }}
+                    <div
+                      class="hint small header-meta"
+                      :title="sourceDoc.lastTransactionAt ? formatDateTime(sourceDoc.lastTransactionAt) : null"
+                    >
+                      {{ sourceHeaderSummary(sourceDoc.tbankLastStatus, sourceDoc.lastTransactionAt) }}
                     </div>
                   </th>
                   <th v-for="s in sourceDoc.sources" :key="s.key">
+                    <span class="badge-dot" :style="{ background: statusMeta(s.status).color }"></span>
                     {{ s.label }}
                     <div
-                      v-if="!sourceHasPerFuelTiming[s.key] && formatRelativeAge(sourceHeaderTransactionAt[s.key])"
-                      class="hint small header-age"
+                      class="hint small header-meta"
+                      :title="
+                        !sourceHasPerFuelTiming[s.key] && sourceHeaderTransactionAt[s.key]
+                          ? formatDateTime(sourceHeaderTransactionAt[s.key])
+                          : null
+                      "
                     >
-                      {{ formatRelativeAge(sourceHeaderTransactionAt[s.key]) }}
+                      {{ sourceHeaderSummary(s.status, sourceHasPerFuelTiming[s.key] ? null : sourceHeaderTransactionAt[s.key]) }}
                     </div>
                   </th>
                   <th>
+                    <span class="badge-dot" :style="{ background: statusMeta(sourceDoc.lastStatus).color }"></span>
                     Итог
-                    <div v-if="formatRelativeAge(sourceDoc.overallLastTransactionAt)" class="hint small header-age">
-                      {{ formatRelativeAge(sourceDoc.overallLastTransactionAt) }}
+                    <div
+                      class="hint small header-meta"
+                      :title="sourceDoc.overallLastTransactionAt ? formatDateTime(sourceDoc.overallLastTransactionAt) : null"
+                    >
+                      {{ sourceHeaderSummary(sourceDoc.lastStatus, sourceDoc.overallLastTransactionAt) }}
                     </div>
                   </th>
                 </tr>
@@ -466,7 +458,11 @@ onBeforeUnmount(() => {
                       :style="{ background: statusMeta(row.bySource[s.key].status).color }"
                     ></span>
                     {{ row.bySource[s.key] ? statusMeta(row.bySource[s.key].status).label : '—' }}
-                    <div v-if="row.bySource[s.key]?.lastTransactionAt" class="hint small fuel-cell-age">
+                    <div
+                      v-if="row.bySource[s.key]?.lastTransactionAt"
+                      class="hint small fuel-cell-age"
+                      :title="formatDateTime(row.bySource[s.key].lastTransactionAt)"
+                    >
                       {{ formatRelativeAge(row.bySource[s.key].lastTransactionAt) }}
                     </div>
                   </td>
@@ -657,35 +653,6 @@ onBeforeUnmount(() => {
   border-radius: 50%;
 }
 
-.source-summary {
-  display: grid;
-  /* auto-fit instead of a fixed N columns (used to be computed inline as
-     repeat(2 + sources.length, 1fr)) - with 4 registered sources today that
-     could mean 5 equal columns forced onto one row, unreadable on mobile
-     (~60px/column at a 350px viewport). Each tile keeps a sane minimum width
-     and wraps onto additional rows instead of shrinking indefinitely. */
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-  margin: 8px 0 16px;
-}
-
-.source-tile {
-  padding: 10px;
-  background: #f8fafc;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.source-label {
-  font-size: 11px;
-  color: #64748b;
-  margin-bottom: 4px;
-}
-
-.source-value {
-  font-weight: 600;
-}
-
 .table-wrap {
   overflow-x: auto;
 }
@@ -741,7 +708,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.header-age {
+.header-meta {
   font-weight: normal;
   white-space: nowrap;
 }
