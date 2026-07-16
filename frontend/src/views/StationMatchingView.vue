@@ -511,4 +511,46 @@ onMounted(loadSourcesAndAll);
 .table-wrap {
   overflow-x: auto;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .hint/entry-card/
+   candidate colors otherwise tie in specificity with main.css's generic
+   dark rules and can win on source order alone. */
+[data-theme='dark'] .hint,
+[data-theme='dark'] .checkbox-label,
+[data-theme='dark'] .btn.ghost {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .filters input[type='text'] {
+  border-color: #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .btn.ghost {
+  border-color: #334155;
+}
+
+[data-theme='dark'] .btn.ghost:hover {
+  background: #263449;
+}
+
+[data-theme='dark'] .entry-card {
+  background: #1e293b;
+  border-left-color: #475569;
+}
+
+[data-theme='dark'] .entry-card.has-candidates {
+  background: #241e3d;
+  border-left-color: #8b5cf6;
+}
+
+[data-theme='dark'] .candidates li {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+[data-theme='dark'] .conflict-note {
+  color: #fcd34d;
+}
 </style>

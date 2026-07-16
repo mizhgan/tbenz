@@ -142,4 +142,12 @@ watch(
   color: #667;
   margin-top: 6px;
 }
+
+/* Site dark theme (store/theme.js) - ties in specificity with main.css's
+   generic dark rule and can win on source order alone. This component's
+   own map tiles stay their normal light OSM style regardless (a small
+   standalone Leaflet instance, not wired into store/mapBasemap.js). */
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
 </style>

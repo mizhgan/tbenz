@@ -229,4 +229,8 @@ onMounted(async () => {
 .clickable-row:hover {
   background: #f8fafc;
 }
+
+[data-theme='dark'] .clickable-row:hover {
+  background: #1e293b;
+}
 </style>

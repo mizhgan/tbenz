@@ -662,4 +662,18 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
 }
+
+/* Site dark theme (store/theme.js) - this file's own .region-select border
+   and .sort-toggle active state otherwise tie in specificity with
+   main.css's generic dark rules and can win on source order alone. */
+[data-theme='dark'] .region-select select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+[data-theme='dark'] .sort-toggle .btn.active {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
 </style>

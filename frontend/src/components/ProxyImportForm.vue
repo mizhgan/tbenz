@@ -142,4 +142,21 @@ async function handleSubmit() {
   gap: 10px;
   margin-top: 16px;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .hint color and
+   .import-result background otherwise tie in specificity with main.css's
+   generic dark rules and can win on source order alone. */
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .import-result {
+  background: #1e293b;
+}
+
+[data-theme='dark'] .form-row textarea {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
 </style>

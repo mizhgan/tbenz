@@ -248,4 +248,12 @@ onMounted(loadProxies);
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .hint/.sub-note color
+   otherwise ties in specificity with main.css's generic dark rule and can
+   win on source order alone. */
+[data-theme='dark'] .hint,
+[data-theme='dark'] .sub-note {
+  color: #94a3b8;
+}
 </style>

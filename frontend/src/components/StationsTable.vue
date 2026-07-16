@@ -129,4 +129,15 @@ const sortedStations = computed(() => {
   color: #94a3b8;
   cursor: default;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .address color and
+   .station-link tie in specificity with main.css's generic dark rule and
+   can win on source order alone. */
+[data-theme='dark'] .address {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .station-link {
+  color: #7dabf8;
+}
 </style>

@@ -85,4 +85,12 @@ function tooltipFor(weekday, hour) {
   height: 22px;
   border-radius: 3px;
 }
+
+/* Site dark theme (store/theme.js) - .cell's own fill color is computed
+   inline from data (:style), unaffected by theme; just the axis labels
+   need a lighter shade to stay legible. */
+[data-theme='dark'] .hour-label,
+[data-theme='dark'] .weekday-label {
+  color: #94a3b8;
+}
 </style>

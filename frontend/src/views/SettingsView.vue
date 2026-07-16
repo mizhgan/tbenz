@@ -189,4 +189,20 @@ onMounted(loadDiscoveredTypes);
   padding-top: 16px;
   border-top: 1px solid #eee;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .hint/.mono colors and
+   the reset-row divider otherwise tie in specificity with main.css's
+   generic dark rule and can win on source order alone. */
+[data-theme='dark'] .hint,
+[data-theme='dark'] .mono {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .color-cell input[type='color'] {
+  border-color: #334155;
+}
+
+[data-theme='dark'] .reset-all-row {
+  border-top-color: #334155;
+}
 </style>

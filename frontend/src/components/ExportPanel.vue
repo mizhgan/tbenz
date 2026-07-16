@@ -293,4 +293,11 @@ function handleGenerate() {
   margin-top: 16px;
   flex-wrap: wrap;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .result-preview
+   border otherwise ties in specificity with main.css's generic dark rule
+   and can win on source order alone. */
+[data-theme='dark'] .result-preview {
+  border-color: #334155;
+}
 </style>

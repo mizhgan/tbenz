@@ -379,4 +379,32 @@ onBeforeUnmount(() => {
   background: #fef3c7;
   color: #b45309;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .hint.small color and
+   .source-status-row divider otherwise tie in specificity with main.css's
+   generic dark rules and can win on source order alone. */
+[data-theme='dark'] .hint.small {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .source-status-row:not(:last-child) {
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] .badge.warn {
+  background: #78350f;
+  color: #fcd34d;
+}
+
+[data-theme='dark'] .error-text-inline {
+  color: #fca5a5;
+}
+
+[data-theme='dark'] .warn-text {
+  color: #fcd34d;
+}
+
+[data-theme='dark'] .log-link {
+  color: #7dabf8;
+}
 </style>

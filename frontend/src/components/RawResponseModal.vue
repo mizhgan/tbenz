@@ -207,4 +207,16 @@ onMounted(load);
   gap: 8px;
   margin-top: 16px;
 }
+
+/* Site dark theme (store/theme.js) - .response-wrap/.response-body are
+   deliberately a permanently-dark code block regardless of theme (left
+   untouched), just .url-code's light background needs a dark variant. */
+[data-theme='dark'] .url-code {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .truncated-note {
+  color: #fcd34d;
+}
 </style>

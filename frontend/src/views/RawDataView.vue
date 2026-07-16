@@ -330,4 +330,37 @@ onMounted(loadCollections);
   font-family: 'SFMono-Regular', Consolas, monospace;
   white-space: pre;
 }
+
+/* Site dark theme (store/theme.js) - overrides this file's own .hint/code/
+   border colors, which otherwise tie in specificity with main.css's
+   generic dark rules and can win on source order alone. */
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .hint code,
+[data-theme='dark'] .dup-group-title code {
+  background: #1e293b;
+}
+
+[data-theme='dark'] .dup-group {
+  border-top-color: #334155;
+}
+
+[data-theme='dark'] .dup-group-title {
+  color: #cbd5e1;
+}
+
+[data-theme='dark'] .dup-table th,
+[data-theme='dark'] .dup-table td {
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] .dup-table th {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .result-header {
+  border-bottom-color: #334155;
+}
 </style>

@@ -423,4 +423,13 @@ function handleSubmit() {
   gap: 10px;
   margin-top: 16px;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .region-list/list-item
+   borders otherwise tie in specificity with main.css's generic dark rule
+   and can win on source order alone. */
+[data-theme='dark'] .region-list,
+[data-theme='dark'] .search-results li,
+[data-theme='dark'] .watchlist-items li {
+  border-color: #334155;
+}
 </style>

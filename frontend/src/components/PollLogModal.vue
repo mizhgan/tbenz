@@ -169,4 +169,15 @@ tr.error td {
   justify-content: flex-end;
   margin-top: 16px;
 }
+
+/* Site dark theme (store/theme.js) - lighter shades of the same hue for
+   AA-ish contrast against a dark background (the light-mode values were
+   picked to sit on white). */
+[data-theme='dark'] .error-cell {
+  color: #fca5a5;
+}
+
+[data-theme='dark'] .badge.warn {
+  color: #fcd34d;
+}
 </style>

@@ -1868,4 +1868,31 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
 }
+
+/* Site dark theme (store/theme.js) - a second, smaller batch of this
+   file's own colors (found on a follow-up sweep across the rest of the
+   app) that tie in specificity with main.css's generic dark rules and can
+   win on source order alone. */
+[data-theme='dark'] .filter-block {
+  border-top-color: #334155;
+}
+
+[data-theme='dark'] .filter-label,
+[data-theme='dark'] .filter-checkbox {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .brand-filter-badge {
+  color: #93c5fd;
+}
+
+[data-theme='dark'] .brand-search {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+[data-theme='dark'] :deep(.popup-sources-warn) {
+  color: #fcd34d;
+}
 </style>

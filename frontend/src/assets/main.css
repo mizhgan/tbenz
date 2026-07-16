@@ -427,3 +427,94 @@ button {
 .fade-enter-from {
   opacity: 0;
 }
+
+/* Site-wide dark theme (store/theme.js), phase 2 - extends phase 1's
+   map-page-only rollout (MapView.vue/StationDetailModal.vue) to every
+   other page by making the *shared* classes here theme-aware directly,
+   rather than duplicating overrides in each of the ~15 views that already
+   build on top of .card/table/.btn/.hint/etc. A page/component with no
+   colors beyond these shared classes needs zero changes of its own to
+   look right in dark mode; one that layers its own hardcoded colors on
+   top (a handful do - chips, chart canvases, badge variants) still needs
+   its own small dark pass, tracked separately as those are found. Gated
+   on [data-theme="dark"] on <html> (set by App.vue's watcher), the same
+   mechanism phase 1 already established. */
+[data-theme='dark'] body {
+  background: #0b1120;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .content {
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .card {
+  background: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+
+[data-theme='dark'] th,
+[data-theme='dark'] td {
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] th {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .btn.secondary {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .btn.secondary:hover {
+  background: #3f4d63;
+}
+
+[data-theme='dark'] .form-row label {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .form-row input,
+[data-theme='dark'] .form-row select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+[data-theme='dark'] .hint {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .badge.ok {
+  background: #14532d;
+  color: #86efac;
+}
+
+[data-theme='dark'] .badge.error {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+
+[data-theme='dark'] .badge.never {
+  background: #334155;
+  color: #cbd5e1;
+}
+
+[data-theme='dark'] .kpi-label {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .card-preview {
+  border-color: #334155;
+}
+
+[data-theme='dark'] .skeleton {
+  background: #1e293b;
+}
+
+[data-theme='dark'] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}

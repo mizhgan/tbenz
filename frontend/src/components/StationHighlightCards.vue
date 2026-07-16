@@ -137,4 +137,20 @@ const emit = defineEmits(['select']);
   font-size: 11px;
   color: #64748b;
 }
+
+/* Site dark theme (store/theme.js) - this file's own .address/.stat-label
+   color otherwise ties in specificity with main.css's generic dark rule
+   and can win on source order alone. */
+[data-theme='dark'] .address,
+[data-theme='dark'] .stat-label {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .station-link {
+  color: #7dabf8;
+}
+
+[data-theme='dark'] .highlight-card {
+  border-color: #334155;
+}
 </style>

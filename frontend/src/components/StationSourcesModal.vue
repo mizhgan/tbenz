@@ -669,4 +669,33 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   margin-top: 16px;
 }
+
+/* Site dark theme (store/theme.js), same pattern as StationDetailModal.vue's
+   identical block - this modal is <Teleport>-ed to <body>, but that's
+   still a descendant of <html> in the final DOM, so the [data-theme="dark"]
+   ancestor selector reaches it without prop threading. Overrides this
+   component's own classes rather than main.css's shared ones, so nothing
+   here leaks onto another component's use of the same class names. */
+[data-theme='dark'] .modal-header {
+  background: #0f172a;
+  border-bottom-color: #334155;
+}
+
+[data-theme='dark'] .hint.small,
+[data-theme='dark'] .header-meta {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .candidates li {
+  border-color: #334155;
+}
+
+[data-theme='dark'] .edit-link {
+  color: #7dabf8;
+}
+
+[data-theme='dark'] .warn-note,
+[data-theme='dark'] .conflict-note {
+  color: #fcd34d;
+}
 </style>

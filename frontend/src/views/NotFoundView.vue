@@ -11,4 +11,12 @@
   text-align: center;
   margin-top: 80px;
 }
+
+.not-found a {
+  color: #2563eb;
+}
+
+[data-theme='dark'] .not-found a {
+  color: #7dabf8;
+}
 </style>
