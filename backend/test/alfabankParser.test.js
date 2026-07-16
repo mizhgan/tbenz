@@ -83,6 +83,19 @@ test('parseStation: "closed" is not_available regardless of last_transaction_at 
     ['not_available', 'not_available', 'not_available', 'not_available']
   );
   assert.equal(parsed.status, 'not_available');
+  // Marked so mergeStatusService can tell this apart from a genuine
+  // per-pump reading (see mergeStationFuelStatuses' own doc comment) - a
+  // station-wide flag smeared across all 4 categories regardless of
+  // whether the station actually has that pump, not real evidence.
+  assert.deepEqual(
+    parsed.fuelStatuses.map((f) => f.stationClosed),
+    [true, true, true, true]
+  );
+});
+
+test('parseStation: a genuine (non-closed) reading is not marked stationClosed', () => {
+  const parsed = parseStation(station({ fuels: [fuel('AI92', 'available', 0)] }));
+  assert.equal(parsed.fuelStatuses[0].stationClosed, false);
 });
 
 test('parseStation: fuel type/name mapping - AI92/AI95/AI98_100 -> bare numbers, DIESEL -> ДТ', () => {

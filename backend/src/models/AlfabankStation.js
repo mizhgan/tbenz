@@ -41,6 +41,14 @@ const alfabankStationSchema = new Schema(
         // worth showing separately in the UI (StationDetailModal's per-source
         // fuel table).
         lastTransactionAt: { type: Date, default: null },
+        // True when this entry came from alfabank's "closed" flag (see
+        // alfabankParser.js's own doc comment) - a station-wide signal
+        // smeared across all 4 fixed categories regardless of whether the
+        // station actually has that pump, not a genuine per-fuel reading.
+        // mergeStatusService.mergeStationFuelStatuses uses this to decide
+        // whether an equipment-list source's contradicting evidence should
+        // override it.
+        stationClosed: { type: Boolean, default: false },
       },
     ],
     conflict: { type: String, default: null },

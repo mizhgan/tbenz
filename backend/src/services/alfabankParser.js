@@ -148,6 +148,22 @@ function parseFuelStatuses(fuels) {
       // when this was last seen" are worth showing separately (see
       // AlfabankStation.js's doc comment on this field).
       lastTransactionAt: parseTransactionDate(f?.last_transaction_at),
+      // "closed" (see this file's own doc comment) is a station-wide flag
+      // applied uniformly across all 4 fixed categories, not a genuine
+      // per-pump reading - it can even carry an old, otherwise-unrelated
+      // last_transaction_at left over from before the station closed (real
+      // case: a "closed" DIESEL entry with a transaction from over a month
+      // earlier), so lastTransactionAt presence alone can't be used to tell
+      // the two apart downstream. Marked explicitly here so
+      // mergeStatusService.mergeStationFuelStatuses can treat it the same
+      // way it already treats gdebenz's station-level projection (dropped
+      // when an equipment-list source contradicts it) instead of as
+      // untouchable per-fuel evidence - confirmed live: a pure-CNG station
+      // ("АГНКС Кировгаз") had alfabank's "closed" flag (applied to all 4
+      // categories, since alfabank has no idea this station never sold
+      // 92/95/100/ДТ in the first place) reading as "genuine" not_available
+      // evidence for gasoline/diesel it never had pumps for at all.
+      stationClosed: f?.status === 'closed',
     }))
     .filter((f) => f.fuelType);
 }

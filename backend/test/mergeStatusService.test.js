@@ -322,6 +322,55 @@ test('mergeStationFuelStatuses: alfabank\'s genuine per-fuel claim survives even
   assert.equal(byType['ДТ'], 'available');
 });
 
+// Real case found live: "АГНКС Кировгаз" (Р-243, 7) is a pure-CNG station -
+// sberazs's equipment list says only ["propane","methane"], but alfabank's
+// "closed" flag (a station-wide signal alfabank applies uniformly across
+// all 4 of its fixed categories - see alfabankParser.js's own doc comment)
+// was landing in fuelStatuses looking exactly like genuine per-pump
+// evidence, so the fix above (which rightly protects real per-fuel
+// evidence like alfabank's genuine readings) was *also* wrongly protecting
+// this flag-derived one - swinging 92/95/ДТ to a confident "not_available"
+// for fuel types this station never had pumps for at all.
+test('mergeStationFuelStatuses: alfabank\'s "closed" flag is treated as a projection, not genuine per-fuel evidence', () => {
+  const merged = mergeStationFuelStatuses(
+    [],
+    [
+      {
+        status: 'not_available',
+        fuelTypes: ['92', '95', 'ДТ'],
+        weight: 1,
+        fuelStatuses: [
+          { fuelType: '92', status: 'not_available', stationClosed: true },
+          { fuelType: '95', status: 'not_available', stationClosed: true },
+          { fuelType: 'ДТ', status: 'not_available', stationClosed: true },
+        ],
+      }, // alfabank, station closed
+      { status: 'no_data', fuelTypes: ['propane', 'methane'], weight: 0, isEquipmentList: true }, // sberazs
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['92'], 'no_data');
+  assert.equal(byType['95'], 'no_data');
+  assert.equal(byType['ДТ'], 'no_data');
+});
+
+test('mergeStationFuelStatuses: a stationClosed entry for a type IN the equipment list still counts normally', () => {
+  const merged = mergeStationFuelStatuses(
+    [],
+    [
+      {
+        status: 'not_available',
+        fuelTypes: ['92'],
+        weight: 1,
+        fuelStatuses: [{ fuelType: '92', status: 'not_available', stationClosed: true }],
+      },
+      { status: 'no_data', fuelTypes: ['92', 'propane'], weight: 0, isEquipmentList: true },
+    ]
+  );
+  const byType = Object.fromEntries(merged.map((f) => [f.fuelType, f.status]));
+  assert.equal(byType['92'], 'not_available'); // 92 is a real pump here - the closed flag is meaningful for it
+});
+
 test('mergeStationOverallStatus: an uncorroborated available-like claim (gdebenz) is dropped from the blanket status vote too', () => {
   const status = mergeStationOverallStatus('no_data', [
     { status: 'available', fuelTypes: ['92', '95', 'ДТ'], weight: 1, isEquipmentList: false },

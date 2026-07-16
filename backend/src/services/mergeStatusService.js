@@ -178,12 +178,20 @@ function mergeStationFuelStatuses(tbankFuelStatuses, secondaryReadings) {
     const votes = [{ status: uncorroborated ? undefined : byType.get(fuelType), weight: 1 }];
     for (const r of secondaryReadings) {
       const perFuelEntry = (r.fuelStatuses || []).find((f) => f.fuelType === fuelType);
+      // No perFuelEntry at all is always a projection; one marked
+      // stationClosed (alfabank's "closed" flag - see alfabankParser.js)
+      // counts as one too despite living in the same fuelStatuses array
+      // genuine readings do - it's the same kind of station-wide claim
+      // smeared across every fixed category that gdebenz's blanket
+      // projection is, not real per-pump evidence.
+      const isStationWideClaim = !perFuelEntry || perFuelEntry.stationClosed;
+      if (!r.isEquipmentList && uncorroborated && isStationWideClaim) continue;
+
       if (perFuelEntry) {
         votes.push({ status: perFuelEntry.status, weight: r.fuelStatusWeight ?? r.weight });
-        continue;
+      } else {
+        votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
       }
-      if (!r.isEquipmentList && uncorroborated) continue;
-      votes.push({ status: projectStationStatusOntoFuelType(r.status, r.fuelTypes, fuelType), weight: r.weight });
     }
     merged.push({ fuelType, status: resolveVotes(votes).status });
   }
