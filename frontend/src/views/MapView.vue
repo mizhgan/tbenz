@@ -921,6 +921,56 @@ onBeforeUnmount(() => {
   margin-bottom: 6px;
 }
 
+/* Compact АИ-92/АИ-95 history ribbon (last 24h - see useMapMarkers.js's
+   buildRibbonHtml) - a hand-built raw-HTML equivalent of
+   StationReliabilityTimeline.vue's own ribbon, scaled down to fit here.
+   Loads lazily (only once a popup is actually opened) and shows this
+   placeholder styling until then. */
+:deep(.popup-ribbon) {
+  margin-bottom: 8px;
+}
+
+:deep(.popup-ribbon-row) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+:deep(.popup-ribbon-label) {
+  flex: 0 0 34px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+
+:deep(.popup-ribbon-bar) {
+  display: flex;
+  flex: 1;
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #e2e8f0;
+}
+
+:deep(.popup-ribbon-segment) {
+  min-width: 1px;
+}
+
+:deep(.popup-ribbon-hint) {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+:deep(.popup-ribbon-loading),
+:deep(.popup-ribbon-empty) {
+  font-size: 11px;
+  color: #94a3b8;
+  padding: 4px 0;
+}
+
 :deep(.popup-fuel-list) {
   max-height: 140px;
   overflow-y: auto;
@@ -1213,5 +1263,19 @@ onBeforeUnmount(() => {
 
 [data-theme='dark'] .popup-sources-warn {
   color: #fcd34d;
+}
+
+[data-theme='dark'] .popup-ribbon-label {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .popup-ribbon-bar {
+  background: #334155;
+}
+
+[data-theme='dark'] .popup-ribbon-hint,
+[data-theme='dark'] .popup-ribbon-loading,
+[data-theme='dark'] .popup-ribbon-empty {
+  color: #64748b;
 }
 </style>

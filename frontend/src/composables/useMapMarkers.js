@@ -1,6 +1,7 @@
 import { ref, watch } from 'vue';
 import L from 'leaflet';
-import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
+import { stationsApi } from '../api/regions';
+import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 
 function formatDateTime(ms) {
   if (!ms) return '—';
@@ -60,6 +61,54 @@ function sourcesSummaryHtml(s) {
       ${disagree ? '<span class="popup-sources-warn">⚠ расходятся (АИ-92, АИ-95)</span>' : ''}
     </div>
   `;
+}
+
+// 24h, not the 7-day window StationDetailModal's own ribbon uses - this one
+// has to fit a ~250px popup, and the point here is "is it flaky *right
+// now*", not a full week of history (that's what "Подробная информация"
+// is for). stationId -> pre-rendered ribbon HTML string, populated lazily
+// (see loadRibbon below) - fetched once per station per page session, not
+// eagerly for every marker, since most popups never get opened. Persists
+// across a live-refresh's setPopupContent call (see renderMarkers) so an
+// already-open popup's ribbon doesn't flash back to a loading placeholder
+// every ~20s.
+const RIBBON_LOOKBACK_HOURS = 24;
+const ribbonCache = new Map();
+
+function ribbonPlaceholderHtml() {
+  return `<div class="popup-ribbon popup-ribbon-loading">Загрузка истории…</div>`;
+}
+
+// Same segment-computation utilities StationReliabilityTimeline.vue uses
+// (computeStatusSegments/collapseIsolatedBlips, both plain framework-
+// agnostic functions from utils/fuelStatus.js) - this is a hand-built raw
+// HTML equivalent of that Vue component's own ribbon, since Leaflet popup
+// content lives outside Vue's render tree entirely and can't just mount a
+// component into it (see buildPopupHtml's own doc comment).
+function buildRibbonHtml(history) {
+  if (!history.length) {
+    return `<div class="popup-ribbon popup-ribbon-empty">Нет истории за последние ${RIBBON_LOOKBACK_HOURS} ч.</div>`;
+  }
+  const rangeStart = new Date(history[0].polledAt).getTime();
+  const rangeEnd = new Date(history[history.length - 1].polledAt).getTime();
+  const totalMs = rangeEnd - rangeStart;
+  const rows = CORE_FUEL_TYPES.map((fuelType) => {
+    const segments = collapseIsolatedBlips(computeStatusSegments(history, [fuelType]));
+    const segmentsHtml = segments
+      .map((seg) => {
+        const widthPct = totalMs > 0 ? ((seg.end - seg.start) / totalMs) * 100 : 100;
+        const meta = statusMeta(seg.status);
+        return `<span class="popup-ribbon-segment" style="flex:0 0 ${widthPct}%;background:${meta.color}" title="${escapeHtml(meta.label)}"></span>`;
+      })
+      .join('');
+    return `
+      <div class="popup-ribbon-row">
+        <span class="popup-ribbon-label">${escapeHtml(fuelTypeLabel(fuelType))}</span>
+        <div class="popup-ribbon-bar">${segmentsHtml}</div>
+      </div>
+    `;
+  }).join('');
+  return `<div class="popup-ribbon">${rows}<div class="popup-ribbon-hint">за последние ${RIBBON_LOOKBACK_HOURS} ч.</div></div>`;
 }
 
 // Fixed screen-pixel radius (unchanged below zoom 14) means markers stay
@@ -144,17 +193,56 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
     const lastTransactionLabel = s.overallLastTransactionAt
       ? formatDateTime(new Date(s.overallLastTransactionAt).getTime())
       : 'нет данных';
+    const stationId = String(s.stationId);
+    const ribbonHtml = ribbonCache.get(stationId) || ribbonPlaceholderHtml();
     return `
       <div class="station-popup">
         <div class="popup-title">${escapeHtml(s.name || 'АЗС')}</div>
         ${s.address ? `<div class="popup-address">${escapeHtml(s.address)}</div>` : ''}
         <div class="popup-status"><span class="popup-dot" style="background:${meta.color}"></span>${meta.label}${fuelSuffix}</div>
+        ${ribbonHtml}
         ${fuelRows ? `<div class="popup-fuel-list">${fuelRows}</div>` : ''}
         ${sourcesSummaryHtml(s)}
         <div class="popup-hint">Последняя транзакция: ${escapeHtml(lastTransactionLabel)}</div>
         <button type="button" class="btn secondary popup-detail-btn">Подробная информация</button>
       </div>
     `;
+  }
+
+  // Fetched once per station per page session (see ribbonCache's own doc
+  // comment) - kicked off from popupopen below, not eagerly for every
+  // marker. Re-renders the popup (picking up the now-cached HTML via
+  // buildPopupHtml above) only if it's still open by the time the request
+  // resolves - a visitor who already moved on shouldn't cause a pointless
+  // DOM update, though the fetch itself still finishes and caches so the
+  // *next* open of this same station is instant.
+  async function loadRibbon(entry) {
+    const stationId = String(entry.data.stationId);
+    if (ribbonCache.has(stationId)) return;
+    try {
+      const from = new Date(Date.now() - RIBBON_LOOKBACK_HOURS * 3600 * 1000).toISOString();
+      const history = await stationsApi.history(stationId, { from, limit: 2000 });
+      ribbonCache.set(stationId, buildRibbonHtml(history));
+    } catch {
+      // Best-effort - the placeholder just never resolves into a ribbon for
+      // this station this session, not worth its own error message inside
+      // an already-compact popup.
+      ribbonCache.set(stationId, `<div class="popup-ribbon popup-ribbon-empty">Не удалось загрузить историю</div>`);
+    }
+    if (entry.marker.isPopupOpen()) {
+      entry.marker.setPopupContent(buildPopupHtml(entry.data));
+      wirePopupContent(entry);
+    }
+  }
+
+  // Shared by the initial popupopen and by loadRibbon's own content
+  // refresh above - both replace the popup's DOM wholesale (Leaflet has no
+  // partial-update API for popup content), so the detail button's
+  // listener needs re-attaching either time, not just on first open.
+  function wirePopupContent(entry) {
+    const el = entry.marker.getPopup()?.getElement();
+    const btn = el ? el.querySelector('.popup-detail-btn') : null;
+    if (btn) btn.addEventListener('click', openDetailModal);
   }
 
   // Re-sizes markers in place on zoom change rather than calling
@@ -206,13 +294,10 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
         // raw HTML Leaflet drops into the DOM), so it can't use @click -
         // wire it up imperatively each time this marker's popup actually
         // opens instead.
-        marker.on('popupopen', (e) => {
+        marker.on('popupopen', () => {
           selectedStation.value = entry.data;
-          const el = e.popup.getElement();
-          const btn = el ? el.querySelector('.popup-detail-btn') : null;
-          if (btn) {
-            btn.addEventListener('click', openDetailModal);
-          }
+          wirePopupContent(entry);
+          loadRibbon(entry);
         });
         markersLayer.addLayer(marker);
         markerEntries.set(id, entry);
@@ -230,6 +315,7 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
         // data hadn't actually changed.
         if (existing.marker.isPopupOpen()) {
           existing.marker.setPopupContent(buildPopupHtml(existing.data));
+          wirePopupContent(existing);
           selectedStation.value = existing.data;
         }
       }
