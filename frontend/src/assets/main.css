@@ -121,31 +121,25 @@ body {
   padding: 0;
 }
 
-/* Shared small segmented-control look for the header's two independent
-   toggles (see App.vue): map basemap style (store/mapBasemap.js) and site
-   theme (store/theme.js). Visible for every visitor regardless of auth
-   state or which page they're on, same reasoning as .telegram-link below -
-   the basemap one only visibly does anything on the map page itself, but
-   the theme one is meant to be global (see store/theme.js's own doc
-   comment on how far that reach currently extends). */
-.pill-switch {
-  display: flex;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-/* Icon-only (each button's own title/aria-label in App.vue carries the
-   text a label used to show) - saves enough header width that both
-   switchers now fit next to the admin identity/logout controls even on a
-   narrow phone (see .pill-switch--basemap's own media query below, no
-   longer needed for that reason but kept as a small extra safety margin). */
-.pill-switch__btn {
+/* Single-icon toggle for the header's two independent switches (see
+   App.vue): map basemap style (store/mapBasemap.js) and site theme
+   (store/theme.js). Each button shows the *current* selection's icon and
+   cycles to the next one on click, rather than showing every option as its
+   own button (that was the previous .pill-switch design - one button per
+   option, with an --active modifier picking out the current one). One
+   button per function reads its state from its own icon, so it doesn't
+   need a sibling to compare against. Visible for every visitor regardless
+   of auth state or which page they're on, same reasoning as .telegram-link
+   below - the basemap one only visibly does anything on the map page
+   itself, but the theme one is meant to be global (see store/theme.js's
+   own doc comment on how far that reach currently extends). */
+.icon-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
   color: #cdd6e3;
   font: inherit;
   font-size: 15px;
@@ -156,14 +150,8 @@ body {
   cursor: pointer;
 }
 
-.pill-switch__btn:hover {
+.icon-toggle:hover {
   background: rgba(255, 255, 255, 0.1);
-}
-
-.pill-switch__btn--active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  font-weight: 600;
 }
 
 /* Official channel link - always visible regardless of auth state (unlike
@@ -197,19 +185,23 @@ body {
 
 }
 
-/* Both switchers went icon-only (see App.vue) specifically so they'd fit
-   here without needing to drop one on narrow screens the way the old
-   text-labeled version did at 700px - .user's content now needs only
-   ~345px, comfortably under even a 375px viewport. Below ~345px itself
-   (confirmed live: fits at 350px, overflows at 340px) there still isn't
-   room for everything, so the basemap switch is still the one to drop
-   there - it only visibly does anything on the map page itself (see the
-   shared .pill-switch doc comment above), unlike the site-wide theme
-   switch or the always-relevant admin identity/logout controls next to
-   it. A much narrower breakpoint than before, and hopefully one that
-   stops applying entirely as very old/small phones age out of use. */
-@media (max-width: 344px) {
-  .pill-switch--basemap {
+/* Collapsing both switchers from segmented pairs down to one cycling icon
+   each (see .icon-toggle above) shrank .user's needed width from ~345px
+   (two-button-per-switch version) to the same ~345px total - the switches
+   themselves got smaller, but .user's total is dominated by the
+   username/role-badge/logout controls next to them, which didn't change.
+   What did change is where things start overflowing without hiding
+   anything: confirmed live (logged in as admin, worst case) fits at 306px,
+   overflows at 304px - below any mainstream device's viewport width (320px
+   floor, e.g. iPhone SE 1st gen). This breakpoint is effectively a
+   defensive fallback for non-standard cases (split-screen multitasking, an
+   embedded webview, ancient hardware) rather than something any current
+   phone actually hits. Basemap is still the one to drop first if it ever
+   does - it only visibly does anything on the map page itself, unlike the
+   site-wide theme switch or the always-relevant admin identity/logout
+   controls next to it. */
+@media (max-width: 306px) {
+  .icon-toggle--basemap {
     display: none;
   }
 }

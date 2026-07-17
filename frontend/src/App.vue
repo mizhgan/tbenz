@@ -18,6 +18,16 @@ const isAuthenticated = computed(() => auth.isAuthenticated);
 // page you land on first, even though it only visibly does anything once
 // you're looking at the map itself.
 const basemap = useMapBasemapStore();
+const basemapCfg = computed(() => BASEMAP_STYLES[basemap.style]);
+const basemapKeys = Object.keys(BASEMAP_STYLES);
+// One button, not a segmented pair (see icon-toggle in main.css) - cycles
+// through every entry in BASEMAP_STYLES in declaration order, so this
+// keeps working unmodified if a third style is ever added, not just for
+// today's two.
+function cycleBasemap() {
+  const nextIndex = (basemapKeys.indexOf(basemap.style) + 1) % basemapKeys.length;
+  basemap.setStyle(basemapKeys[nextIndex]);
+}
 // Site-wide light/dark theme (store/theme.js) - reflected onto <html> via
 // data-theme below so both regular CSS (MapView.vue's own chrome) and
 // <Teleport>-ed content (StationDetailModal.vue, still a descendant of
@@ -69,42 +79,24 @@ function handleLogout() {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="user">
-        <div class="pill-switch pill-switch--basemap">
-          <button
-            v-for="(cfg, key) in BASEMAP_STYLES"
-            :key="key"
-            type="button"
-            class="pill-switch__btn"
-            :class="{ 'pill-switch__btn--active': basemap.style === key }"
-            :title="`Подложка карты: ${cfg.label}`"
-            :aria-label="`Подложка карты: ${cfg.label}`"
-            @click="basemap.setStyle(key)"
-          >
-            {{ cfg.icon }}
-          </button>
-        </div>
-        <div class="pill-switch">
-          <button
-            type="button"
-            class="pill-switch__btn"
-            :class="{ 'pill-switch__btn--active': theme.theme === 'light' }"
-            title="Тема сайта: светлая"
-            aria-label="Тема сайта: светлая"
-            @click="theme.setTheme('light')"
-          >
-            ☀️
-          </button>
-          <button
-            type="button"
-            class="pill-switch__btn"
-            :class="{ 'pill-switch__btn--active': theme.theme === 'dark' }"
-            title="Тема сайта: тёмная"
-            aria-label="Тема сайта: тёмная"
-            @click="theme.setTheme('dark')"
-          >
-            🌙
-          </button>
-        </div>
+        <button
+          type="button"
+          class="icon-toggle icon-toggle--basemap"
+          :title="`Подложка карты: ${basemapCfg.label} (нажмите для смены)`"
+          :aria-label="`Подложка карты: ${basemapCfg.label}. Нажмите для смены`"
+          @click="cycleBasemap"
+        >
+          {{ basemapCfg.icon }}
+        </button>
+        <button
+          type="button"
+          class="icon-toggle"
+          :title="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'} (нажмите для смены)`"
+          :aria-label="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'}. Нажмите для смены`"
+          @click="theme.setTheme(theme.theme === 'dark' ? 'light' : 'dark')"
+        >
+          {{ theme.theme === 'dark' ? '🌙' : '☀️' }}
+        </button>
         <a
           class="telegram-link"
           href="https://t.me/tbenzin"
