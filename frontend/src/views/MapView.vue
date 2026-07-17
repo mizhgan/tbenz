@@ -964,7 +964,6 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 
-:deep(.popup-ribbon-loading),
 :deep(.popup-ribbon-empty) {
   font-size: 11px;
   color: #94a3b8;
@@ -1274,7 +1273,6 @@ onBeforeUnmount(() => {
 }
 
 [data-theme='dark'] .popup-ribbon-hint,
-[data-theme='dark'] .popup-ribbon-loading,
 [data-theme='dark'] .popup-ribbon-empty {
   color: #64748b;
 }

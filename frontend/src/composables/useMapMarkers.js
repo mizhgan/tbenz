@@ -75,8 +75,25 @@ function sourcesSummaryHtml(s) {
 const RIBBON_LOOKBACK_HOURS = 24;
 const ribbonCache = new Map();
 
-function ribbonPlaceholderHtml() {
-  return `<div class="popup-ribbon popup-ribbon-loading">Загрузка истории…</div>`;
+// Same row/label/hint structure buildRibbonHtml itself renders (right down
+// to the real hint text, which - like the labels - never actually depends
+// on the fetch result: CORE_FUEL_TYPES and RIBBON_LOOKBACK_HOURS are both
+// known upfront) - only the bar itself is shimmer-placeholder content,
+// since that's the one piece that genuinely doesn't exist yet. Matching
+// heights exactly means the popup doesn't reflow/jump once the real
+// ribbon replaces this - a plain "Loading…" line was noticeably shorter
+// than 2 real bar rows, shifting everything below it down the moment data
+// arrived.
+function ribbonSkeletonHtml() {
+  const rows = CORE_FUEL_TYPES.map(
+    (fuelType) => `
+      <div class="popup-ribbon-row">
+        <span class="popup-ribbon-label">${escapeHtml(fuelTypeLabel(fuelType))}</span>
+        <div class="popup-ribbon-bar skeleton"></div>
+      </div>
+    `
+  ).join('');
+  return `<div class="popup-ribbon">${rows}<div class="popup-ribbon-hint">за последние ${RIBBON_LOOKBACK_HOURS} ч.</div></div>`;
 }
 
 // Same segment-computation utilities StationReliabilityTimeline.vue uses
@@ -194,7 +211,7 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
       ? formatDateTime(new Date(s.overallLastTransactionAt).getTime())
       : 'нет данных';
     const stationId = String(s.stationId);
-    const ribbonHtml = ribbonCache.get(stationId) || ribbonPlaceholderHtml();
+    const ribbonHtml = ribbonCache.get(stationId) || ribbonSkeletonHtml();
     return `
       <div class="station-popup">
         <div class="popup-title">${escapeHtml(s.name || 'АЗС')}</div>
