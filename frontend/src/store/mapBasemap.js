@@ -24,15 +24,20 @@ const STORAGE_KEY = 'mapBasemapStyle';
 // what this option is for anymore: it's the familiar, unmodified OSM look,
 // full stop. "contrast" is the answer for anyone who wants the
 // better-marker-readability experience instead.
+// `icon` is what the header switcher actually renders (see App.vue) -
+// `label` stays around for the button's title/aria-label so the icon-only
+// button is still identifiable without relying on the glyph alone.
 export const BASEMAP_STYLES = {
   standard: {
     label: 'Обычная',
+    icon: '🗺️',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors',
     subdomains: 'abc',
   },
   contrast: {
     label: 'Контрастная',
+    icon: '◐',
     urls: {
       light: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',

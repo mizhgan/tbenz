@@ -69,34 +69,40 @@ function handleLogout() {
         <router-link to="/settings">Настройки</router-link>
       </nav>
       <div class="user">
-        <div class="pill-switch pill-switch--basemap" title="Стиль подложки карты">
+        <div class="pill-switch pill-switch--basemap">
           <button
             v-for="(cfg, key) in BASEMAP_STYLES"
             :key="key"
             type="button"
             class="pill-switch__btn"
             :class="{ 'pill-switch__btn--active': basemap.style === key }"
+            :title="`Подложка карты: ${cfg.label}`"
+            :aria-label="`Подложка карты: ${cfg.label}`"
             @click="basemap.setStyle(key)"
           >
-            {{ cfg.label }}
+            {{ cfg.icon }}
           </button>
         </div>
-        <div class="pill-switch" title="Тема сайта">
+        <div class="pill-switch">
           <button
             type="button"
             class="pill-switch__btn"
             :class="{ 'pill-switch__btn--active': theme.theme === 'light' }"
+            title="Тема сайта: светлая"
+            aria-label="Тема сайта: светлая"
             @click="theme.setTheme('light')"
           >
-            Светлая
+            ☀️
           </button>
           <button
             type="button"
             class="pill-switch__btn"
             :class="{ 'pill-switch__btn--active': theme.theme === 'dark' }"
+            title="Тема сайта: тёмная"
+            aria-label="Тема сайта: тёмная"
             @click="theme.setTheme('dark')"
           >
-            Тёмная
+            🌙
           </button>
         </div>
         <a

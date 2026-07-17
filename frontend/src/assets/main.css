@@ -135,15 +135,25 @@ body {
   overflow: hidden;
 }
 
+/* Icon-only (each button's own title/aria-label in App.vue carries the
+   text a label used to show) - saves enough header width that both
+   switchers now fit next to the admin identity/logout controls even on a
+   narrow phone (see .pill-switch--basemap's own media query below, no
+   longer needed for that reason but kept as a small extra safety margin). */
 .pill-switch__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: #cdd6e3;
   font: inherit;
-  font-size: 12px;
-  padding: 5px 9px;
+  font-size: 15px;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .pill-switch__btn:hover {
@@ -185,15 +195,20 @@ body {
     display: none;
   }
 
-  /* .user's own content (both pill-switches + telegram + username + role
-     badge + logout) doesn't wrap and needs ~514px - confirmed live on a
-     375px viewport that without this, the row simply overflows past the
-     screen edge, pushing the username/role/logout controls off-screen and
-     out of reach entirely (not just cramped - genuinely unusable). The
-     basemap switch is the one to drop: it only visibly does anything on
-     the map page itself (see the shared .pill-switch doc comment above),
-     unlike the site-wide theme switch or the always-relevant admin
-     identity/logout controls next to it. */
+}
+
+/* Both switchers went icon-only (see App.vue) specifically so they'd fit
+   here without needing to drop one on narrow screens the way the old
+   text-labeled version did at 700px - .user's content now needs only
+   ~345px, comfortably under even a 375px viewport. Below ~345px itself
+   (confirmed live: fits at 350px, overflows at 340px) there still isn't
+   room for everything, so the basemap switch is still the one to drop
+   there - it only visibly does anything on the map page itself (see the
+   shared .pill-switch doc comment above), unlike the site-wide theme
+   switch or the always-relevant admin identity/logout controls next to
+   it. A much narrower breakpoint than before, and hopefully one that
+   stops applying entirely as very old/small phones age out of use. */
+@media (max-width: 344px) {
   .pill-switch--basemap {
     display: none;
   }
