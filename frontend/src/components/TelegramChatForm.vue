@@ -4,6 +4,7 @@ import { stationsApi } from '../api/regions';
 import RegionMapPicker from './RegionMapPicker.vue';
 import { statusMeta } from '../utils/fuelStatus';
 import { useAsyncAction } from '../composables/useAsyncAction';
+import ModalForm from './ModalForm.vue';
 
 const props = defineProps({
   initial: { type: Object, required: true },
@@ -160,186 +161,159 @@ function handleSubmit() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="modal-backdrop" @click.self="emit('cancel')">
-      <form class="card modal-card" @submit.prevent="handleSubmit">
-        <h2>Настройка чата «{{ initial.title || initial.chatId }}»</h2>
-        <p class="hint">
-          {{ initial.type }} · ID {{ initial.chatId }}
-        </p>
+  <ModalForm :error="error" @submit="handleSubmit" @cancel="emit('cancel')">
+    <template #header>
+      <h2 class="chat-title">Настройка чата «{{ initial.title || initial.chatId }}»</h2>
+      <p class="hint">
+        {{ initial.type }} · ID {{ initial.chatId }}
+      </p>
+    </template>
 
-        <div class="form-row">
-          <label for="status">Статус</label>
-          <select id="status" v-model="status">
-            <option v-for="opt in STATUS_OPTIONS" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="form-row">
-          <label>Районы, за которыми следит чат</label>
-          <div class="region-list">
-            <p v-if="!regions.length" class="muted">Районы ещё не созданы.</p>
-            <label v-for="r in regions" :key="r._id" class="filter-checkbox">
-              <input
-                type="checkbox"
-                :checked="selectedRegionIds.has(String(r._id))"
-                @change="toggleRegion(r._id)"
-              />
-              {{ r.name }}
-            </label>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <label>События</label>
-          <div class="region-list">
-            <label v-for="opt in EVENT_OPTIONS" :key="opt.key" class="filter-checkbox">
-              <input type="checkbox" v-model="events[opt.key]" />
-              {{ opt.label }}
-            </label>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <label for="fuelTypes">Виды топлива (через запятую, пусто — АИ-92, АИ-95)</label>
-          <input id="fuelTypes" v-model="fuelTypesText" type="text" placeholder="92, 95, 98" />
-        </div>
-
-        <div class="form-row">
-          <label for="brands">Сети АЗС (через запятую, пусто — все)</label>
-          <input id="brands" v-model="brandsText" type="text" placeholder="Роснефть, Лукойл" />
-        </div>
-
-        <div class="form-row">
-          <label>Вотчлист станций</label>
-          <p class="hint">Станции из вотчлиста уведомляют чат независимо от фильтров выше.</p>
-          <div class="watchlist-search">
-            <input
-              v-model="searchQuery"
-              type="text"
-              placeholder="Поиск станции по названию или адресу"
-              @keyup.enter.prevent="runSearch"
-            />
-            <button type="button" class="btn secondary" :disabled="searching" @click="runSearch">
-              {{ searching ? 'Поиск...' : 'Найти' }}
-            </button>
-          </div>
-          <p v-if="searchError" class="error-text">{{ searchError }}</p>
-          <ul v-if="searchResults.length" class="search-results">
-            <li v-for="s in searchResults" :key="s._id">
-              <span>{{ s.name }} <span class="muted">{{ s.address }}</span></span>
-              <button type="button" class="btn secondary" @click="addStation(s)">Добавить</button>
-            </li>
-          </ul>
-
-          <ul v-if="watchlist.length" class="watchlist-items">
-            <li v-for="s in watchlist" :key="s.id">
-              <span>{{ s.name || s.id }} <span class="muted">{{ s.address }}</span></span>
-              <button type="button" class="btn danger" @click="removeStation(s.id)">Убрать</button>
-            </li>
-          </ul>
-          <p v-else class="muted">Вотчлист пуст.</p>
-        </div>
-
-        <div class="form-row">
-          <label>Картинка карты в уведомлениях о появлении/пропаже топлива</label>
-          <p class="hint">
-            Необязательно. Выберите на карте область, которую нужно показывать на картинке —
-            специально не весь район целиком, чтобы точки станций не были слишком мелкими. Если
-            область не задана, уведомления остаются текстовыми, как раньше.
-          </p>
-          <RegionMapPicker :model-value="bbox" @update:model-value="onBboxPicked" />
-          <div class="bbox-grid">
-            <div class="form-row">
-              <label>minLat</label>
-              <input v-model.number="bbox.minLat" type="number" step="any" />
-            </div>
-            <div class="form-row">
-              <label>maxLat</label>
-              <input v-model.number="bbox.maxLat" type="number" step="any" />
-            </div>
-            <div class="form-row">
-              <label>minLon</label>
-              <input v-model.number="bbox.minLon" type="number" step="any" />
-            </div>
-            <div class="form-row">
-              <label>maxLon</label>
-              <input v-model.number="bbox.maxLon" type="number" step="any" />
-            </div>
-          </div>
-          <button type="button" class="btn secondary" @click="clearBbox">Убрать картинку (не задавать область)</button>
-
-          <p class="hint" style="margin-top: 12px">
-            Какие статусы отмечать точками на картинке — например, можно убрать «Нет», если
-            станций без топлива слишком много и они перекрывают всё остальное. На сводку чисел под
-            картинкой это не влияет — там всегда полная картина (по АИ-92, АИ-95, без учёта этого
-            фильтра).
-          </p>
-          <div class="region-list">
-            <label v-for="key in MAP_STATUS_KEYS" :key="key" class="filter-checkbox">
-              <input
-                type="checkbox"
-                :checked="selectedMapStatuses.has(key)"
-                @change="toggleMapStatus(key)"
-              />
-              <span class="status-dot" :style="{ background: statusMeta(key).color }"></span>
-              {{ statusMeta(key).label }}
-            </label>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <label>Ежедневный пост-приглашение</label>
-          <p class="hint">
-            Раз в день в выбранное время публикует пост со ссылками на сайт и бота (текст каждый
-            раз немного разный, суть та же). Картинка берётся из настройки выше (область на карте)
-            — если она не задана, пост уходит только текстом. Для привлечения новых подписчиков,
-            не для оповещений о статусе топлива.
-          </p>
-          <label class="filter-checkbox">
-            <input type="checkbox" v-model="promo.enabled" />
-            Публиковать ежедневный пост
-          </label>
-          <div class="form-row">
-            <label for="promoTime">Время (по Москве)</label>
-            <input id="promoTime" v-model="promo.time" type="time" />
-          </div>
-        </div>
-
-        <p v-if="error" class="error-text">{{ error }}</p>
-
-        <div class="modal-actions">
-          <button type="button" class="btn secondary" @click="emit('cancel')">Отмена</button>
-          <button type="submit" class="btn">Сохранить</button>
-        </div>
-      </form>
+    <div class="form-row">
+      <label for="status">Статус</label>
+      <select id="status" v-model="status">
+        <option v-for="opt in STATUS_OPTIONS" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
     </div>
-  </Teleport>
+
+    <div class="form-row">
+      <label>Районы, за которыми следит чат</label>
+      <div class="region-list">
+        <p v-if="!regions.length" class="muted">Районы ещё не созданы.</p>
+        <label v-for="r in regions" :key="r._id" class="filter-checkbox">
+          <input
+            type="checkbox"
+            :checked="selectedRegionIds.has(String(r._id))"
+            @change="toggleRegion(r._id)"
+          />
+          {{ r.name }}
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label>События</label>
+      <div class="region-list">
+        <label v-for="opt in EVENT_OPTIONS" :key="opt.key" class="filter-checkbox">
+          <input type="checkbox" v-model="events[opt.key]" />
+          {{ opt.label }}
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label for="fuelTypes">Виды топлива (через запятую, пусто — АИ-92, АИ-95)</label>
+      <input id="fuelTypes" v-model="fuelTypesText" type="text" placeholder="92, 95, 98" />
+    </div>
+
+    <div class="form-row">
+      <label for="brands">Сети АЗС (через запятую, пусто — все)</label>
+      <input id="brands" v-model="brandsText" type="text" placeholder="Роснефть, Лукойл" />
+    </div>
+
+    <div class="form-row">
+      <label>Вотчлист станций</label>
+      <p class="hint">Станции из вотчлиста уведомляют чат независимо от фильтров выше.</p>
+      <div class="watchlist-search">
+        <input
+          v-model="searchQuery"
+          type="text"
+          placeholder="Поиск станции по названию или адресу"
+          @keyup.enter.prevent="runSearch"
+        />
+        <button type="button" class="btn secondary" :disabled="searching" @click="runSearch">
+          {{ searching ? 'Поиск...' : 'Найти' }}
+        </button>
+      </div>
+      <p v-if="searchError" class="error-text">{{ searchError }}</p>
+      <ul v-if="searchResults.length" class="search-results">
+        <li v-for="s in searchResults" :key="s._id">
+          <span>{{ s.name }} <span class="muted">{{ s.address }}</span></span>
+          <button type="button" class="btn secondary" @click="addStation(s)">Добавить</button>
+        </li>
+      </ul>
+
+      <ul v-if="watchlist.length" class="watchlist-items">
+        <li v-for="s in watchlist" :key="s.id">
+          <span>{{ s.name || s.id }} <span class="muted">{{ s.address }}</span></span>
+          <button type="button" class="btn danger" @click="removeStation(s.id)">Убрать</button>
+        </li>
+      </ul>
+      <p v-else class="muted">Вотчлист пуст.</p>
+    </div>
+
+    <div class="form-row">
+      <label>Картинка карты в уведомлениях о появлении/пропаже топлива</label>
+      <p class="hint">
+        Необязательно. Выберите на карте область, которую нужно показывать на картинке —
+        специально не весь район целиком, чтобы точки станций не были слишком мелкими. Если
+        область не задана, уведомления остаются текстовыми, как раньше.
+      </p>
+      <RegionMapPicker :model-value="bbox" @update:model-value="onBboxPicked" />
+      <div class="bbox-grid">
+        <div class="form-row">
+          <label>minLat</label>
+          <input v-model.number="bbox.minLat" type="number" step="any" />
+        </div>
+        <div class="form-row">
+          <label>maxLat</label>
+          <input v-model.number="bbox.maxLat" type="number" step="any" />
+        </div>
+        <div class="form-row">
+          <label>minLon</label>
+          <input v-model.number="bbox.minLon" type="number" step="any" />
+        </div>
+        <div class="form-row">
+          <label>maxLon</label>
+          <input v-model.number="bbox.maxLon" type="number" step="any" />
+        </div>
+      </div>
+      <button type="button" class="btn secondary" @click="clearBbox">Убрать картинку (не задавать область)</button>
+
+      <p class="hint" style="margin-top: 12px">
+        Какие статусы отмечать точками на картинке — например, можно убрать «Нет», если
+        станций без топлива слишком много и они перекрывают всё остальное. На сводку чисел под
+        картинкой это не влияет — там всегда полная картина (по АИ-92, АИ-95, без учёта этого
+        фильтра).
+      </p>
+      <div class="region-list">
+        <label v-for="key in MAP_STATUS_KEYS" :key="key" class="filter-checkbox">
+          <input
+            type="checkbox"
+            :checked="selectedMapStatuses.has(key)"
+            @change="toggleMapStatus(key)"
+          />
+          <span class="status-dot" :style="{ background: statusMeta(key).color }"></span>
+          {{ statusMeta(key).label }}
+        </label>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label>Ежедневный пост-приглашение</label>
+      <p class="hint">
+        Раз в день в выбранное время публикует пост со ссылками на сайт и бота (текст каждый
+        раз немного разный, суть та же). Картинка берётся из настройки выше (область на карте)
+        — если она не задана, пост уходит только текстом. Для привлечения новых подписчиков,
+        не для оповещений о статусе топлива.
+      </p>
+      <label class="filter-checkbox">
+        <input type="checkbox" v-model="promo.enabled" />
+        Публиковать ежедневный пост
+      </label>
+      <div class="form-row">
+        <label for="promoTime">Время (по Москве)</label>
+        <input id="promoTime" v-model="promo.time" type="time" />
+      </div>
+    </div>
+  </ModalForm>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 40px 16px;
-  overflow-y: auto;
-  z-index: 2000;
-}
-
-.modal-card {
-  width: 100%;
-  max-width: 560px;
-}
-
-.modal-card h2 {
-  margin-top: 0;
-  margin-bottom: 2px;
+.chat-title {
+  margin: 0 0 2px;
   font-size: 18px;
 }
 
@@ -410,13 +384,6 @@ function handleSubmit() {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 13px;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
 }
 
 /* Site dark theme (store/theme.js) - this file's own .region-list/list-item

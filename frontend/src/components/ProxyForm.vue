@@ -1,5 +1,6 @@
 <script setup>
 import { reactive, ref } from 'vue';
+import ModalForm from './ModalForm.vue';
 
 const props = defineProps({
   initial: { type: Object, default: null },
@@ -63,90 +64,61 @@ function handleSubmit() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="modal-backdrop" @click.self="emit('cancel')">
-      <form class="card modal-card" @submit.prevent="handleSubmit">
-        <h2>{{ initial ? 'Редактировать прокси' : 'Новый прокси' }}</h2>
-
-        <div class="form-row">
-          <label for="label">Название (необязательно)</label>
-          <input id="label" v-model="form.label" type="text" placeholder="Например, DE-1" />
-        </div>
-
-        <div class="form-row">
-          <label for="type">Тип</label>
-          <select id="type" v-model="form.type">
-            <option value="socks5">SOCKS5</option>
-            <option value="http">HTTP</option>
-            <option value="https">HTTPS</option>
-          </select>
-        </div>
-
-        <div class="bbox-grid">
-          <div class="form-row">
-            <label for="host">Адрес</label>
-            <input id="host" v-model="form.host" type="text" placeholder="1.2.3.4" required />
-          </div>
-          <div class="form-row">
-            <label for="port">Порт</label>
-            <input id="port" v-model.number="form.port" type="number" min="1" max="65535" required />
-          </div>
-        </div>
-
-        <div class="bbox-grid">
-          <div class="form-row">
-            <label for="username">Логин (необязательно)</label>
-            <input id="username" v-model="form.username" type="text" autocomplete="off" />
-          </div>
-          <div class="form-row">
-            <label for="password">{{
-              initial ? 'Новый пароль (оставьте пустым, чтобы не менять)' : 'Пароль (необязательно)'
-            }}</label>
-            <input id="password" v-model="form.password" type="password" autocomplete="new-password" />
-          </div>
-        </div>
-
-        <div class="form-row form-row--inline">
-          <label for="active">
-            <input id="active" v-model="form.active" type="checkbox" />
-            Активен (использовать для запросов)
-          </label>
-        </div>
-
-        <p v-if="error" class="error-text">{{ error }}</p>
-
-        <div class="modal-actions">
-          <button type="button" class="btn secondary" @click="emit('cancel')">Отмена</button>
-          <button type="submit" class="btn">Сохранить</button>
-        </div>
-      </form>
+  <ModalForm
+    :title="initial ? 'Редактировать прокси' : 'Новый прокси'"
+    :error="error"
+    max-width="480px"
+    @submit="handleSubmit"
+    @cancel="emit('cancel')"
+  >
+    <div class="form-row">
+      <label for="label">Название (необязательно)</label>
+      <input id="label" v-model="form.label" type="text" placeholder="Например, DE-1" />
     </div>
-  </Teleport>
+
+    <div class="form-row">
+      <label for="type">Тип</label>
+      <select id="type" v-model="form.type">
+        <option value="socks5">SOCKS5</option>
+        <option value="http">HTTP</option>
+        <option value="https">HTTPS</option>
+      </select>
+    </div>
+
+    <div class="bbox-grid">
+      <div class="form-row">
+        <label for="host">Адрес</label>
+        <input id="host" v-model="form.host" type="text" placeholder="1.2.3.4" required />
+      </div>
+      <div class="form-row">
+        <label for="port">Порт</label>
+        <input id="port" v-model.number="form.port" type="number" min="1" max="65535" required />
+      </div>
+    </div>
+
+    <div class="bbox-grid">
+      <div class="form-row">
+        <label for="username">Логин (необязательно)</label>
+        <input id="username" v-model="form.username" type="text" autocomplete="off" />
+      </div>
+      <div class="form-row">
+        <label for="password">{{
+          initial ? 'Новый пароль (оставьте пустым, чтобы не менять)' : 'Пароль (необязательно)'
+        }}</label>
+        <input id="password" v-model="form.password" type="password" autocomplete="new-password" />
+      </div>
+    </div>
+
+    <div class="form-row form-row--inline">
+      <label for="active">
+        <input id="active" v-model="form.active" type="checkbox" />
+        Активен (использовать для запросов)
+      </label>
+    </div>
+  </ModalForm>
 </template>
 
 <style scoped>
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 40px 16px;
-  overflow-y: auto;
-  z-index: 2000;
-}
-
-.modal-card {
-  width: 100%;
-  max-width: 480px;
-}
-
-.modal-card h2 {
-  margin-top: 0;
-  font-size: 18px;
-}
-
 .bbox-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -157,12 +129,5 @@ function handleSubmit() {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 16px;
 }
 </style>
