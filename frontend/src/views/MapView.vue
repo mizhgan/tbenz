@@ -1064,30 +1064,14 @@ onBeforeUnmount(() => {
   background: #3f4d63;
 }
 
-[data-theme='dark'] :deep(.leaflet-popup-content-wrapper),
-[data-theme='dark'] :deep(.leaflet-popup-tip) {
-  background: #1e293b;
-  color: #e2e8f0;
-}
-
-[data-theme='dark'] :deep(.leaflet-container a.leaflet-popup-close-button) {
-  color: #94a3b8;
-}
-
-[data-theme='dark'] :deep(.popup-address),
-[data-theme='dark'] :deep(.popup-hint),
-[data-theme='dark'] :deep(.popup-sources) {
-  color: #94a3b8;
-}
-
-[data-theme='dark'] :deep(.popup-fuel-list) {
-  border-top-color: #334155;
-}
-
-[data-theme='dark'] :deep(.popup-source-chip) {
-  background: #334155;
-  color: #e2e8f0;
-}
+/* Dark-theme popup rules used to live here as `[data-theme='dark']
+   :deep(.foo)`, which doesn't work: :deep() always injects this
+   component's scope attribute as a *required ancestor* of whatever it
+   wraps (confirmed live), and there's no way to satisfy that when the
+   selector needs to match under `[data-theme="dark"]` on <html> - <html>
+   has no ancestors at all, scoped or not, so any :deep()-based version of
+   this rule can never match anything. Moved to a genuinely global <style>
+   block below instead (see its own doc comment). */
 
 .filter-block {
   display: flex;
@@ -1188,8 +1172,46 @@ onBeforeUnmount(() => {
   color: #e2e8f0;
   border-color: #334155;
 }
+</style>
 
-[data-theme='dark'] :deep(.popup-sources-warn) {
+<style>
+/* Genuinely global (no `scoped` attribute), unlike every other <style>
+   block in this app - needed specifically for these dark-theme popup
+   rules. They must match under `[data-theme="dark"]` on <html>, which has
+   no ancestors at all - scoped CSS (including :deep(), which still
+   requires this component's own scope attribute as an ancestor somewhere
+   in the selector - see the removed rules' own former doc comment in the
+   scoped block above) can never satisfy that. Safe to be unscoped:
+   confirmed these exact class names (.leaflet-popup-*, .popup-*) are only
+   ever used by useMapMarkers.js's bindPopup calls - no other component
+   renders anything using them, so there's nothing else on the site for an
+   unscoped rule to accidentally style. */
+[data-theme='dark'] .leaflet-popup-content-wrapper,
+[data-theme='dark'] .leaflet-popup-tip {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .leaflet-container a.leaflet-popup-close-button {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .popup-address,
+[data-theme='dark'] .popup-hint,
+[data-theme='dark'] .popup-sources {
+  color: #94a3b8;
+}
+
+[data-theme='dark'] .popup-fuel-list {
+  border-top-color: #334155;
+}
+
+[data-theme='dark'] .popup-source-chip {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+[data-theme='dark'] .popup-sources-warn {
   color: #fcd34d;
 }
 </style>

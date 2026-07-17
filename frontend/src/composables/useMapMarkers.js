@@ -101,6 +101,17 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
   // out from under someone who's since panned/zoomed manually.
   const hasFitted = ref(false);
 
+  // stationId -> { marker, data } - lets renderMarkers below update markers
+  // in place (position/color/tooltip/popup content) instead of clearing and
+  // rebuilding the whole layer on every refresh, which used to close any
+  // popup a visitor had open the moment the next live poll (or filter
+  // change) landed, even though nothing about *that* station necessarily
+  // changed. `entry.data` is what buildPopupHtml's bound callback actually
+  // reads (see renderMarkers below) - reassigning it on every update is
+  // what makes an already-open popup's content refresh in place instead of
+  // going stale until it's closed and reopened.
+  const markerEntries = new Map();
+
   function openDetailModal() {
     showDetailModal.value = true;
   }
@@ -158,40 +169,79 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
   function renderMarkers() {
     if (!mapState.map || !mapState.markersLayer) return;
     const { map, markersLayer } = mapState;
-    markersLayer.clearLayers();
     const radius = markerRadiusForZoom(map.getZoom());
+    const seenIds = new Set();
+
     for (const s of filteredStationsRef.value) {
+      const id = String(s.stationId);
+      seenIds.add(id);
       const meta = statusMeta(effectiveStatus(s));
-      const marker = L.circleMarker([s.lat, s.lon], {
-        radius,
-        // White outline independent of the status color (previously
-        // `color` matched `fillColor`, so the "stroke" was invisible as a
-        // stroke) - guarantees separation from whatever's directly
-        // underneath, since a same-color-as-fill edge blends into
-        // equally-colored map features (a red marker over a red/orange
-        // road, a green one over a park).
-        color: '#fff',
-        fillColor: meta.color,
-        fillOpacity: 0.85,
-        weight: 2,
-      });
       const fuelSuffix = ` (${escapeHtml(badgeFuelLabelRef.value)})`;
-      marker.bindTooltip(`${escapeHtml(s.name || 'АЗС')} — ${meta.label}${fuelSuffix}`);
-      marker.bindPopup(() => buildPopupHtml(s), { maxWidth: 260, minWidth: 220 });
-      // The button inside the popup isn't part of Vue's render tree (it's
-      // raw HTML Leaflet drops into the DOM), so it can't use @click - wire
-      // it up imperatively each time this marker's popup actually opens
-      // instead.
-      marker.on('popupopen', (e) => {
-        selectedStation.value = s;
-        const el = e.popup.getElement();
-        const btn = el ? el.querySelector('.popup-detail-btn') : null;
-        if (btn) {
-          btn.addEventListener('click', openDetailModal);
+      const tooltipText = `${escapeHtml(s.name || 'АЗС')} — ${meta.label}${fuelSuffix}`;
+
+      const existing = markerEntries.get(id);
+      if (!existing) {
+        const marker = L.circleMarker([s.lat, s.lon], {
+          radius,
+          // White outline independent of the status color (previously
+          // `color` matched `fillColor`, so the "stroke" was invisible as a
+          // stroke) - guarantees separation from whatever's directly
+          // underneath, since a same-color-as-fill edge blends into
+          // equally-colored map features (a red marker over a red/orange
+          // road, a green one over a park).
+          color: '#fff',
+          fillColor: meta.color,
+          fillOpacity: 0.85,
+          weight: 2,
+        });
+        // `entry` (not `s` directly) is what the popup callback and
+        // popupopen handler below read, and entry.data gets reassigned on
+        // every later refresh (see the `else` branch) - so a popup bound
+        // this way always shows/reopens with the latest data for this
+        // station, not a frozen snapshot from whenever it was first drawn.
+        const entry = { marker, data: s };
+        marker.bindTooltip(tooltipText);
+        marker.bindPopup(() => buildPopupHtml(entry.data), { maxWidth: 260, minWidth: 220 });
+        // The button inside the popup isn't part of Vue's render tree (it's
+        // raw HTML Leaflet drops into the DOM), so it can't use @click -
+        // wire it up imperatively each time this marker's popup actually
+        // opens instead.
+        marker.on('popupopen', (e) => {
+          selectedStation.value = entry.data;
+          const el = e.popup.getElement();
+          const btn = el ? el.querySelector('.popup-detail-btn') : null;
+          if (btn) {
+            btn.addEventListener('click', openDetailModal);
+          }
+        });
+        markersLayer.addLayer(marker);
+        markerEntries.set(id, entry);
+      } else {
+        existing.data = s;
+        existing.marker.setLatLng([s.lat, s.lon]);
+        existing.marker.setStyle({ fillColor: meta.color, radius });
+        existing.marker.setTooltipContent(tooltipText);
+        // A closed popup already picks up the new `existing.data` next time
+        // it opens (see the bindPopup callback above) - an already-open one
+        // needs its content refreshed explicitly, which is the whole point
+        // of this diff-based render instead of the old clear-and-rebuild:
+        // that used to destroy and recreate every marker (and so close
+        // every open popup) on each live refresh, even for stations whose
+        // data hadn't actually changed.
+        if (existing.marker.isPopupOpen()) {
+          existing.marker.setPopupContent(buildPopupHtml(existing.data));
+          selectedStation.value = existing.data;
         }
-      });
-      markersLayer.addLayer(marker);
+      }
     }
+
+    for (const [id, entry] of markerEntries) {
+      if (!seenIds.has(id)) {
+        markersLayer.removeLayer(entry.marker);
+        markerEntries.delete(id);
+      }
+    }
+
     if (stationsRef.value.length && !hasFitted.value) {
       const bounds = L.latLngBounds(stationsRef.value.map((s) => [s.lat, s.lon]));
       map.fitBounds(bounds, { padding: [30, 30] });
