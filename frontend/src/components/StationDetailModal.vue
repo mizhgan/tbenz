@@ -7,6 +7,7 @@ import { availabilityColor, formatPct, formatMinutes } from '../utils/colorScale
 import { renderStationCard, canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
+import { useAsyncAction } from '../composables/useAsyncAction';
 import { useAuthStore } from '../store/auth';
 import StationReliabilityTimeline from './StationReliabilityTimeline.vue';
 
@@ -150,8 +151,7 @@ const headerStation = computed(() => ({
 
 const editingDetails = ref(false);
 const editForm = reactive({ name: '', brand: '', address: '' });
-const editBusy = ref(false);
-const editError = ref('');
+const { loading: editBusy, error: editError, run: runSaveDetails } = useAsyncAction();
 
 function openEditDetails() {
   editForm.name = headerStation.value.name || '';
@@ -162,28 +162,32 @@ function openEditDetails() {
 }
 
 async function saveDetails() {
-  editBusy.value = true;
-  editError.value = '';
-  try {
-    const updated = await stationsApi.update(props.station.stationId, {
-      name: editForm.name.trim(),
-      brand: editForm.brand.trim(),
-      address: editForm.address.trim(),
-    });
+  const updated = await runSaveDetails(
+    () =>
+      stationsApi.update(props.station.stationId, {
+        name: editForm.name.trim(),
+        brand: editForm.brand.trim(),
+        address: editForm.address.trim(),
+      }),
+    { fallbackMessage: 'Не удалось сохранить изменения' }
+  );
+  if (updated) {
     if (sourceDoc.value) Object.assign(sourceDoc.value, updated);
     editingDetails.value = false;
     emit('changed');
-  } catch (err) {
-    editError.value = err.response?.data?.error || 'Не удалось сохранить изменения';
-  } finally {
-    editBusy.value = false;
   }
 }
 
-const cardGenerating = ref(false);
 const cardUrl = ref(null);
-const cardError = ref('');
 const copyFeedback = ref('');
+// Shared across generateCard/copyCardToClipboard/shareCard below - same
+// grouping the original hand-rolled cardError was already doing (one
+// error slot for the whole "generate, then copy or share it" flow).
+// cardGenerating technically also flips true/false during a copy/share
+// call this way (neither has its own loading UI, only generateCard's
+// button does) - harmless since those are nearly-instant browser API
+// calls, not worth a second useAsyncAction instance just to avoid it.
+const { loading: cardGenerating, error: cardError, run: runCard } = useAsyncAction();
 const clipboardSupported = canCopyImageToClipboard();
 let cardBlob = null;
 let cardFile = null;
@@ -229,71 +233,65 @@ function resetCard() {
 }
 
 async function generateCard() {
-  cardError.value = '';
   copyFeedback.value = '';
-  cardGenerating.value = true;
-  try {
-    // Forecast/history are "nice to have" on the card, not essential - a
-    // failure on either just means that section is omitted, not that the
-    // whole card generation fails (same reasoning as the reports page's
-    // per-section error handling).
-    // from/limit matches StationReliabilityTimeline.vue's own request - the
-    // card's status ribbon needs the same real 7 days of history the live
-    // page's ribbon shows, not just whatever the fuel-type strips below it
-    // used to get by with (200 most recent, unbounded span - often well
-    // under a week at ~15-minute polling).
-    const historyFrom = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-    const [forecastResult, historyResult] = await Promise.allSettled([
-      stationsApi.forecast(props.station.stationId, { hoursAhead: 12 }),
-      stationsApi.history(props.station.stationId, { from: historyFrom, limit: 5000 }),
-    ]);
-    const forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
-    const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
+  await runCard(
+    async () => {
+      // Forecast/history are "nice to have" on the card, not essential - a
+      // failure on either just means that section is omitted, not that the
+      // whole card generation fails (same reasoning as the reports page's
+      // per-section error handling).
+      // from/limit matches StationReliabilityTimeline.vue's own request - the
+      // card's status ribbon needs the same real 7 days of history the live
+      // page's ribbon shows, not just whatever the fuel-type strips below it
+      // used to get by with (200 most recent, unbounded span - often well
+      // under a week at ~15-minute polling).
+      const historyFrom = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const [forecastResult, historyResult] = await Promise.allSettled([
+        stationsApi.forecast(props.station.stationId, { hoursAhead: 12 }),
+        stationsApi.history(props.station.stationId, { from: historyFrom, limit: 5000 }),
+      ]);
+      const forecast = forecastResult.status === 'fulfilled' ? forecastResult.value : null;
+      const history = historyResult.status === 'fulfilled' ? historyResult.value : null;
 
-    // Merges in headerStation's name/address rather than using the prop
-    // as-is, so a correction made in this same modal session (see
-    // saveDetails above) shows up on a card generated right after, instead
-    // of the stale value the parent's snapshot/table still has until its
-    // own next refresh.
-    const blob = await renderStationCard({
-      station: { ...props.station, name: headerStation.value.name, address: headerStation.value.address },
-      reliability: reliability.value,
-      forecast,
-      history,
-    });
-    if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
-    cardBlob = blob;
-    cardUrl.value = URL.createObjectURL(blob);
-    const safeName = (headerStation.value.name || 'station').replace(/[^\p{L}\p{N}]+/gu, '-');
-    cardFile = new File([blob], `${safeName}-card.png`, { type: 'image/png' });
-  } catch (err) {
-    cardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
-  } finally {
-    cardGenerating.value = false;
-  }
+      // Merges in headerStation's name/address rather than using the prop
+      // as-is, so a correction made in this same modal session (see
+      // saveDetails above) shows up on a card generated right after, instead
+      // of the stale value the parent's snapshot/table still has until its
+      // own next refresh.
+      const blob = await renderStationCard({
+        station: { ...props.station, name: headerStation.value.name, address: headerStation.value.address },
+        reliability: reliability.value,
+        forecast,
+        history,
+      });
+      if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
+      cardBlob = blob;
+      cardUrl.value = URL.createObjectURL(blob);
+      const safeName = (headerStation.value.name || 'station').replace(/[^\p{L}\p{N}]+/gu, '-');
+      cardFile = new File([blob], `${safeName}-card.png`, { type: 'image/png' });
+    },
+    { formatError: (err) => `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}` }
+  );
 }
 
 async function copyCardToClipboard() {
   if (!cardBlob) return;
   copyFeedback.value = '';
-  try {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]);
-    copyFeedback.value = 'ok';
-  } catch (err) {
-    copyFeedback.value = 'error';
-    cardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
-  }
+  const result = await runCard(() => navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]), {
+    formatError: (err) => `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`,
+  });
+  copyFeedback.value = result !== undefined ? 'ok' : 'error';
 }
 
 async function shareCard() {
   if (!cardFile) return;
-  try {
-    await navigator.share({ files: [cardFile], title: `Статус станции: ${headerStation.value.name || 'АЗС'}` });
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      cardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+  await runCard(
+    () => navigator.share({ files: [cardFile], title: `Статус станции: ${headerStation.value.name || 'АЗС'}` }),
+    {
+      // A cancelled native share sheet isn't an error worth surfacing.
+      formatError: (err) => (err.name === 'AbortError' ? null : `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`),
     }
-  }
+  );
 }
 
 onMounted(async () => {

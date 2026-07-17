@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { stationMatchingApi } from '../api/stationMatching';
 import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
+import { useKeyedAsyncAction } from '../composables/useAsyncAction';
 
 const sources = ref([]);
 const selectedSourceKey = ref('');
@@ -9,7 +10,12 @@ const unmatched = ref([]);
 const matched = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
-const busyIds = ref(new Set());
+// loadAll/loadSourcesAndAll keep their own loading/errorMessage above
+// (initial-load skeleton, out of scope - see UsersView.vue's same note);
+// match/ignore/unmatch share this one keyed instance - each row's
+// optimistic splice-before/restore-on-error still lives at the call site
+// (via onError below), useKeyedAsyncAction only owns the busy/error state.
+const { busyIds, error: actionError, run: runAction } = useKeyedAsyncAction();
 
 const searchQuery = ref('');
 const onlyWithCandidates = ref(false);
@@ -68,57 +74,47 @@ const filteredUnmatched = computed(() => {
 // which is the slow part (seconds, not milliseconds) and was forcing the
 // entire page to flash to a loading state after every click.
 async function handleMatch(secondaryId, stationId) {
-  busyIds.value.add(secondaryId);
-  errorMessage.value = '';
   const idx = unmatched.value.findIndex((g) => g.id === secondaryId);
   const removed = idx !== -1 ? unmatched.value.splice(idx, 1)[0] : null;
-  try {
-    await stationMatchingApi.match(selectedSourceKey.value, secondaryId, stationId);
-    // Only the matched table needs a refresh - it's a cheap lookup (no
-    // per-item candidate search), unlike unmatched.
-    matched.value = await stationMatchingApi.listMatched(selectedSourceKey.value);
-  } catch (err) {
-    if (removed) unmatched.value.splice(idx, 0, removed);
-    errorMessage.value = err.response?.data?.error || 'Не удалось сопоставить станцию';
-  } finally {
-    busyIds.value.delete(secondaryId);
-  }
+  const result = await runAction(
+    secondaryId,
+    async () => {
+      await stationMatchingApi.match(selectedSourceKey.value, secondaryId, stationId);
+      // Only the matched table needs a refresh - it's a cheap lookup (no
+      // per-item candidate search), unlike unmatched.
+      return stationMatchingApi.listMatched(selectedSourceKey.value);
+    },
+    { fallbackMessage: 'Не удалось сопоставить станцию', onError: () => removed && unmatched.value.splice(idx, 0, removed) }
+  );
+  if (result !== undefined) matched.value = result;
 }
 
 async function handleIgnore(secondaryId) {
-  busyIds.value.add(secondaryId);
-  errorMessage.value = '';
   const idx = unmatched.value.findIndex((g) => g.id === secondaryId);
   const removed = idx !== -1 ? unmatched.value.splice(idx, 1)[0] : null;
-  try {
-    await stationMatchingApi.ignore(selectedSourceKey.value, secondaryId);
-  } catch (err) {
-    if (removed) unmatched.value.splice(idx, 0, removed);
-    errorMessage.value = err.response?.data?.error || 'Не удалось скрыть станцию';
-  } finally {
-    busyIds.value.delete(secondaryId);
-  }
+  await runAction(secondaryId, () => stationMatchingApi.ignore(selectedSourceKey.value, secondaryId), {
+    fallbackMessage: 'Не удалось скрыть станцию',
+    onError: () => removed && unmatched.value.splice(idx, 0, removed),
+  });
 }
 
 async function handleUnmatch(secondaryId) {
   if (!confirm('Отменить сопоставление? Объединённые данные останутся в истории, новые опросы перестанут объединяться.')) return;
-  busyIds.value.add(secondaryId);
-  errorMessage.value = '';
   const idx = matched.value.findIndex((g) => g.id === secondaryId);
   const removed = idx !== -1 ? matched.value.splice(idx, 1)[0] : null;
-  try {
-    await stationMatchingApi.unmatch(selectedSourceKey.value, secondaryId);
-    // Unlike match/ignore above, this one station needs to reappear in the
-    // unmatched queue with freshly computed candidates - only a full
-    // listUnmatched recompute provides that. Runs in the background (no
-    // loading spinner) since unmatching is a rarer action than confirming.
-    unmatched.value = await stationMatchingApi.listUnmatched(selectedSourceKey.value);
-  } catch (err) {
-    if (removed) matched.value.splice(idx, 0, removed);
-    errorMessage.value = err.response?.data?.error || 'Не удалось отменить сопоставление';
-  } finally {
-    busyIds.value.delete(secondaryId);
-  }
+  const result = await runAction(
+    secondaryId,
+    async () => {
+      await stationMatchingApi.unmatch(selectedSourceKey.value, secondaryId);
+      // Unlike match/ignore above, this one station needs to reappear in the
+      // unmatched queue with freshly computed candidates - only a full
+      // listUnmatched recompute provides that. Runs in the background (no
+      // loading spinner) since unmatching is a rarer action than confirming.
+      return stationMatchingApi.listUnmatched(selectedSourceKey.value);
+    },
+    { fallbackMessage: 'Не удалось отменить сопоставление', onError: () => removed && matched.value.splice(idx, 0, removed) }
+  );
+  if (result !== undefined) unmatched.value = result;
 }
 
 function fuelTypesLabel(types) {
@@ -161,7 +157,7 @@ onMounted(loadSourcesAndAll);
       показывается как «возможно доступно», а не выбирается наугад.
     </p>
 
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="errorMessage || actionError" class="error-text">{{ errorMessage || actionError }}</p>
     <p v-if="loading" class="hint">Загрузка...</p>
 
     <template v-else>

@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue';
 import { stationsApi } from '../api/regions';
 import RegionMapPicker from './RegionMapPicker.vue';
 import { statusMeta } from '../utils/fuelStatus';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const props = defineProps({
   initial: { type: Object, required: true },
@@ -87,8 +88,7 @@ const promo = reactive({
 
 const searchQuery = ref('');
 const searchResults = ref([]);
-const searching = ref(false);
-const searchError = ref('');
+const { loading: searching, error: searchError, run: runSearchAction } = useAsyncAction();
 const error = ref('');
 
 function toggleRegion(id) {
@@ -103,15 +103,10 @@ async function runSearch() {
     searchResults.value = [];
     return;
   }
-  searching.value = true;
-  searchError.value = '';
-  try {
-    searchResults.value = await stationsApi.list({ q, limit: 8 });
-  } catch (err) {
-    searchError.value = err.response?.data?.error || 'Не удалось выполнить поиск';
-  } finally {
-    searching.value = false;
-  }
+  const results = await runSearchAction(() => stationsApi.list({ q, limit: 8 }), {
+    fallbackMessage: 'Не удалось выполнить поиск',
+  });
+  if (results) searchResults.value = results;
 }
 
 function addStation(station) {

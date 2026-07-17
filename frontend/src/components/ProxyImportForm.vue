@@ -1,12 +1,12 @@
 <script setup>
 import { reactive, ref } from 'vue';
 import { proxiesApi } from '../api/proxies';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const emit = defineEmits(['imported', 'cancel']);
 
 const form = reactive({ text: '' });
-const busy = ref(false);
-const error = ref('');
+const { loading: busy, error, run } = useAsyncAction();
 const result = ref(null);
 
 async function handleSubmit() {
@@ -16,14 +16,10 @@ async function handleSubmit() {
     error.value = 'Вставьте хотя бы одну строку';
     return;
   }
-  busy.value = true;
-  try {
-    result.value = await proxiesApi.import(form.text);
-    if (result.value.created || result.value.updated) emit('imported');
-  } catch (err) {
-    error.value = err.response?.data?.error || 'Не удалось выполнить импорт';
-  } finally {
-    busy.value = false;
+  const imported = await run(() => proxiesApi.import(form.text), { fallbackMessage: 'Не удалось выполнить импорт' });
+  if (imported) {
+    result.value = imported;
+    if (imported.created || imported.updated) emit('imported');
   }
 }
 </script>

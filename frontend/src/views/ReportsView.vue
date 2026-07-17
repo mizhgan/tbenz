@@ -15,6 +15,7 @@ import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationHighlightCards from '../components/StationHighlightCards.vue';
 import StationsTable from '../components/StationsTable.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const route = useRoute();
 
@@ -32,14 +33,17 @@ const errorMessage = ref('');
 // lastSeenAt field names).
 const detailStation = ref(null);
 const showDetailModal = ref(false);
+// Not useKeyedAsyncAction's Set - only one detail fetch is ever really in
+// flight (one click opens one modal), and the child tables' :loading-
+// station-id prop wants the specific id, not a has()-checkable collection.
 const detailLoadingId = ref(null);
-const detailError = ref('');
+const { error: detailError, run: runOpenDetail } = useAsyncAction();
 
 async function openStationDetail(stationId) {
-  detailError.value = '';
   detailLoadingId.value = stationId;
-  try {
-    const doc = await stationsApi.get(stationId);
+  const doc = await runOpenDetail(() => stationsApi.get(stationId), { fallbackMessage: 'Не удалось загрузить данные станции' });
+  detailLoadingId.value = null;
+  if (doc) {
     detailStation.value = {
       stationId: doc._id,
       name: doc.name,
@@ -52,10 +56,6 @@ async function openStationDetail(stationId) {
       polledAt: doc.lastSeenAt,
     };
     showDetailModal.value = true;
-  } catch (err) {
-    detailError.value = err.response?.data?.error || 'Не удалось загрузить данные станции';
-  } finally {
-    detailLoadingId.value = null;
   }
 }
 
@@ -186,10 +186,12 @@ const selectedRegion = computed(() => regions.value.find((r) => r._id === select
 // Shareable report card - client-side canvas, same approach and UI pattern
 // (generate -> preview -> copy/download/share) as the station card in
 // StationDetailModal.vue.
-const cardGenerating = ref(false);
 const cardUrl = ref(null);
-const cardError = ref('');
 const copyFeedback = ref('');
+// Shared across generateReportCard/copyReportCardToClipboard/shareReportCard
+// below - see StationDetailModal.vue's identical grouping/rationale for its
+// own card flow.
+const { loading: cardGenerating, error: cardError, run: runCard } = useAsyncAction();
 const clipboardSupported = canCopyImageToClipboard();
 let cardBlob = null;
 let cardFile = null;
@@ -207,77 +209,70 @@ function resetReportCard() {
 }
 
 async function generateReportCard() {
-  cardError.value = '';
   copyFeedback.value = '';
-  cardGenerating.value = true;
-  try {
-    const topStationsBase = highlightedStations.value.slice(0, 3);
-    // Best-of (default CORE_FUEL_TYPES) ribbon per top station, same real
-    // segments (not bucketed) StationReliabilityTimeline.vue itself draws -
-    // fetched here rather than inside regionReportCard.js since that file
-    // is a pure Canvas layout function with no API access of its own (same
-    // pattern generateCard() in StationDetailModal.vue already follows for
-    // its own card's history). Only 3 stations, so 3 parallel fetches.
-    const historyResults = await Promise.allSettled(
-      topStationsBase.map((s) => stationsApi.history(s.stationId, { from: fromIso.value, to: toIso.value, limit: 5000 }))
-    );
-    const topStations = topStationsBase.map((s, i) => {
-      const result = historyResults[i];
-      const history = result.status === 'fulfilled' ? result.value : [];
-      const ribbon = history.length ? collapseIsolatedBlips(computeStatusSegments(history)) : [];
-      return {
-        ...s,
-        ribbon,
-        ribbonRangeStart: history.length ? history[0].polledAt : null,
-        ribbonRangeEnd: history.length ? history[history.length - 1].polledAt : null,
-      };
-    });
+  await runCard(
+    async () => {
+      const topStationsBase = highlightedStations.value.slice(0, 3);
+      // Best-of (default CORE_FUEL_TYPES) ribbon per top station, same real
+      // segments (not bucketed) StationReliabilityTimeline.vue itself draws -
+      // fetched here rather than inside regionReportCard.js since that file
+      // is a pure Canvas layout function with no API access of its own (same
+      // pattern generateCard() in StationDetailModal.vue already follows for
+      // its own card's history). Only 3 stations, so 3 parallel fetches.
+      const historyResults = await Promise.allSettled(
+        topStationsBase.map((s) => stationsApi.history(s.stationId, { from: fromIso.value, to: toIso.value, limit: 5000 }))
+      );
+      const topStations = topStationsBase.map((s, i) => {
+        const result = historyResults[i];
+        const history = result.status === 'fulfilled' ? result.value : [];
+        const ribbon = history.length ? collapseIsolatedBlips(computeStatusSegments(history)) : [];
+        return {
+          ...s,
+          ribbon,
+          ribbonRangeStart: history.length ? history[0].polledAt : null,
+          ribbonRangeEnd: history.length ? history[history.length - 1].polledAt : null,
+        };
+      });
 
-    const blob = await renderRegionReportCard({
-      region: selectedRegion.value || { name: 'Район' },
-      from: fromMs.value,
-      to: toMs.value,
-      summary: summary.value,
-      trendBuckets: trendBuckets.value,
-      forecastBuckets: forecastBuckets.value,
-      recoveryTrendBuckets: recoveryTrendBuckets.value,
-      direction: forecastDirection.value,
-      topStations,
-      stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
-    });
-    if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
-    cardBlob = blob;
-    cardUrl.value = URL.createObjectURL(blob);
-    const safeName = (selectedRegion.value?.name || 'region').replace(/[^\p{L}\p{N}]+/gu, '-');
-    cardFile = new File([blob], `${safeName}-report.png`, { type: 'image/png' });
-  } catch (err) {
-    cardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
-  } finally {
-    cardGenerating.value = false;
-  }
+      const blob = await renderRegionReportCard({
+        region: selectedRegion.value || { name: 'Район' },
+        from: fromMs.value,
+        to: toMs.value,
+        summary: summary.value,
+        trendBuckets: trendBuckets.value,
+        forecastBuckets: forecastBuckets.value,
+        recoveryTrendBuckets: recoveryTrendBuckets.value,
+        direction: forecastDirection.value,
+        topStations,
+        stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
+      });
+      if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
+      cardBlob = blob;
+      cardUrl.value = URL.createObjectURL(blob);
+      const safeName = (selectedRegion.value?.name || 'region').replace(/[^\p{L}\p{N}]+/gu, '-');
+      cardFile = new File([blob], `${safeName}-report.png`, { type: 'image/png' });
+    },
+    { formatError: (err) => `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}` }
+  );
 }
 
 async function copyReportCardToClipboard() {
   if (!cardBlob) return;
   copyFeedback.value = '';
-  try {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]);
-    copyFeedback.value = 'ok';
-  } catch (err) {
-    copyFeedback.value = 'error';
-    cardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
-  }
+  const result = await runCard(() => navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]), {
+    formatError: (err) => `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`,
+  });
+  copyFeedback.value = result !== undefined ? 'ok' : 'error';
 }
 
 async function shareReportCard() {
   if (!cardFile) return;
-  try {
-    await navigator.share({ files: [cardFile], title: `Отчёт: ${selectedRegion.value?.name || 'Район'}` });
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      cardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
+  await runCard(
+    () => navigator.share({ files: [cardFile], title: `Отчёт: ${selectedRegion.value?.name || 'Район'}` }),
+    {
+      formatError: (err) => (err.name === 'AbortError' ? null : `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`),
     }
-  }
+  );
 }
 
 async function loadRegions() {

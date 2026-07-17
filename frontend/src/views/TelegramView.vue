@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { telegramApi } from '../api/telegram';
 import { regionsApi } from '../api/regions';
 import TelegramChatForm from '../components/TelegramChatForm.vue';
+import { useAsyncAction, useKeyedAsyncAction } from '../composables/useAsyncAction';
 
 const status = ref(null);
 const chats = ref([]);
@@ -11,7 +12,12 @@ const loading = ref(true);
 const errorMessage = ref('');
 const showForm = ref(false);
 const editingChat = ref(null);
-const testingIds = ref(new Set());
+// loadAll keeps its own loading/errorMessage above (initial-load skeleton,
+// out of scope for useAsyncAction - see UsersView.vue's same note);
+// separate instances for submit/delete (shared, no loading indicator) and
+// the per-chat test-send button (keyed, several could be in flight at once).
+const { error: actionError, run: runAction } = useAsyncAction();
+const { busyIds: testingIds, error: testError, run: runTest } = useKeyedAsyncAction();
 
 const STATUS_LABELS = {
   pending: 'ожидает настройки',
@@ -58,37 +64,23 @@ function openEditForm(chat) {
 }
 
 async function handleSubmit(payload) {
-  errorMessage.value = '';
-  try {
-    await telegramApi.updateChat(editingChat.value.id, payload);
+  const result = await runAction(() => telegramApi.updateChat(editingChat.value.id, payload), {
+    fallbackMessage: 'Не удалось сохранить настройки чата',
+  });
+  if (result !== undefined) {
     showForm.value = false;
     await loadAll();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось сохранить настройки чата';
   }
 }
 
 async function handleDelete(chat) {
   if (!confirm(`Удалить чат «${chat.title || chat.chatId}» из списка?`)) return;
-  errorMessage.value = '';
-  try {
-    await telegramApi.removeChat(chat.id);
-    await loadAll();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось удалить чат';
-  }
+  const result = await runAction(() => telegramApi.removeChat(chat.id), { fallbackMessage: 'Не удалось удалить чат' });
+  if (result !== undefined) await loadAll();
 }
 
 async function handleTest(chat) {
-  testingIds.value.add(chat.id);
-  errorMessage.value = '';
-  try {
-    await telegramApi.testChat(chat.id);
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось отправить тестовое сообщение';
-  } finally {
-    testingIds.value.delete(chat.id);
-  }
+  await runTest(chat.id, () => telegramApi.testChat(chat.id), { fallbackMessage: 'Не удалось отправить тестовое сообщение' });
 }
 
 function eventsSummary(chat) {
@@ -126,7 +118,9 @@ onMounted(loadAll);
       {{ botStatusText }}
     </p>
 
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="errorMessage || actionError || testError" class="error-text">
+      {{ errorMessage || actionError || testError }}
+    </p>
 
     <div class="card">
       <p v-if="loading">Загрузка...</p>

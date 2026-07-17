@@ -5,6 +5,7 @@ import { stationsApi } from '../api/regions';
 import { stationMatchingApi } from '../api/stationMatching';
 import { statusMeta, fuelTypeLabel, formatRelativeAge } from '../utils/fuelStatus';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const props = defineProps({
   stationId: { type: String, required: true },
@@ -14,11 +15,13 @@ const emit = defineEmits(['close', 'changed']);
 const loading = ref(true);
 const errorMessage = ref('');
 const station = ref(null);
-const actionError = ref('');
-const actionBusy = ref(false);
+// Shared across loadCandidates/handleMatch/handleUnmatch below - only one
+// of these three can meaningfully be in flight at once in a single-station
+// modal, unlike StationMatchingView's per-row list of many stations at
+// once (which needs useKeyedAsyncAction instead).
+const { loading: actionBusy, error: actionError, run: runAction } = useAsyncAction();
 
 const candidates = ref([]);
-const candidatesLoading = ref(false);
 const candidatesLoaded = ref(false);
 
 const miniMapContainer = ref(null);
@@ -39,8 +42,7 @@ const matchedSource = computed(() => (station.value?.sources || []).find((s) => 
 // nameEditedByAdmin/addressEditedByAdmin instead of just writing the field.
 const editingDetails = ref(false);
 const editForm = reactive({ name: '', brand: '', address: '' });
-const editBusy = ref(false);
-const editError = ref('');
+const { loading: editBusy, error: editError, run: runSaveDetails } = useAsyncAction();
 
 function openEditDetails() {
   editForm.name = station.value?.name || '';
@@ -51,21 +53,19 @@ function openEditDetails() {
 }
 
 async function saveDetails() {
-  editBusy.value = true;
-  editError.value = '';
-  try {
-    const updated = await stationsApi.update(props.stationId, {
-      name: editForm.name.trim(),
-      brand: editForm.brand.trim(),
-      address: editForm.address.trim(),
-    });
+  const updated = await runSaveDetails(
+    () =>
+      stationsApi.update(props.stationId, {
+        name: editForm.name.trim(),
+        brand: editForm.brand.trim(),
+        address: editForm.address.trim(),
+      }),
+    { fallbackMessage: 'Не удалось сохранить изменения' }
+  );
+  if (updated) {
     if (station.value) Object.assign(station.value, updated);
     editingDetails.value = false;
     emit('changed');
-  } catch (err) {
-    editError.value = err.response?.data?.error || 'Не удалось сохранить изменения';
-  } finally {
-    editBusy.value = false;
   }
 }
 
@@ -222,47 +222,36 @@ function renderMap() {
 }
 
 async function loadCandidates() {
-  candidatesLoading.value = true;
-  actionError.value = '';
-  try {
-    candidates.value = await stationMatchingApi.candidatesForStation(SOURCE_KEY, props.stationId);
+  const result = await runAction(() => stationMatchingApi.candidatesForStation(SOURCE_KEY, props.stationId), {
+    fallbackMessage: 'Не удалось загрузить кандидатов',
+  });
+  if (result) {
+    candidates.value = result;
     candidatesLoaded.value = true;
-  } catch (err) {
-    actionError.value = err.response?.data?.error || 'Не удалось загрузить кандидатов';
-  } finally {
-    candidatesLoading.value = false;
   }
 }
 
 async function handleMatch(secondaryId) {
-  actionBusy.value = true;
-  actionError.value = '';
-  try {
-    await stationMatchingApi.match(SOURCE_KEY, secondaryId, props.stationId);
+  const result = await runAction(() => stationMatchingApi.match(SOURCE_KEY, secondaryId, props.stationId), {
+    fallbackMessage: 'Не удалось сопоставить станцию',
+  });
+  if (result !== undefined) {
     await load();
     emit('changed');
-  } catch (err) {
-    actionError.value = err.response?.data?.error || 'Не удалось сопоставить станцию';
-  } finally {
-    actionBusy.value = false;
   }
 }
 
 async function handleUnmatch() {
   if (!matchedSource.value) return;
   if (!confirm('Отменить сопоставление? Исторические данные останутся, новые опросы перестанут объединяться.')) return;
-  actionBusy.value = true;
-  actionError.value = '';
-  try {
-    await stationMatchingApi.unmatch(SOURCE_KEY, matchedSource.value.id);
+  const result = await runAction(() => stationMatchingApi.unmatch(SOURCE_KEY, matchedSource.value.id), {
+    fallbackMessage: 'Не удалось отменить сопоставление',
+  });
+  if (result !== undefined) {
     candidatesLoaded.value = false;
     candidates.value = [];
     await load();
     emit('changed');
-  } catch (err) {
-    actionError.value = err.response?.data?.error || 'Не удалось отменить сопоставление';
-  } finally {
-    actionBusy.value = false;
   }
 }
 
@@ -443,10 +432,10 @@ onBeforeUnmount(() => {
               v-if="!candidatesLoaded"
               type="button"
               class="btn secondary"
-              :disabled="candidatesLoading"
+              :disabled="actionBusy"
               @click="loadCandidates"
             >
-              {{ candidatesLoading ? 'Поиск...' : 'Найти станцию gdebenz для сопоставления' }}
+              {{ actionBusy ? 'Поиск...' : 'Найти станцию gdebenz для сопоставления' }}
             </button>
             <template v-else>
               <p v-if="!candidates.length" class="hint small">

@@ -6,6 +6,7 @@ import { stationMatchingApi } from '../api/stationMatching';
 import RegionForm from '../components/RegionForm.vue';
 import PollLogModal from '../components/PollLogModal.vue';
 import RawResponseModal from '../components/RawResponseModal.vue';
+import { useAsyncAction, useKeyedAsyncAction } from '../composables/useAsyncAction';
 
 const router = useRouter();
 const regions = ref([]);
@@ -14,7 +15,12 @@ const loading = ref(true);
 const errorMessage = ref('');
 const showForm = ref(false);
 const editingRegion = ref(null);
-const pollingIds = ref(new Set());
+// loadRegions/refreshAll keep their own loading/errorMessage above
+// (initial-load + 15s background refresh, out of scope - see UsersView.vue's
+// same note); submit/delete share one instance, handlePollNow is keyed
+// (per-region "Опрос..." button).
+const { error: actionError, run: runAction } = useAsyncAction();
+const { busyIds: pollingIds, error: pollError, run: runPoll } = useKeyedAsyncAction();
 // regionId -> array of { sourceKey, attempts24h, errors24h, emptyOk24h,
 // lastPolledAt, lastStatus, lastError, lastStationCount } - see backend's
 // pollLogService.js. Loaded alongside regions, not embedded in the region
@@ -129,39 +135,29 @@ function openEditForm(region) {
 }
 
 async function handleSubmit(payload) {
-  try {
-    if (editingRegion.value) {
-      await regionsApi.update(editingRegion.value._id, payload);
-    } else {
-      await regionsApi.create(payload);
-    }
+  const result = await runAction(
+    () => (editingRegion.value ? regionsApi.update(editingRegion.value._id, payload) : regionsApi.create(payload)),
+    { fallbackMessage: 'Не удалось сохранить район' }
+  );
+  if (result !== undefined) {
     showForm.value = false;
     await loadRegions();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось сохранить район';
   }
 }
 
 async function handleDelete(region) {
   if (!confirm(`Удалить район "${region.name}"? История опроса для него будет удалена.`)) return;
-  try {
-    await regionsApi.remove(region._id);
-    await loadRegions();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось удалить район';
-  }
+  const result = await runAction(() => regionsApi.remove(region._id), { fallbackMessage: 'Не удалось удалить район' });
+  if (result !== undefined) await loadRegions();
 }
 
 async function handlePollNow(region) {
-  pollingIds.value.add(region._id);
-  try {
-    await regionsApi.pollNow(region._id);
+  const result = await runPoll(region._id, () => regionsApi.pollNow(region._id), {
+    fallbackMessage: 'Не удалось запросить данные',
+  });
+  if (result !== undefined) {
     await loadRegions();
     await loadPollStats();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось запросить данные';
-  } finally {
-    pollingIds.value.delete(region._id);
   }
 }
 
@@ -197,7 +193,9 @@ onBeforeUnmount(() => {
       <button class="btn" @click="openCreateForm">+ Добавить район</button>
     </div>
 
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="errorMessage || actionError || pollError" class="error-text">
+      {{ errorMessage || actionError || pollError }}
+    </p>
 
     <div class="card">
       <p v-if="loading">Загрузка...</p>

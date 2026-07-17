@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { usersApi } from '../api/users';
 import { useAuthStore } from '../store/auth';
 import UserForm from '../components/UserForm.vue';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const auth = useAuthStore();
 
@@ -11,6 +12,12 @@ const loading = ref(true);
 const errorMessage = ref('');
 const showForm = ref(false);
 const editingUser = ref(null);
+// Separate from loadUsers's own loading/errorMessage above - that pair
+// drives the initial-load skeleton (loading starts true), which
+// useAsyncAction's loading (starts false) would break a beat of on mount.
+// This one's just for save/delete, which - like before this composable
+// existed - show an error but no loading indicator of their own.
+const { error: actionError, run: runAction } = useAsyncAction();
 
 async function loadUsers() {
   loading.value = true;
@@ -35,29 +42,20 @@ function openEditForm(user) {
 }
 
 async function handleSubmit(payload) {
-  errorMessage.value = '';
-  try {
-    if (editingUser.value) {
-      await usersApi.update(editingUser.value.id, payload);
-    } else {
-      await usersApi.create(payload);
-    }
+  const result = await runAction(
+    () => (editingUser.value ? usersApi.update(editingUser.value.id, payload) : usersApi.create(payload)),
+    { fallbackMessage: 'Не удалось сохранить пользователя' }
+  );
+  if (result !== undefined) {
     showForm.value = false;
     await loadUsers();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось сохранить пользователя';
   }
 }
 
 async function handleDelete(user) {
   if (!confirm(`Удалить пользователя «${user.username}»?`)) return;
-  errorMessage.value = '';
-  try {
-    await usersApi.remove(user.id);
-    await loadUsers();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось удалить пользователя';
-  }
+  const result = await runAction(() => usersApi.remove(user.id), { fallbackMessage: 'Не удалось удалить пользователя' });
+  if (result !== undefined) await loadUsers();
 }
 
 function formatDate(value) {
@@ -75,7 +73,7 @@ onMounted(loadUsers);
       <button class="btn" @click="openCreateForm">+ Добавить пользователя</button>
     </div>
 
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="errorMessage || actionError" class="error-text">{{ errorMessage || actionError }}</p>
 
     <div class="card">
       <p v-if="loading">Загрузка...</p>

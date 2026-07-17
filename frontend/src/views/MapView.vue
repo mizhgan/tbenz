@@ -28,6 +28,7 @@ import {
   pickVideoMimeType,
   sleep,
 } from '../utils/mapExport';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 // leaflet-image (used for the export panel below) expects a global `L`, as
 // most pre-ES-module Leaflet plugins do.
@@ -298,9 +299,12 @@ let exportResultFile = null;
 // generate -> preview -> copy/download/share UI pattern as the station and
 // region report cards (StationDetailModal.vue/ReportsView.vue).
 const showShareCard = ref(false);
-const shareCardGenerating = ref(false);
+// Shared across generateShareCard/copyShareCardToClipboard/shareShareCard
+// below - see StationDetailModal.vue's identical grouping/rationale for its
+// own card flow. Independent of the animation export's own exportError -
+// that one stays hand-rolled (see handleGenerateExport's own note).
+const { loading: shareCardGenerating, error: shareCardError, run: runShareCard } = useAsyncAction();
 const shareCardUrl = ref(null);
-const shareCardError = ref('');
 const shareCardCopyFeedback = ref('');
 const shareCardCanShare = ref(false);
 const shareCardClipboardSupported = canCopyImageToClipboard();
@@ -789,68 +793,68 @@ function resetShareCard() {
 async function generateShareCard() {
   if (!map) return;
   resetShareCard();
-  shareCardGenerating.value = true;
-
   const unlock = lockMapInteraction(map);
   try {
-    const size = map.getSize();
-    markersLayer.remove();
-    let baseCanvas;
-    try {
-      baseCanvas = await captureMapBase(map);
-    } finally {
-      markersLayer.addTo(map);
-    }
+    await runShareCard(
+      async () => {
+        const size = map.getSize();
+        markersLayer.remove();
+        let baseCanvas;
+        try {
+          baseCanvas = await captureMapBase(map);
+        } finally {
+          markersLayer.addTo(map);
+        }
 
-    const frameCanvas = document.createElement('canvas');
-    frameCanvas.width = size.x;
-    frameCanvas.height = size.y;
-    const ctx = frameCanvas.getContext('2d');
-    ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
+        const frameCanvas = document.createElement('canvas');
+        frameCanvas.width = size.x;
+        frameCanvas.height = size.y;
+        const ctx = frameCanvas.getContext('2d');
+        ctx.drawImage(baseCanvas, 0, 0, size.x, size.y);
 
-    // The share card scales this whole canvas down to a fixed content width
-    // (see mapShareCard.js) - on a wide desktop window that shrinks a
-    // fixed on-screen dot radius into an indistinct smear wherever
-    // stations cluster (e.g. a city center). Inflating the radius here by
-    // the inverse of that eventual scale keeps the *final* dot size
-    // consistent (~8px radius) regardless of how wide the map happened to
-    // be captured at.
-    const shareCardScale = MAP_CONTENT_WIDTH / size.x;
-    const dotRadius = 8 / shareCardScale;
-    const dotStroke = 2 / shareCardScale;
+        // The share card scales this whole canvas down to a fixed content width
+        // (see mapShareCard.js) - on a wide desktop window that shrinks a
+        // fixed on-screen dot radius into an indistinct smear wherever
+        // stations cluster (e.g. a city center). Inflating the radius here by
+        // the inverse of that eventual scale keeps the *final* dot size
+        // consistent (~8px radius) regardless of how wide the map happened to
+        // be captured at.
+        const shareCardScale = MAP_CONTENT_WIDTH / size.x;
+        const dotRadius = 8 / shareCardScale;
+        const dotStroke = 2 / shareCardScale;
 
-    const visibleStations = stations.value.filter(
-      (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
+        const visibleStations = stations.value.filter(
+          (s) => statusFilters[effectiveStatus(s)] !== false && brandFilters[brandOf(s)] !== false
+        );
+        for (const s of visibleStations) {
+          const pt = map.latLngToContainerPoint([s.lat, s.lon]);
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, dotRadius, 0, Math.PI * 2);
+          ctx.fillStyle = statusMeta(effectiveStatus(s)).color;
+          ctx.fill();
+          ctx.lineWidth = dotStroke;
+          ctx.strokeStyle = '#ffffff';
+          ctx.stroke();
+        }
+
+        const blob = await renderMapShareCard({
+          regionName: selectedRegion.value?.name || 'Район',
+          mapCanvas: frameCanvas,
+          counts: currentSummary.value.stationCounts,
+          stationCount: currentSummary.value.total,
+          availablePct: currentSummary.value.availablePct,
+          fuelLabel: badgeFuelLabel.value,
+          generatedAt: Date.now(),
+        });
+        shareCardBlob = blob;
+        shareCardUrl.value = URL.createObjectURL(blob);
+        const safeName = (selectedRegion.value?.name || 'map').replace(/[^\p{L}\p{N}]+/gu, '-');
+        shareCardFile = new File([blob], `${safeName}-map.png`, { type: 'image/png' });
+        shareCardCanShare.value = canShareFile(shareCardFile);
+      },
+      { formatError: (err) => `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}` }
     );
-    for (const s of visibleStations) {
-      const pt = map.latLngToContainerPoint([s.lat, s.lon]);
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, dotRadius, 0, Math.PI * 2);
-      ctx.fillStyle = statusMeta(effectiveStatus(s)).color;
-      ctx.fill();
-      ctx.lineWidth = dotStroke;
-      ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
-    }
-
-    const blob = await renderMapShareCard({
-      regionName: selectedRegion.value?.name || 'Район',
-      mapCanvas: frameCanvas,
-      counts: currentSummary.value.stationCounts,
-      stationCount: currentSummary.value.total,
-      availablePct: currentSummary.value.availablePct,
-      fuelLabel: badgeFuelLabel.value,
-      generatedAt: Date.now(),
-    });
-    shareCardBlob = blob;
-    shareCardUrl.value = URL.createObjectURL(blob);
-    const safeName = (selectedRegion.value?.name || 'map').replace(/[^\p{L}\p{N}]+/gu, '-');
-    shareCardFile = new File([blob], `${safeName}-map.png`, { type: 'image/png' });
-    shareCardCanShare.value = canShareFile(shareCardFile);
-  } catch (err) {
-    shareCardError.value = `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}`;
   } finally {
-    shareCardGenerating.value = false;
     unlock();
   }
 }
@@ -868,24 +872,17 @@ function closeShareCard() {
 async function copyShareCardToClipboard() {
   if (!shareCardBlob) return;
   shareCardCopyFeedback.value = '';
-  try {
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': shareCardBlob })]);
-    shareCardCopyFeedback.value = 'ok';
-  } catch (err) {
-    shareCardCopyFeedback.value = 'error';
-    shareCardError.value = `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`;
-  }
+  const result = await runShareCard(() => navigator.clipboard.write([new ClipboardItem({ 'image/png': shareCardBlob })]), {
+    formatError: (err) => `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`,
+  });
+  shareCardCopyFeedback.value = result !== undefined ? 'ok' : 'error';
 }
 
 async function shareShareCard() {
   if (!shareCardFile) return;
-  try {
-    await navigator.share({ files: [shareCardFile], title: 'Карта доступности топлива' });
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      shareCardError.value = `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`;
-    }
-  }
+  await runShareCard(() => navigator.share({ files: [shareCardFile], title: 'Карта доступности топлива' }), {
+    formatError: (err) => (err.name === 'AbortError' ? null : `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`),
+  });
 }
 
 onMounted(async () => {

@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import { rawDataApi } from '../api/rawData';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const collections = ref([]);
 const selectedCollection = ref('');
@@ -8,14 +9,12 @@ const filterText = ref('');
 const limit = ref(20);
 const resultText = ref('');
 const count = ref(null);
-const loading = ref(false);
-const errorMessage = ref('');
+const { loading, error: errorMessage, run: runQueryAction } = useAsyncAction();
 const copyFeedback = ref('');
 
 const dupGroups = ref(null);
-const dupLoading = ref(false);
-const dupError = ref('');
 const dupCopyFeedback = ref('');
+const { loading: dupLoading, error: dupError, run: runFindDuplicates } = useAsyncAction();
 
 async function loadCollections() {
   try {
@@ -27,18 +26,11 @@ async function loadCollections() {
 }
 
 async function findDuplicates() {
-  dupError.value = '';
   dupCopyFeedback.value = '';
-  dupLoading.value = true;
-  try {
-    const { groups } = await rawDataApi.duplicateStations();
-    dupGroups.value = groups;
-  } catch (err) {
-    dupGroups.value = null;
-    dupError.value = err.response?.data?.error || 'Не удалось выполнить поиск дубликатов';
-  } finally {
-    dupLoading.value = false;
-  }
+  const result = await runFindDuplicates(() => rawDataApi.duplicateStations(), {
+    fallbackMessage: 'Не удалось выполнить поиск дубликатов',
+  });
+  dupGroups.value = result ? result.groups : null;
 }
 
 async function copyDuplicates() {
@@ -53,22 +45,19 @@ async function copyDuplicates() {
 
 async function runQuery() {
   if (!selectedCollection.value) return;
-  errorMessage.value = '';
   copyFeedback.value = '';
-  loading.value = true;
-  try {
-    const params = { limit: limit.value };
-    const trimmed = filterText.value.trim();
-    if (trimmed) params.filter = trimmed;
-    const { docs, count: n } = await rawDataApi.query(selectedCollection.value, params);
-    count.value = n;
-    resultText.value = JSON.stringify(docs, null, 2);
-  } catch (err) {
+  const params = { limit: limit.value };
+  const trimmed = filterText.value.trim();
+  if (trimmed) params.filter = trimmed;
+  const result = await runQueryAction(() => rawDataApi.query(selectedCollection.value, params), {
+    fallbackMessage: 'Не удалось выполнить запрос',
+  });
+  if (result) {
+    count.value = result.count;
+    resultText.value = JSON.stringify(result.docs, null, 2);
+  } else {
     resultText.value = '';
     count.value = null;
-    errorMessage.value = err.response?.data?.error || 'Не удалось выполнить запрос';
-  } finally {
-    loading.value = false;
   }
 }
 

@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue';
 import { proxiesApi } from '../api/proxies';
 import ProxyForm from '../components/ProxyForm.vue';
 import ProxyImportForm from '../components/ProxyImportForm.vue';
+import { useAsyncAction, useKeyedAsyncAction } from '../composables/useAsyncAction';
 
 const proxies = ref([]);
 const loading = ref(true);
@@ -10,8 +11,13 @@ const errorMessage = ref('');
 const showForm = ref(false);
 const showImport = ref(false);
 const editingProxy = ref(null);
-const checkingIds = ref(new Set());
-const togglingIds = ref(new Set());
+// loadProxies keeps its own loading/errorMessage above (initial-load
+// skeleton, out of scope - see UsersView.vue's same note); one shared
+// instance for submit/delete, two keyed ones since check and toggle can
+// each be in flight per-row independently of each other.
+const { error: actionError, run: runAction } = useAsyncAction();
+const { busyIds: checkingIds, error: checkError, run: runCheck } = useKeyedAsyncAction();
+const { busyIds: togglingIds, error: toggleError, run: runToggle } = useKeyedAsyncAction();
 
 async function loadProxies() {
   loading.value = true;
@@ -36,55 +42,32 @@ function openEditForm(proxy) {
 }
 
 async function handleSubmit(payload) {
-  errorMessage.value = '';
-  try {
-    if (editingProxy.value) {
-      await proxiesApi.update(editingProxy.value.id, payload);
-    } else {
-      await proxiesApi.create(payload);
-    }
+  const result = await runAction(
+    () => (editingProxy.value ? proxiesApi.update(editingProxy.value.id, payload) : proxiesApi.create(payload)),
+    { fallbackMessage: 'Не удалось сохранить прокси' }
+  );
+  if (result !== undefined) {
     showForm.value = false;
     await loadProxies();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось сохранить прокси';
   }
 }
 
 async function handleDelete(proxy) {
   if (!confirm(`Удалить прокси «${proxy.label || proxy.host}»?`)) return;
-  errorMessage.value = '';
-  try {
-    await proxiesApi.remove(proxy.id);
-    await loadProxies();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось удалить прокси';
-  }
+  const result = await runAction(() => proxiesApi.remove(proxy.id), { fallbackMessage: 'Не удалось удалить прокси' });
+  if (result !== undefined) await loadProxies();
 }
 
 async function handleCheck(proxy) {
-  checkingIds.value.add(proxy.id);
-  errorMessage.value = '';
-  try {
-    await proxiesApi.check(proxy.id);
-    await loadProxies();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось проверить прокси';
-  } finally {
-    checkingIds.value.delete(proxy.id);
-  }
+  const result = await runCheck(proxy.id, () => proxiesApi.check(proxy.id), { fallbackMessage: 'Не удалось проверить прокси' });
+  if (result !== undefined) await loadProxies();
 }
 
 async function handleToggle(proxy) {
-  togglingIds.value.add(proxy.id);
-  errorMessage.value = '';
-  try {
-    await proxiesApi.update(proxy.id, { active: !proxy.active });
-    await loadProxies();
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось изменить статус прокси';
-  } finally {
-    togglingIds.value.delete(proxy.id);
-  }
+  const result = await runToggle(proxy.id, () => proxiesApi.update(proxy.id, { active: !proxy.active }), {
+    fallbackMessage: 'Не удалось изменить статус прокси',
+  });
+  if (result !== undefined) await loadProxies();
 }
 
 function formatDate(value) {
@@ -115,7 +98,9 @@ onMounted(loadProxies);
       автоматически. Если активных прокси нет, запросы идут напрямую.
     </p>
 
-    <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
+    <p v-if="errorMessage || actionError || checkError || toggleError" class="error-text">
+      {{ errorMessage || actionError || checkError || toggleError }}
+    </p>
 
     <div class="card">
       <p v-if="loading">Загрузка...</p>

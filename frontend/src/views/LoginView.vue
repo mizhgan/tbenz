@@ -2,27 +2,19 @@
 import { ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '../store/auth';
+import { useAsyncAction } from '../composables/useAsyncAction';
 
 const username = ref('');
 const password = ref('');
-const error = ref('');
-const loading = ref(false);
+const { loading, error, run } = useAsyncAction();
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
 
 async function handleSubmit() {
-  error.value = '';
-  loading.value = true;
-  try {
-    await auth.login(username.value, password.value);
-    router.push(route.query.redirect || { name: 'map' });
-  } catch (err) {
-    error.value = err.response?.data?.error || 'Не удалось войти';
-  } finally {
-    loading.value = false;
-  }
+  await run(() => auth.login(username.value, password.value), { fallbackMessage: 'Не удалось войти' });
+  if (!error.value) router.push(route.query.redirect || { name: 'map' });
 }
 </script>
 
