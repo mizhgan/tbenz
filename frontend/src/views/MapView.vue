@@ -893,6 +893,19 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* Leaflet's marker paths are keyboard-focusable, and a mouse click focuses
+   them same as any other focusable element - browsers then draw their
+   plain default focus ring right around the marker, easy to mistake for a
+   stray bit of UI sitting just under the popup (confirmed live:
+   document.activeElement after a click is the marker's own <path>, nothing
+   here had styled its focus state either way before). :not(:focus-visible)
+   keeps this to mouse clicks specifically - a keyboard user tabbing to a
+   marker still gets the outline, since that's the one case it's actually
+   needed for. */
+:deep(.leaflet-interactive:focus:not(:focus-visible)) {
+  outline: none;
+}
+
 /* Station quick-info popup on marker click, replacing the old always-on
    sidebar - :deep() because Leaflet injects this as raw HTML outside Vue's
    render tree (see buildPopupHtml in the script), so it never gets the
