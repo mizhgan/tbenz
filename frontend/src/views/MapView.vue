@@ -311,6 +311,13 @@ const mapContainer = ref(null);
 let map = null;
 let markersLayer = null;
 let tileLayer = null;
+// Drives .leaflet-map--dark-filter (see this file's own <style>) - "Обычная"
+// (OSM's own tiles) has no dark-native variant to switch to the way
+// "Контрастная" swaps to Carto's dark_all, so dark site theme + this style
+// needs a CSS approximation instead (see applyBasemapStyle's own comment
+// on the exact filter values). Light theme needs no filter at all here -
+// "Обычная" is meant to be genuinely standard, unmodified OSM in that case.
+const useDarkTileFilter = ref(false);
 let liveTimer = null;
 let sliderDebounceTimer = null;
 let snapshotRequestId = 0;
@@ -503,6 +510,10 @@ function applyBasemapStyle() {
     maxZoom: 19,
     crossOrigin: true,
   }).addTo(map);
+  // "Контрастная" needs no filter regardless of theme (it already swapped
+  // to the matching Carto variant above) - only "Обычная" in dark theme
+  // does, see .leaflet-map--dark-filter's own doc comment for why.
+  useDarkTileFilter.value = styleKey === 'standard' && themeStore.theme === 'dark';
 }
 
 function renderMarkers() {
@@ -954,7 +965,7 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
     <div class="map-wrap">
-      <div ref="mapContainer" class="leaflet-map"></div>
+      <div ref="mapContainer" class="leaflet-map" :class="{ 'leaflet-map--dark-filter': useDarkTileFilter }"></div>
 
       <!-- Always-visible entry point into the drawer below - region,
            slider, export/share etc. still live behind it, so the map
@@ -1564,6 +1575,25 @@ onBeforeUnmount(() => {
 .leaflet-map {
   width: 100%;
   height: 100%;
+}
+
+/* Dark-theme approximation for "Обычная" - unlike "Контрастная" (which
+   just swaps to Carto's own dark_all tiles), OSM has no dark-native
+   variant to switch to, so picking dark site theme while still on this
+   style would otherwise leave a bright light-mode map sitting in the
+   middle of an otherwise-dark page (light theme needs nothing here at all
+   - "Обычная" there is meant to be genuinely standard, unmodified OSM).
+   Uses the standard CSS "invert the whole tile" trick (invert flips
+   light<->dark; hue-rotate(180deg) un-does the resulting hue shift, e.g.
+   keeps roads looking roughly road-colored instead of inverted-cyan;
+   brightness/contrast/saturate tone the result down to a muted dark map,
+   not a harsh photo-negative). Imperfect - a real dark-styled tileset
+   (like Carto's dark_all) always looks better - but a reasonable
+   approximation for the one style that doesn't have one. :deep() targets
+   .leaflet-tile-pane specifically, a sibling of the marker/popup panes,
+   not an ancestor of them, so markers/popups stay unaffected. */
+.leaflet-map--dark-filter :deep(.leaflet-tile-pane) {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
 }
 
 .map-wrap {
