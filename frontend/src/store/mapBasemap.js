@@ -7,10 +7,7 @@ const STORAGE_KEY = 'mapBasemapStyle';
 // navigation/reloads and so the header control and the map itself share
 // one source of truth without prop-drilling through the router. App.vue's
 // v-for over this object is what actually renders the switcher's buttons -
-// adding an entry here is enough, no template change needed. See
-// MapView.vue's own doc comment on why each style needs different tile
-// handling (one filters OSM's own tiles, the other swaps providers
-// entirely).
+// adding an entry here is enough, no template change needed.
 //
 // "contrast" used to be two separate entries (a light Carto style and a
 // dark one) - folded into one now that the site has its own light/dark
@@ -19,15 +16,20 @@ const STORAGE_KEY = 'mapBasemapStyle';
 // many for what's really the same choice ("give me the muted, high-contrast
 // tiles") the site theme should already be answering. resolveBasemapUrl
 // below picks the matching Carto variant for whichever theme is active.
+//
+// "standard" is deliberately plain, unfiltered OSM regardless of site
+// theme - earlier versions ran a CSS filter on it (a light-mode desaturate,
+// then also a dark-mode invert-based approximation once the theme toggle
+// existed) to help markers stand out against busy tiles, but that's not
+// what this option is for anymore: it's the familiar, unmodified OSM look,
+// full stop. "contrast" is the answer for anyone who wants the
+// better-marker-readability experience instead.
 export const BASEMAP_STYLES = {
-  desaturated: {
+  standard: {
     label: 'Обычная',
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; OpenStreetMap contributors',
     subdomains: 'abc',
-    // Only this style needs the CSS filter (see MapView.vue) - OSM's own
-    // tiles are the saturated ones being toned down.
-    filtered: true,
   },
   contrast: {
     label: 'Контрастная',
@@ -37,16 +39,15 @@ export const BASEMAP_STYLES = {
     },
     attribution: '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
     subdomains: 'abcd',
-    filtered: false,
   },
 };
 
-// `desaturated` has one fixed url; `contrast` has one per site theme (see
+// `standard` has one fixed url; `contrast` has one per site theme (see
 // the doc comment above) - this is the one place that difference gets
 // resolved, so MapView.vue's own tile-layer setup doesn't need to know
 // which shape a given style's URL config is in.
 export function resolveBasemapUrl(styleKey, theme) {
-  const cfg = BASEMAP_STYLES[styleKey] || BASEMAP_STYLES.desaturated;
+  const cfg = BASEMAP_STYLES[styleKey] || BASEMAP_STYLES.standard;
   if (cfg.url) return cfg.url;
   return cfg.urls[theme] || cfg.urls.light;
 }
@@ -54,9 +55,9 @@ export function resolveBasemapUrl(styleKey, theme) {
 function loadStyle() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw && BASEMAP_STYLES[raw] ? raw : 'desaturated';
+    return raw && BASEMAP_STYLES[raw] ? raw : 'standard';
   } catch {
-    return 'desaturated';
+    return 'standard';
   }
 }
 
