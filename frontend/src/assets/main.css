@@ -27,58 +27,47 @@ body {
   height: 100%;
 }
 
+/* Full redesign, replacing an earlier version where brand/nav/user sat in
+   one row and .nav fell back to a horizontally-scrolling strip once its
+   links (up to 10, for an admin) didn't fit - that scroll strip had no
+   visible affordance hinting more links were off to the side, so it just
+   looked broken rather than usable. Now a fixed two-row shape at every
+   width: brand + user up top, nav below - and nav *wraps* onto as many
+   lines as it needs instead of scrolling, so every link stays visible with
+   no scrollbar, ever. */
 .topbar {
   display: flex;
-  align-items: center;
-  gap: 24px;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px 24px;
   background: #14213d;
   color: #fff;
 }
 
+.topbar-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Two lines always (not just a narrow-screen fallback) - "Топливо —
+   Мониторинг" on one line was the widest single piece of the old header,
+   and splitting it keeps the brand's footprint small and predictable
+   rather than fighting .user for space at every width. */
 .brand {
+  display: flex;
+  flex-direction: column;
   font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
 }
 
 .nav {
   display: flex;
-  gap: 16px;
-  flex: 1;
-  /* Flex items default to min-width: auto, which refuses to shrink below
-     the content's natural size - with 6 links that's wider than most phone
-     screens, and since nothing here wraps, the excess doesn't drop to a new
-     line, it pushes the whole page wider (horizontal scroll on the entire
-     app, not just the nav). min-width: 0 lets the nav actually shrink to
-     the space the topbar has, and overflow-x: auto turns the excess into a
-     horizontally scrollable strip contained within the nav itself instead. */
-  min-width: 0;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Below this width, brand + nav + user no longer fit on one line even with
-   the nav itself scrolling internally - brand and user alone can eat up
-   most of the available space, squeezing nav down to 0px (invisible, not
-   just cramped). Give nav its own full-width row below brand/user instead,
-   where it has real room to be a usable horizontally-scrollable strip. */
-@media (max-width: 700px) {
-  .topbar {
-    flex-wrap: wrap;
-    row-gap: 8px;
-  }
-
-  .brand {
-    order: 1;
-  }
-
-  .user {
-    order: 2;
-  }
-
-  .nav {
-    order: 3;
-    flex-basis: 100%;
-  }
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .nav a {
@@ -87,7 +76,6 @@ body {
   padding: 6px 10px;
   border-radius: 6px;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .nav a.router-link-active {
@@ -95,11 +83,33 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 
+/* Right-aligned, own column, split into two rows (see App.vue): identity
+   (Telegram link + username/role/logout, or the "Войти" link) on top, the
+   basemap/theme icon toggles below. Splitting these into two rows means
+   the column's required width is whichever row is wider, not their sum -
+   previously everything lived in one row and that sum was the whole
+   reason the header needed a dedicated narrow-screen icon-only/hide
+   treatment for so many of its pieces. */
 .user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.user__identity {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.user__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .role-badge {
@@ -174,34 +184,13 @@ body {
   color: #fff;
 }
 
-/* Icon-only below the same width the nav itself starts wrapping to its own
-   row (see .topbar's media query) - brand + username + role badge + this
-   link all still have to share one line at that width, and the icon alone
-   (with its title="" tooltip) stays recognizable without the label. */
+/* Icon-only below the width .user__identity's own flex-wrap starts kicking
+   in (username + role badge + logout, or "Войти", all sharing the row with
+   this link) - keeps that row on one line a little longer before it has to
+   wrap onto two, and the icon alone (with its title="" tooltip) stays
+   recognizable without the label. */
 @media (max-width: 700px) {
   .telegram-link__label {
-    display: none;
-  }
-
-}
-
-/* Collapsing both switchers from segmented pairs down to one cycling icon
-   each (see .icon-toggle above) shrank .user's needed width from ~345px
-   (two-button-per-switch version) to the same ~345px total - the switches
-   themselves got smaller, but .user's total is dominated by the
-   username/role-badge/logout controls next to them, which didn't change.
-   What did change is where things start overflowing without hiding
-   anything: confirmed live (logged in as admin, worst case) fits at 306px,
-   overflows at 304px - below any mainstream device's viewport width (320px
-   floor, e.g. iPhone SE 1st gen). This breakpoint is effectively a
-   defensive fallback for non-standard cases (split-screen multitasking, an
-   embedded webview, ancient hardware) rather than something any current
-   phone actually hits. Basemap is still the one to drop first if it ever
-   does - it only visibly does anything on the map page itself, unlike the
-   site-wide theme switch or the always-relevant admin identity/logout
-   controls next to it. */
-@media (max-width: 306px) {
-  .icon-toggle--basemap {
     display: none;
   }
 }
