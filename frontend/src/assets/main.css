@@ -27,36 +27,55 @@ body {
   height: 100%;
 }
 
-/* Full redesign, replacing an earlier version where brand/nav/user sat in
-   one row and .nav fell back to a horizontally-scrolling strip once its
+/* Full redesign, replacing two earlier attempts. First: brand/nav/user sat
+   in one row and .nav fell back to a horizontally-scrolling strip once its
    links (up to 10, for an admin) didn't fit - that scroll strip had no
    visible affordance hinting more links were off to the side, so it just
-   looked broken rather than usable. Now a fixed two-row shape at every
-   width: brand + user up top, nav below - and nav *wraps* onto as many
-   lines as it needs instead of scrolling, so every link stays visible with
-   no scrollbar, ever. */
+   looked broken rather than usable. Second: nav moved to its own
+   full-width row below brand/user - fixed the scrolling, but left a big
+   empty gap in the top row on wide screens (brand and user, now both
+   narrow, no longer came close to filling it) - and squeezing nav back
+   inline to fill that gap (a *third* attempt, briefly) turned out to
+   trade that problem for a worse one at medium widths: with brand and
+   user both holding their width, nav's leftover space could shrink to
+   ~300px there even though the viewport had 700+px to give it, wrapping
+   its 10 links five deep for no real reason.
+   Settled on a CSS Grid layout with two shapes, switched by viewport
+   width alone (media query below) rather than by how much space nav
+   happens to have left over after two fixed-width neighbors claim theirs:
+   wide screens ("brand nav user" in one row - nav fills the actual gap)
+   and everything narrower (nav back on its own full-width row, where it
+   has real room regardless of how wide brand/.user's content is that
+   day). */
 .topbar {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'brand . user' 'nav nav nav';
+  align-items: start;
+  gap: 10px 20px;
   padding: 12px 24px;
   background: #14213d;
   color: #fff;
 }
 
-.topbar-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+/* See .topbar's doc comment - inline "brand | nav | user" only above this
+   width; measured live that 768px-ish viewports squeeze nav's leftover
+   column down to an unreasonably tall wrap (five rows for a full admin
+   nav) even though there's plenty of total width, just not arranged where
+   nav can use it. */
+@media (min-width: 900px) {
+  .topbar {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: 'brand nav user';
+  }
 }
 
 /* Two lines always (not just a narrow-screen fallback) - "Топливо —
    Мониторинг" on one line was the widest single piece of the old header,
    and splitting it keeps the brand's footprint small and predictable
-   rather than fighting .user for space at every width. */
+   rather than fighting nav/.user for space at every width. */
 .brand {
+  grid-area: brand;
   display: flex;
   flex-direction: column;
   font-weight: 600;
@@ -64,8 +83,14 @@ body {
   white-space: nowrap;
 }
 
+/* The one flexible item in the grid (see .topbar's doc comment) -
+   min-width: 0 lets it shrink past its own links' combined width instead
+   of forcing its grid column (and so the whole row) wider, and its own
+   flex-wrap lets individual links drop onto more lines as it's squeezed. */
 .nav {
+  grid-area: nav;
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
   gap: 8px 16px;
 }
@@ -83,14 +108,15 @@ body {
   background: rgba(255, 255, 255, 0.12);
 }
 
-/* Right-aligned, own column, split into two rows (see App.vue): identity
-   (Telegram link + username/role/logout, or the "Войти" link) on top, the
-   basemap/theme icon toggles below. Splitting these into two rows means
-   the column's required width is whichever row is wider, not their sum -
-   previously everything lived in one row and that sum was the whole
-   reason the header needed a dedicated narrow-screen icon-only/hide
-   treatment for so many of its pieces. */
+/* Own column, split into two rows (see App.vue): identity (Telegram link +
+   username/role/logout, or the "Войти" link) on top, the basemap/theme
+   icon toggles below. Splitting these into two rows means the column's
+   required width is whichever row is wider, not their sum - previously
+   everything lived in one row and that sum was the whole reason the
+   header needed a dedicated narrow-screen icon-only/hide treatment for so
+   many of its pieces. */
 .user {
+  grid-area: user;
   display: flex;
   flex-direction: column;
   align-items: flex-end;

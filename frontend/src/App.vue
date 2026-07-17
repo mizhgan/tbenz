@@ -65,55 +65,9 @@ function handleLogout() {
 <template>
   <div class="layout">
     <header class="topbar">
-      <div class="topbar-top">
-        <div class="brand">
-          <span class="brand__line">⛽ Топливо —</span>
-          <span class="brand__line">Мониторинг</span>
-        </div>
-        <div class="user">
-          <div class="user__identity">
-            <a
-              class="telegram-link"
-              href="https://t.me/tbenzin"
-              target="_blank"
-              rel="noopener"
-              title="Канал в Telegram"
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                <path
-                  d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.18 1.897-.962 6.502-1.359 8.627-.168.9-.499 1.201-.82 1.23-.696.064-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.242-1.865-.44-.751-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.831-2.529 6.998-3.015 3.332-1.386 4.025-1.627 4.477-1.635.099-.002.321.023.465.14.121.098.155.23.171.323.016.093.037.306.02.472z"
-                />
-              </svg>
-              <span class="telegram-link__label">Telegram</span>
-            </a>
-            <template v-if="isAuthenticated">
-              <span>{{ auth.username }}</span>
-              <span v-if="auth.isAdmin" class="role-badge">админ</span>
-              <button class="link-btn" @click="handleLogout">Выйти</button>
-            </template>
-            <router-link v-else to="/login">Войти</router-link>
-          </div>
-          <div class="user__controls">
-            <button
-              type="button"
-              class="icon-toggle icon-toggle--basemap"
-              :title="`Подложка карты: ${basemapCfg.label} (нажмите для смены)`"
-              :aria-label="`Подложка карты: ${basemapCfg.label}. Нажмите для смены`"
-              @click="cycleBasemap"
-            >
-              {{ basemapCfg.icon }}
-            </button>
-            <button
-              type="button"
-              class="icon-toggle"
-              :title="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'} (нажмите для смены)`"
-              :aria-label="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'}. Нажмите для смены`"
-              @click="theme.setTheme(theme.theme === 'dark' ? 'light' : 'dark')"
-            >
-              {{ theme.theme === 'dark' ? '🌙' : '☀️' }}
-            </button>
-          </div>
-        </div>
+      <div class="brand">
+        <span class="brand__line">⛽ Топливо —</span>
+        <span class="brand__line">Мониторинг</span>
       </div>
       <nav class="nav">
         <router-link v-if="auth.isAdmin" to="/regions">Районы</router-link>
@@ -127,6 +81,50 @@ function handleLogout() {
         <router-link v-if="auth.isAdmin" to="/raw-data">Сырые данные</router-link>
         <router-link to="/settings">Настройки</router-link>
       </nav>
+      <div class="user">
+        <div class="user__identity">
+          <a
+            class="telegram-link"
+            href="https://t.me/tbenzin"
+            target="_blank"
+            rel="noopener"
+            title="Канал в Telegram"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+              <path
+                d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.18 1.897-.962 6.502-1.359 8.627-.168.9-.499 1.201-.82 1.23-.696.064-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.242-1.865-.44-.751-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.831-2.529 6.998-3.015 3.332-1.386 4.025-1.627 4.477-1.635.099-.002.321.023.465.14.121.098.155.23.171.323.016.093.037.306.02.472z"
+              />
+            </svg>
+            <span class="telegram-link__label">Telegram</span>
+          </a>
+          <template v-if="isAuthenticated">
+            <span>{{ auth.username }}</span>
+            <span v-if="auth.isAdmin" class="role-badge">админ</span>
+            <button class="link-btn" @click="handleLogout">Выйти</button>
+          </template>
+          <router-link v-else to="/login">Войти</router-link>
+        </div>
+        <div class="user__controls">
+          <button
+            type="button"
+            class="icon-toggle icon-toggle--basemap"
+            :title="`Подложка карты: ${basemapCfg.label} (нажмите для смены)`"
+            :aria-label="`Подложка карты: ${basemapCfg.label}. Нажмите для смены`"
+            @click="cycleBasemap"
+          >
+            {{ basemapCfg.icon }}
+          </button>
+          <button
+            type="button"
+            class="icon-toggle"
+            :title="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'} (нажмите для смены)`"
+            :aria-label="`Тема сайта: ${theme.theme === 'dark' ? 'тёмная' : 'светлая'}. Нажмите для смены`"
+            @click="theme.setTheme(theme.theme === 'dark' ? 'light' : 'dark')"
+          >
+            {{ theme.theme === 'dark' ? '🌙' : '☀️' }}
+          </button>
+        </div>
+      </div>
     </header>
     <main class="content" :class="{ 'content--full-bleed': isFullBleed }">
       <router-view />
