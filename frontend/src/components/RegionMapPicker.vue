@@ -144,10 +144,16 @@ watch(
 }
 
 /* Site dark theme (store/theme.js) - ties in specificity with main.css's
-   generic dark rule and can win on source order alone. This component's
-   own map tiles stay their normal light OSM style regardless (a small
-   standalone Leaflet instance, not wired into store/mapBasemap.js). */
+   generic dark rule and can win on source order alone. */
 [data-theme='dark'] .hint {
   color: #94a3b8;
+}
+
+/* This component's map is always plain OSM (a small standalone Leaflet
+   instance, not wired into store/mapBasemap.js's style switcher) - see
+   MapView.vue's identical filter (its own "Обычная" dark-theme rule) for
+   the full rationale on the exact values. */
+[data-theme='dark'] .picker-map :deep(.leaflet-tile-pane) {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
 }
 </style>

@@ -568,6 +568,12 @@ onBeforeUnmount(() => {
   isolation: isolate;
 }
 
+/* Site dark theme (store/theme.js) - see StationDetailModal.vue's
+   identical rule for the full rationale. */
+[data-theme='dark'] .mini-map :deep(.leaflet-tile-pane) {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
+}
+
 .distance-note {
   margin: 0 0 12px;
 }

@@ -696,6 +696,17 @@ onBeforeUnmount(() => {
   isolation: isolate;
 }
 
+/* Site dark theme (store/theme.js) - this mini-map is always plain OSM
+   (no basemap-style switcher here the way MapView.vue's main map has one),
+   so it just needs the same dark approximation MapView.vue uses for its
+   own "Обычная" style in dark theme - see that file's identical filter for
+   the full rationale on the exact values. Pure CSS (no JS/theme store
+   import needed) since there's no tile-provider swap involved, just this
+   one filter toggling on the existing OSM tiles. */
+[data-theme='dark'] .mini-map :deep(.leaflet-tile-pane) {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6);
+}
+
 .fuel-list {
   list-style: none;
   padding: 0;
