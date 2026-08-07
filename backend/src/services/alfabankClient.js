@@ -1,9 +1,18 @@
+const https = require('https');
 const axios = require('axios');
 const { alfabankApiBaseUrl, proxyRequestTimeoutMs } = require('../config/env');
 const { memoizeAsync } = require('../utils/cache');
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
+// alfabank.ru now serves a Russian national root CA cert that Node's default
+// trust store doesn't carry, so every request fails TLS verification
+// (`self-signed certificate in certificate chain`) before it ever reaches
+// the anti-bot redirect loop below. There's no legitimate CA bundle to add
+// here, so skip verification for this client only - scoped to this one
+// httpsAgent, not process-wide (no NODE_TLS_REJECT_UNAUTHORIZED).
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 // Verified live: a plain request gets a 307 back to the exact same URL,
 // minting a fresh `spid`/`spsc` anti-bot cookie pair each hop
@@ -39,6 +48,7 @@ async function fetchRaw() {
       timeout: proxyRequestTimeoutMs,
       maxRedirects: 0,
       validateStatus: (status) => status === 200 || status === 307,
+      httpsAgent,
       headers: {
         Accept: 'application/json',
         'User-Agent': USER_AGENT,
