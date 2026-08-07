@@ -1,3 +1,4 @@
+const https = require('https');
 const axios = require('axios');
 const { tbankApiBaseUrl, proxyRequestTimeoutMs } = require('../config/env');
 const Proxy = require('../models/Proxy');
@@ -9,12 +10,19 @@ const USER_AGENT =
 
 const MAX_PROXY_ATTEMPTS = 5;
 
+// Russian banks have been migrating to the national root CA (see
+// alfabankClient.js, which hit this live) - toplivo.tbank.ru hasn't yet as
+// of this writing, but pre-empting it here is cheap and this is scoped to
+// this client's own agents, not process-wide.
+const INSECURE_TLS = { rejectUnauthorized: false };
+const directHttpsAgent = new https.Agent(INSECURE_TLS);
+
 function buildClient(agent) {
   return axios.create({
     baseURL: tbankApiBaseUrl,
     timeout: proxyRequestTimeoutMs,
     httpAgent: agent || undefined,
-    httpsAgent: agent || undefined,
+    httpsAgent: agent || directHttpsAgent,
     proxy: agent ? false : undefined,
     headers: {
       Accept: 'application/json',
@@ -66,7 +74,7 @@ async function fetchStations({ minLat, maxLat, minLon, maxLon }) {
     triedIds.push(proxy._id);
 
     try {
-      const agent = proxyService.buildAgent(proxy);
+      const agent = proxyService.buildAgent(proxy, INSECURE_TLS);
       const response = await buildClient(agent).get('', { params });
       await proxyService.recordSuccess(proxy._id);
       return { data: response.data, requestUrl };

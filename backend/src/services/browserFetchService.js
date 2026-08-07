@@ -54,9 +54,9 @@ function looksLikeJson(text) {
  * different fetches can go through different (or no) proxies concurrently
  * on the one shared browser.
  */
-async function fetchJsonThroughBrowser(url, { proxy, timeoutMs = 20000 } = {}) {
+async function fetchJsonThroughBrowser(url, { proxy, timeoutMs = 20000, ignoreHTTPSErrors = false } = {}) {
   const browser = await getBrowser();
-  const context = await browser.newContext({ userAgent: USER_AGENT, proxy });
+  const context = await browser.newContext({ userAgent: USER_AGENT, proxy, ignoreHTTPSErrors });
   const deadline = Date.now() + timeoutMs;
   try {
     const page = await context.newPage();

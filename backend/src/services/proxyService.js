@@ -14,11 +14,17 @@ function buildProxyUrl(proxy) {
   return `${scheme}://${auth}${proxy.host}:${proxy.port}`;
 }
 
-function buildAgent(proxy) {
+// `tlsOptions` (e.g. { rejectUnauthorized: false }) is merged into the TLS
+// connect options these agent classes use for the tunneled connection to the
+// actual target host - separate from the proxy's own connection, and opt-in
+// per caller (see tbankClient.js) rather than applied here to every agent,
+// since this same function backs the plain connectivity check in
+// testProxy() below, which has no reason to trust a bad cert.
+function buildAgent(proxy, tlsOptions) {
   const url = buildProxyUrl(proxy);
-  if (proxy.type === 'socks5') return new SocksProxyAgent(url);
-  if (proxy.type === 'https') return new HttpsProxyAgent(url);
-  return new HttpProxyAgent(url);
+  if (proxy.type === 'socks5') return new SocksProxyAgent(url, tlsOptions);
+  if (proxy.type === 'https') return new HttpsProxyAgent(url, tlsOptions);
+  return new HttpProxyAgent(url, tlsOptions);
 }
 
 // Playwright's context `proxy` option wants a plain {server, username,

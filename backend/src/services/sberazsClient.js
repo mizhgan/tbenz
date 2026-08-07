@@ -30,7 +30,16 @@ function buildRequestUrl(bbox) {
 async function requestOnce(proxy, bbox) {
   const url = buildUrl(bbox);
   const proxyOption = proxy ? proxyService.buildPlaywrightProxyOption(proxy) : undefined;
-  return browserFetchService.fetchJsonThroughBrowser(url, { proxy: proxyOption, timeoutMs: proxyRequestTimeoutMs });
+  // Russian banks have been migrating to the national root CA (see
+  // alfabankClient.js, which hit this live) - sberazs.ru hasn't yet as of
+  // this writing, but pre-empting it here is cheap: scoped to this fetch's
+  // own short-lived browser context, not every page this shared Chromium
+  // instance ever opens.
+  return browserFetchService.fetchJsonThroughBrowser(url, {
+    proxy: proxyOption,
+    timeoutMs: proxyRequestTimeoutMs,
+    ignoreHTTPSErrors: true,
+  });
 }
 
 /**
