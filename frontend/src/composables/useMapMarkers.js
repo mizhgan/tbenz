@@ -67,11 +67,14 @@ function sourcesSummaryHtml(s) {
 // has to fit a ~250px popup, and the point here is "is it flaky *right
 // now*", not a full week of history (that's what "Подробная информация"
 // is for). stationId -> pre-rendered ribbon HTML string, populated lazily
-// (see loadRibbon below) - fetched once per station per page session, not
-// eagerly for every marker, since most popups never get opened. Persists
-// across a live-refresh's setPopupContent call (see renderMarkers) so an
-// already-open popup's ribbon doesn't flash back to a loading placeholder
-// every ~20s.
+// (see loadRibbon below) - fetched once per station per continuous popup
+// open, not eagerly for every marker, since most popups never get opened.
+// Persists across a live-refresh's setPopupContent call (see renderMarkers)
+// so an already-open popup's ribbon doesn't flash back to a loading
+// placeholder every ~20s - but gets evicted on popupclose (see the
+// popupclose listener below) so reopening later (this session's data has
+// moved on by then) fetches fresh instead of replaying whatever was true
+// the first time this station's popup was ever opened.
 const RIBBON_LOOKBACK_HOURS = 24;
 const ribbonCache = new Map();
 
@@ -315,6 +318,13 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
           selectedStation.value = entry.data;
           wirePopupContent(entry);
           loadRibbon(entry);
+        });
+        // Evict rather than leaving the entry to answer every future
+        // popupopen for this station - see ribbonCache's own doc comment
+        // above for why "while this exact popup instance stays open" and
+        // "for the rest of the page session" need different lifetimes.
+        marker.on('popupclose', () => {
+          ribbonCache.delete(String(entry.data.stationId));
         });
         markersLayer.addLayer(marker);
         markerEntries.set(id, entry);
