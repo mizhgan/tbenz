@@ -91,13 +91,6 @@ const mapContainer = ref(null);
 // runs later, by which point onMounted has populated it - see
 // useMapMarkers.js's own doc comment for the full reasoning.
 const mapState = { map: null, markersLayer: null, tileLayer: null };
-// Drives .leaflet-map--dark-filter (see this file's own <style>) - "Обычная"
-// (OSM's own tiles) has no dark-native variant to switch to the way
-// "Контрастная" swaps to Carto's dark_all, so dark site theme + this style
-// needs a CSS approximation instead (see applyBasemapStyle's own comment
-// on the exact filter values). Light theme needs no filter at all here -
-// "Обычная" is meant to be genuinely standard, unmodified OSM in that case.
-const useDarkTileFilter = ref(false);
 let resizeObserver = null;
 
 // Marker/popup rendering - watches `filteredStations` above and redraws
@@ -181,8 +174,18 @@ function applyBasemapStyle() {
   }).addTo(mapState.map);
   // "Контрастная" needs no filter regardless of theme (it already swapped
   // to the matching Carto variant above) - only "Обычная" in dark theme
-  // does, see .leaflet-map--dark-filter's own doc comment for why.
-  useDarkTileFilter.value = styleKey === 'standard' && themeStore.theme === 'dark';
+  // does, see .leaflet-map--dark-filter's own doc comment for why. Toggled
+  // via classList directly, NOT a Vue :class binding: Leaflet adds its own
+  // classes (leaflet-container, leaflet-touch, ...) straight onto this same
+  // element outside Vue's tracking, and a reactive :class patch replaces
+  // the whole className from the vnode alone - wiping Leaflet's classes out
+  // from under it every time the site theme toggles. That broke every
+  // ".leaflet-container ..."-scoped rule (including Leaflet's own popup
+  // close-button CSS) for the rest of the page session, not just this filter.
+  mapContainer.value?.classList.toggle(
+    'leaflet-map--dark-filter',
+    styleKey === 'standard' && themeStore.theme === 'dark'
+  );
 }
 
 async function handleRegionChange() {
@@ -256,7 +259,7 @@ onBeforeUnmount(() => {
     <p v-if="errorMessage" class="error-text">{{ errorMessage }}</p>
 
     <div class="map-wrap">
-      <div ref="mapContainer" class="leaflet-map" :class="{ 'leaflet-map--dark-filter': useDarkTileFilter }"></div>
+      <div ref="mapContainer" class="leaflet-map"></div>
 
       <!-- Always-visible entry point into the drawer below - region,
            slider, export/share etc. still live behind it, so the map
