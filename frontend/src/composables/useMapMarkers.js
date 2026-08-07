@@ -3,6 +3,19 @@ import L from 'leaflet';
 import { stationsApi } from '../api/regions';
 import { statusMeta, fuelTypeLabel, CORE_FUEL_TYPES, computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 
+// Leaflet's default autoPan padding is a bare 5px, so it pans just far
+// enough for the popup to graze the map container's own top edge - which is
+// exactly where the floating status-badge/toggle-bar chrome lives (see
+// MapView.vue's .status-badge/.toggle-bar, both position: absolute within
+// the same map container). A short popup never reaches that far up, but the
+// history ribbon regularly makes popups tall enough to need the pan, and on
+// a narrow (mobile) viewport that reliably parks the popup's own close
+// button right under the status badge - both fight for the same top-right
+// corner. Reserving real vertical room here (taller than the badge, see its
+// own top/height) makes autoPan stop below that chrome instead of under it.
+const POPUP_AUTOPAN_PADDING_TOP_LEFT = L.point(16, 100);
+const POPUP_AUTOPAN_PADDING_BOTTOM_RIGHT = L.point(16, 40);
+
 function formatDateTime(ms) {
   if (!ms) return '—';
   return new Date(ms).toLocaleString('ru-RU');
@@ -309,7 +322,12 @@ export function useMapMarkers({ mapState, stationsRef, filteredStationsRef, effe
         // station, not a frozen snapshot from whenever it was first drawn.
         const entry = { marker, data: s };
         marker.bindTooltip(tooltipText);
-        marker.bindPopup(() => buildPopupHtml(entry.data), { maxWidth: 260, minWidth: 220 });
+        marker.bindPopup(() => buildPopupHtml(entry.data), {
+          maxWidth: 260,
+          minWidth: 220,
+          autoPanPaddingTopLeft: POPUP_AUTOPAN_PADDING_TOP_LEFT,
+          autoPanPaddingBottomRight: POPUP_AUTOPAN_PADDING_BOTTOM_RIGHT,
+        });
         // The button inside the popup isn't part of Vue's render tree (it's
         // raw HTML Leaflet drops into the DOM), so it can't use @click -
         // wire it up imperatively each time this marker's popup actually
