@@ -5,10 +5,10 @@ const StationSnapshot = require('../models/StationSnapshot');
 const { getStationForecast } = require('../services/forecastService');
 const { getSource } = require('../services/sourceRegistry');
 const { getSingleStationMetrics } = require('../services/metricsService');
-const { parseRange } = require('../utils/dateRange');
+const { parseRange, MAX_SAFE_RANGE_MS } = require('../utils/dateRange');
 
 const METRICS_DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
-const METRICS_MAX_RANGE_MS = 92 * 24 * 60 * 60 * 1000;
+const METRICS_MAX_RANGE_MS = MAX_SAFE_RANGE_MS;
 
 // Doubles as the admin UI's station-watchlist picker (small `q`+`limit`
 // searches, the original use) and the "Станции" browse page's fuller list

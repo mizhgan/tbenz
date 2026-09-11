@@ -12,6 +12,19 @@ const { HttpError } = require('../middleware/errorHandler');
 // query took ~2.7s, paid by every single visitor).
 const RANGE_ROUND_MS = 5 * 60 * 1000;
 
+// Shared cap for every metrics/history-style endpoint's own maxRangeMs.
+// Used to be 92 days per controller, picked as "headroom" over the reports
+// page's widest 30-day preset without ever being load-tested - a real
+// 72-day custom report (free-typed into the datetime-local inputs, not one
+// of the preset buttons) OOM-killed mongod in production: getStationMetrics
+// et al materialize every raw snapshot doc for the whole window in memory,
+// and ~100 stations x 72 days x 144 polls/day is ~1M docs. Measured live on
+// that incident's own host (3.8GB RAM, 2 CPU): a 61-day range already took
+// ~19s for the heaviest endpoints; 72 days pushed mongod's RSS to 1.86GB and
+// it got OOM-killed mid-query. 35 days keeps clear of that cliff while still
+// giving custom ranges real headroom over the 30-day preset.
+const MAX_SAFE_RANGE_MS = 35 * 24 * 60 * 60 * 1000;
+
 function roundDown(date) {
   return new Date(Math.floor(date.getTime() / RANGE_ROUND_MS) * RANGE_ROUND_MS);
 }
@@ -40,4 +53,4 @@ function parseRange(query, { defaultRangeMs, maxRangeMs }) {
   return { from: roundedFrom, to: roundedTo };
 }
 
-module.exports = { parseRange, roundDown, RANGE_ROUND_MS };
+module.exports = { parseRange, roundDown, RANGE_ROUND_MS, MAX_SAFE_RANGE_MS };
