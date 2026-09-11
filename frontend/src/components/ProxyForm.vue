@@ -4,6 +4,12 @@ import ModalForm from './ModalForm.vue';
 
 const props = defineProps({
   initial: { type: Object, default: null },
+  // The parent (ProxiesView.vue) owns the actual create/update request and
+  // passes its own useAsyncAction loading state through here - without it,
+  // "Сохранить" stayed clickable for the whole request, so a fast double
+  // click (or click + Enter) fired two overlapping submits and could create
+  // two proxies instead of one.
+  submitting: { type: Boolean, default: false },
 });
 const emit = defineEmits(['submit', 'cancel']);
 
@@ -68,6 +74,8 @@ function handleSubmit() {
     :title="initial ? 'Редактировать прокси' : 'Новый прокси'"
     :error="error"
     max-width="480px"
+    :submit-disabled="submitting"
+    :submit-label="submitting ? 'Сохранение...' : 'Сохранить'"
     @submit="handleSubmit"
     @cancel="emit('cancel')"
   >

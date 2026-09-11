@@ -16,7 +16,7 @@ const editingChat = ref(null);
 // out of scope for useAsyncAction - see UsersView.vue's same note);
 // separate instances for submit/delete (shared, no loading indicator) and
 // the per-chat test-send button (keyed, several could be in flight at once).
-const { error: actionError, run: runAction } = useAsyncAction();
+const { loading: actionLoading, error: actionError, run: runAction } = useAsyncAction();
 const { busyIds: testingIds, error: testError, run: runTest } = useKeyedAsyncAction();
 
 const STATUS_LABELS = {
@@ -162,8 +162,8 @@ onMounted(loadAll);
                 >
                   {{ testingIds.has(c.id) ? 'Отправка...' : 'Тест' }}
                 </button>
-                <button class="btn secondary" @click="openEditForm(c)">Настроить</button>
-                <button class="btn danger" @click="handleDelete(c)">Удалить</button>
+                <button class="btn secondary" :disabled="actionLoading" @click="openEditForm(c)">Настроить</button>
+                <button class="btn danger" :disabled="actionLoading" @click="handleDelete(c)">Удалить</button>
               </td>
             </tr>
           </tbody>
@@ -175,6 +175,7 @@ onMounted(loadAll);
       v-if="showForm"
       :initial="editingChat"
       :regions="regions"
+      :submitting="actionLoading"
       @submit="handleSubmit"
       @cancel="showForm = false"
     />

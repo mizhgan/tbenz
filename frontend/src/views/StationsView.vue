@@ -40,7 +40,17 @@ async function loadRegions() {
   }
 }
 
+// Guards against a slower/older call's response landing after and
+// overwriting a faster/newer one's - loadStations is re-triggered by four
+// independent sources (mount, the debounced search box, the filters watch
+// below, and the sources modal's @changed) with no cancellation between
+// them, so typing a search term while also switching a filter select can
+// easily fire two overlapping requests that resolve out of order. Same
+// pattern as ReportsView.vue's loadMetrics requestToken.
+let requestToken = 0;
+
 async function loadStations() {
+  const myToken = ++requestToken;
   loading.value = true;
   errorMessage.value = '';
   try {
@@ -49,11 +59,14 @@ async function loadStations() {
     if (filters.region) params.region = filters.region;
     if (filters.status) params.status = filters.status;
     if (filters.matchState) params.matchState = filters.matchState;
-    stations.value = await stationsApi.list(params);
+    const result = await stationsApi.list(params);
+    if (myToken !== requestToken) return; // superseded by a newer call - discard
+    stations.value = result;
   } catch (err) {
+    if (myToken !== requestToken) return;
     errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список станций';
   } finally {
-    loading.value = false;
+    if (myToken === requestToken) loading.value = false;
   }
 }
 

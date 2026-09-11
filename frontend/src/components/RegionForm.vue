@@ -5,6 +5,12 @@ import ModalForm from './ModalForm.vue';
 
 const props = defineProps({
   initial: { type: Object, default: null },
+  // The parent (RegionsView.vue) owns the actual create/update request and
+  // passes its own useAsyncAction loading state through here - without it,
+  // "Сохранить" stayed clickable for the whole request, so a fast double
+  // click (or click + Enter) fired two overlapping submits and could create
+  // two regions instead of one.
+  submitting: { type: Boolean, default: false },
 });
 const emit = defineEmits(['submit', 'cancel']);
 
@@ -58,6 +64,8 @@ function handleSubmit() {
   <ModalForm
     :title="initial ? 'Редактировать район' : 'Новый район'"
     :error="error"
+    :submit-disabled="submitting"
+    :submit-label="submitting ? 'Сохранение...' : 'Сохранить'"
     @submit="handleSubmit"
     @cancel="emit('cancel')"
   >

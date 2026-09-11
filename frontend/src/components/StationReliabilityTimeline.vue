@@ -95,7 +95,16 @@ const dayTicks = computed(() => {
   return allTicks.filter((_, i) => i % step === 0);
 });
 
+// Guards against a slower/older call's response landing after and
+// overwriting a faster/newer one's - up to 5 of these render at once inside
+// StationHighlightCards.vue, each re-fetching via the watch below whenever
+// the reports page's own selected period changes, with no cancellation
+// between successive calls. Same pattern as ReportsView.vue's loadMetrics
+// requestToken.
+let requestToken = 0;
+
 async function load() {
+  const myToken = ++requestToken;
   loading.value = true;
   errorMessage.value = '';
   try {
@@ -103,6 +112,7 @@ async function load() {
     const params = { from, limit: 5000 };
     if (props.to) params.to = props.to;
     const history = await stationsApi.history(props.stationId, params);
+    if (myToken !== requestToken) return; // superseded by a newer call - discard
     if (!history.length) {
       rows.value = [];
       return;
@@ -114,9 +124,10 @@ async function load() {
     rangeStart.value = new Date(history[0].polledAt);
     rangeEnd.value = new Date(history[history.length - 1].polledAt);
   } catch (err) {
+    if (myToken !== requestToken) return;
     errorMessage.value = 'Не удалось загрузить историю';
   } finally {
-    loading.value = false;
+    if (myToken === requestToken) loading.value = false;
   }
 }
 

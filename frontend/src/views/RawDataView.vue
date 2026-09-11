@@ -43,15 +43,25 @@ async function copyDuplicates() {
   }
 }
 
+// Guards against a slower/older query landing after and overwriting a
+// faster/newer one's results - runQuery fires from both the "Выполнить"
+// button (disabled while loading) and Enter in the filter input (not
+// disabled), so pressing Enter twice while editing the filter can fire two
+// overlapping requests. Same request-token pattern as ReportsView.vue's
+// loadMetrics.
+let requestToken = 0;
+
 async function runQuery() {
   if (!selectedCollection.value) return;
   copyFeedback.value = '';
+  const myToken = ++requestToken;
   const params = { limit: limit.value };
   const trimmed = filterText.value.trim();
   if (trimmed) params.filter = trimmed;
   const result = await runQueryAction(() => rawDataApi.query(selectedCollection.value, params), {
     fallbackMessage: 'Не удалось выполнить запрос',
   });
+  if (myToken !== requestToken) return; // superseded by a newer call - discard
   if (result) {
     count.value = result.count;
     resultText.value = JSON.stringify(result.docs, null, 2);

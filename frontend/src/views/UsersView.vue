@@ -17,7 +17,7 @@ const editingUser = ref(null);
 // useAsyncAction's loading (starts false) would break a beat of on mount.
 // This one's just for save/delete, which - like before this composable
 // existed - show an error but no loading indicator of their own.
-const { error: actionError, run: runAction } = useAsyncAction();
+const { loading: actionLoading, error: actionError, run: runAction } = useAsyncAction();
 
 async function loadUsers() {
   loading.value = true;
@@ -98,10 +98,10 @@ onMounted(loadUsers);
               </td>
               <td>{{ formatDate(u.createdAt) }}</td>
               <td class="actions">
-                <button class="btn secondary" @click="openEditForm(u)">Изменить</button>
+                <button class="btn secondary" :disabled="actionLoading" @click="openEditForm(u)">Изменить</button>
                 <button
                   class="btn danger"
-                  :disabled="u.id === auth.userId"
+                  :disabled="u.id === auth.userId || actionLoading"
                   :title="u.id === auth.userId ? 'Нельзя удалить свою учётную запись' : ''"
                   @click="handleDelete(u)"
                 >
@@ -117,6 +117,7 @@ onMounted(loadUsers);
     <UserForm
       v-if="showForm"
       :initial="editingUser"
+      :submitting="actionLoading"
       @submit="handleSubmit"
       @cancel="showForm = false"
     />

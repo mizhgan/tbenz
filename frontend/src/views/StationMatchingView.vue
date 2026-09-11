@@ -11,17 +11,25 @@ const matched = ref([]);
 const loading = ref(true);
 const errorMessage = ref('');
 // loadAll/loadSourcesAndAll keep their own loading/errorMessage above
-// (initial-load skeleton, out of scope - see UsersView.vue's same note);
-// match/ignore/unmatch share this one keyed instance - each row's
-// optimistic splice-before/restore-on-error still lives at the call site
-// (via onError below), useKeyedAsyncAction only owns the busy/error state.
+// (initial-load skeleton); match/ignore/unmatch share this one keyed
+// instance - each row's optimistic splice-before/restore-on-error still
+// lives at the call site (via onError below), useKeyedAsyncAction only
+// owns the busy/error state.
 const { busyIds, error: actionError, run: runAction } = useKeyedAsyncAction();
 
 const searchQuery = ref('');
 const onlyWithCandidates = ref(false);
 
+// Guards against a slower/older call's response landing after and
+// overwriting a faster/newer one's - loadAll is re-triggered by mount and
+// by switching the source <select> (handleSourceChange below), with no
+// cancellation between them. Same request-token pattern as
+// ReportsView.vue's loadMetrics.
+let requestToken = 0;
+
 async function loadAll() {
   if (!selectedSourceKey.value) return;
+  const myToken = ++requestToken;
   loading.value = true;
   errorMessage.value = '';
   try {
@@ -29,12 +37,14 @@ async function loadAll() {
       stationMatchingApi.listUnmatched(selectedSourceKey.value),
       stationMatchingApi.listMatched(selectedSourceKey.value),
     ]);
+    if (myToken !== requestToken) return; // superseded by a newer call - discard
     unmatched.value = unmatchedRes;
     matched.value = matchedRes;
   } catch (err) {
+    if (myToken !== requestToken) return;
     errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список станций';
   } finally {
-    loading.value = false;
+    if (myToken === requestToken) loading.value = false;
   }
 }
 

@@ -16,10 +16,13 @@ const errorMessage = ref('');
 const showForm = ref(false);
 const editingRegion = ref(null);
 // loadRegions/refreshAll keep their own loading/errorMessage above
-// (initial-load + 15s background refresh, out of scope - see UsersView.vue's
-// same note); submit/delete share one instance, handlePollNow is keyed
+// (initial-load + 15s background refresh, guarded against overlap via
+// regionsRequestToken/pollStatsRequestToken below - this view's own
+// setInterval is what needs it; UsersView.vue's identically-shaped
+// loadUsers has no recurring timer, only sequential post-action reloads,
+// so it doesn't); submit/delete share one instance, handlePollNow is keyed
 // (per-region "Опрос..." button).
-const { error: actionError, run: runAction } = useAsyncAction();
+const { loading: actionLoading, error: actionError, run: runAction } = useAsyncAction();
 const { busyIds: pollingIds, error: pollError, run: runPoll } = useKeyedAsyncAction();
 // regionId -> array of { sourceKey, attempts24h, errors24h, emptyOk24h,
 // lastPolledAt, lastStatus, lastError, lastStationCount } - see backend's
@@ -33,13 +36,28 @@ const copiedUrlKey = ref('');
 
 let refreshTimer = null;
 
+// loadRegions/loadPollStats are each re-triggered from several places
+// (onMounted, the 15s refreshTimer, handleSubmit/handleDelete/handlePollNow)
+// with no cancellation between overlapping calls - a poll-stats fetch across
+// every region (loadPollStats' own Promise.all) can plausibly outlast the
+// 15s interval as the region count grows, letting an older tick's response
+// land after and overwrite a newer one's. Same request-token pattern as
+// ReportsView.vue's loadMetrics, one counter per ref being written so
+// guarding one doesn't needlessly drop the other's in-flight call.
+let regionsRequestToken = 0;
+let pollStatsRequestToken = 0;
+
 async function loadRegions() {
+  const myToken = ++regionsRequestToken;
   try {
-    regions.value = await regionsApi.list();
+    const result = await regionsApi.list();
+    if (myToken !== regionsRequestToken) return; // superseded by a newer call - discard
+    regions.value = result;
   } catch (err) {
+    if (myToken !== regionsRequestToken) return;
     errorMessage.value = err.response?.data?.error || 'Не удалось загрузить районы';
   } finally {
-    loading.value = false;
+    if (myToken === regionsRequestToken) loading.value = false;
   }
 }
 
@@ -108,6 +126,7 @@ function openRaw(region, sourceKey, label) {
 }
 
 async function loadPollStats() {
+  const myToken = ++pollStatsRequestToken;
   const entries = await Promise.all(
     regions.value.map(async (r) => {
       try {
@@ -117,6 +136,7 @@ async function loadPollStats() {
       }
     })
   );
+  if (myToken !== pollStatsRequestToken) return; // superseded by a newer call - discard
   pollStatsByRegion.value = new Map(entries);
 }
 
@@ -271,8 +291,8 @@ onBeforeUnmount(() => {
                 >
                   {{ pollingIds.has(region._id) ? 'Опрос...' : 'Опросить сейчас' }}
                 </button>
-                <button class="btn secondary" @click="openEditForm(region)">Изменить</button>
-                <button class="btn danger" @click="handleDelete(region)">Удалить</button>
+                <button class="btn secondary" :disabled="actionLoading" @click="openEditForm(region)">Изменить</button>
+                <button class="btn danger" :disabled="actionLoading" @click="handleDelete(region)">Удалить</button>
               </td>
             </tr>
           </tbody>
@@ -283,6 +303,7 @@ onBeforeUnmount(() => {
     <RegionForm
       v-if="showForm"
       :initial="editingRegion"
+      :submitting="actionLoading"
       @submit="handleSubmit"
       @cancel="showForm = false"
     />

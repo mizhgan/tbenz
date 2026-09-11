@@ -9,6 +9,12 @@ import ModalForm from './ModalForm.vue';
 const props = defineProps({
   initial: { type: Object, required: true },
   regions: { type: Array, default: () => [] },
+  // The parent (TelegramView.vue) owns the actual create/update request and
+  // passes its own useAsyncAction loading state through here - without it,
+  // "Сохранить" stayed clickable for the whole request, so a fast double
+  // click (or click + Enter) fired two overlapping submits and could create
+  // two chats instead of one.
+  submitting: { type: Boolean, default: false },
 });
 const emit = defineEmits(['submit', 'cancel']);
 
@@ -98,15 +104,25 @@ function toggleRegion(id) {
   else selectedRegionIds.add(key);
 }
 
+// Guards against a slower/older search landing after and overwriting a
+// faster/newer one's results - runSearch fires from both Enter and the
+// "Найти" button, and useAsyncAction's own `run` has no re-entry guard, so
+// pressing Enter twice quickly (the input itself isn't disabled while
+// `searching`) can fire two overlapping requests. Same request-token
+// pattern as ReportsView.vue's loadMetrics.
+let requestToken = 0;
+
 async function runSearch() {
   const q = searchQuery.value.trim();
   if (!q) {
     searchResults.value = [];
     return;
   }
+  const myToken = ++requestToken;
   const results = await runSearchAction(() => stationsApi.list({ q, limit: 8 }), {
     fallbackMessage: 'Не удалось выполнить поиск',
   });
+  if (myToken !== requestToken) return; // superseded by a newer call - discard
   if (results) searchResults.value = results;
 }
 
@@ -161,7 +177,13 @@ function handleSubmit() {
 </script>
 
 <template>
-  <ModalForm :error="error" @submit="handleSubmit" @cancel="emit('cancel')">
+  <ModalForm
+    :error="error"
+    :submit-disabled="submitting"
+    :submit-label="submitting ? 'Сохранение...' : 'Сохранить'"
+    @submit="handleSubmit"
+    @cancel="emit('cancel')"
+  >
     <template #header>
       <h2 class="chat-title">Настройка чата «{{ initial.title || initial.chatId }}»</h2>
       <p class="hint">

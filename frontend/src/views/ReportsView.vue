@@ -417,18 +417,18 @@ onMounted(async () => {
 
       <div class="form-row">
         <label>С</label>
-        <input type="datetime-local" v-model="fromInput" />
+        <input type="datetime-local" v-model="fromInput" :disabled="!regions.length" />
       </div>
       <div class="form-row">
         <label>По</label>
-        <input type="datetime-local" v-model="toInput" />
+        <input type="datetime-local" v-model="toInput" :disabled="!regions.length" />
       </div>
 
       <div class="presets">
-        <button class="btn secondary" @click="setPreset(24)">24ч</button>
-        <button class="btn secondary" @click="setPreset(24 * 7)">7д</button>
-        <button class="btn secondary" @click="setPreset(24 * 30)">30д</button>
-        <button class="btn secondary" @click="setPreset(24 * 90)">90д</button>
+        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24)">24ч</button>
+        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 7)">7д</button>
+        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 30)">30д</button>
+        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 90)">90д</button>
       </div>
 
       <button class="btn" :disabled="loading" @click="loadMetrics">

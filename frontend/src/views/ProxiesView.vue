@@ -15,7 +15,7 @@ const editingProxy = ref(null);
 // skeleton, out of scope - see UsersView.vue's same note); one shared
 // instance for submit/delete, two keyed ones since check and toggle can
 // each be in flight per-row independently of each other.
-const { error: actionError, run: runAction } = useAsyncAction();
+const { loading: actionLoading, error: actionError, run: runAction } = useAsyncAction();
 const { busyIds: checkingIds, error: checkError, run: runCheck } = useKeyedAsyncAction();
 const { busyIds: togglingIds, error: toggleError, run: runToggle } = useKeyedAsyncAction();
 
@@ -163,8 +163,8 @@ onMounted(loadProxies);
                 >
                   {{ p.active ? 'Выключить' : 'Включить' }}
                 </button>
-                <button class="btn secondary" @click="openEditForm(p)">Изменить</button>
-                <button class="btn danger" @click="handleDelete(p)">Удалить</button>
+                <button class="btn secondary" :disabled="actionLoading" @click="openEditForm(p)">Изменить</button>
+                <button class="btn danger" :disabled="actionLoading" @click="handleDelete(p)">Удалить</button>
               </td>
             </tr>
           </tbody>
@@ -175,6 +175,7 @@ onMounted(loadProxies);
     <ProxyForm
       v-if="showForm"
       :initial="editingProxy"
+      :submitting="actionLoading"
       @submit="handleSubmit"
       @cancel="showForm = false"
     />
