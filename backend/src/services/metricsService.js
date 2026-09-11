@@ -350,6 +350,15 @@ async function getAvailabilityTrendUncached(regionId, { from, to, bucketHours = 
   const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
   const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
 
+  // Clamped to where this region actually has snapshot history within the
+  // requested window - see getSnapshotDataBounds' own doc comment for why
+  // (and why this can't just use this function's own $group rows for that -
+  // getRecoveryTrend needs the exact same clamp from the exact same source
+  // to keep both charts' bucket counts equal, and it has no StationSnapshot
+  // rows of its own to derive one from).
+  const bounds = await getSnapshotDataBounds(match);
+  if (!bounds) return [];
+
   const rows = await StationSnapshot.aggregate([
     { $match: match },
     ...CORE_FUEL_UNWIND_STAGES,
@@ -368,7 +377,7 @@ async function getAvailabilityTrendUncached(regionId, { from, to, bucketHours = 
   // Fills every expected boundary, not just ones $group actually returned -
   // see enumerateBucketStarts' own doc comment for why (keeps this chart's
   // bucket count in sync with getRecoveryTrend's own).
-  return enumerateBucketStarts(from, to, unit, binSize).map((bucketStart) => {
+  return enumerateBucketStarts(bounds.min, new Date(bounds.max.getTime() + 1), unit, binSize).map((bucketStart) => {
     const row = rowByBucketStartMs.get(bucketStart.getTime());
     const counts = row || { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
     return {
@@ -817,6 +826,32 @@ function enumerateBucketStarts(from, to, unit, binSize) {
   return starts;
 }
 
+// Two cheap indexed nearest-neighbor lookups (StationSnapshot's own
+// {region:1, polledAt:-1}-shaped index) - not a full range scan, just "does
+// this region have ANY snapshot at all within this match, and where do they
+// start/end." Used to clamp enumerateBucketStarts to where the region
+// actually *has* history instead of the raw requested from/to: a report
+// reaching back past when the region started being tracked used to
+// synthesize a long leading run of genuinely-nonexistent "no data" buckets
+// (not the legitimate "tracked but quiet" gaps this whole gap-fill exists
+// for) - reported live, Chart.js's stacked-area rendering visibly broke
+// down over a ~25-day leading run of those on a 90-day report, compressing
+// the real data into a fraction of the chart's own width instead of simply
+// not extending back that far. Both getAvailabilityTrendUncached and
+// getRecoveryTrendUncached call this (the latter reads StationOutage, which
+// has no bound of its own to give - an outage-free week is real data, not
+// missing data, so it can't supply "where did tracking start" the way
+// StationSnapshot can) so their clamped bounds - and therefore their
+// bucket counts - always agree, not just approximately.
+async function getSnapshotDataBounds(match) {
+  const [earliest, latest] = await Promise.all([
+    StationSnapshot.findOne(match, { polledAt: 1 }).sort({ polledAt: 1 }).lean(),
+    StationSnapshot.findOne(match, { polledAt: 1 }).sort({ polledAt: -1 }).lean(),
+  ]);
+  if (!earliest) return null;
+  return { min: earliest.polledAt, max: latest.polledAt };
+}
+
 /**
  * Region-wide average recovery time, bucketed the same way
  * getAvailabilityTrend's own bucketHours does (hour buckets for a short
@@ -842,6 +877,16 @@ function enumerateBucketStarts(from, to, unit, binSize) {
 async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24, tz = DEFAULT_TZ }) {
   const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
   const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
+
+  // Same clamp-to-where-the-region-actually-has-history as
+  // getAvailabilityTrendUncached, from the exact same source
+  // (StationSnapshot, via getSnapshotDataBounds) so both functions land on
+  // identical bounds - an outage-free stretch is real data this function
+  // can't tell apart from "not tracked yet" on its own (StationOutage has
+  // no rows either way), so it borrows StationSnapshot's own answer to that
+  // rather than guessing from its own (silent either way) result.
+  const bounds = await getSnapshotDataBounds(buildMatch(regionId, from, to));
+  if (!bounds) return [];
 
   // $group/$dateTrunc directly over the persisted StationOutage log (see
   // that model's own doc comment) instead of a raw StationSnapshot find() +
@@ -870,7 +915,7 @@ async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24, 
   // exceptional case) - see enumerateBucketStarts' own doc comment for why
   // this keeps this chart's bucket count in sync with getAvailabilityTrend's
   // own, so the two line up on the reports page instead of drifting apart.
-  return enumerateBucketStarts(from, to, unit, binSize).map((bucketStart) => {
+  return enumerateBucketStarts(bounds.min, new Date(bounds.max.getTime() + 1), unit, binSize).map((bucketStart) => {
     const row = rowByBucketStartMs.get(bucketStart.getTime());
     return {
       bucketStart,
