@@ -1,4 +1,5 @@
 const StationSnapshot = require('../models/StationSnapshot');
+const StationOutage = require('../models/StationOutage');
 const Station = require('../models/Station');
 const { listSources } = require('./sourceRegistry');
 const { memoizeAsync } = require('../utils/cache');
@@ -477,6 +478,11 @@ const RECOVERY_STATUSES = new Set(['available', 'maybe_available']);
 // getStationForecast), both of which need each outage on its own rather
 // than just the average. Purely additive - every existing caller that only
 // destructures {outageCount, avgOutageMinutes} is unaffected.
+//
+// `openStartedAt` surfaces that excluded trailing streak's own start (or
+// null) - unused by any of the aggregate-number callers above, but lets
+// scripts/backfillStationOutages.js seed Station.openOutages for a still-down
+// station from the exact same scan, instead of a separate walk.
 function computeOutages(history) {
   let outageCount = 0;
   let totalOutageMs = 0;
@@ -500,7 +506,45 @@ function computeOutages(history) {
     outageCount,
     avgOutageMinutes: outageCount > 0 ? totalOutageMs / outageCount / 60000 : null,
     outages,
+    openStartedAt: outageStartedAt,
   };
+}
+
+// The incremental twin of computeOutages above - advances one station's
+// per-region streak state ("openOutages", see Station.js's own doc comment)
+// by exactly one new snapshot instead of re-deriving the whole streak from a
+// full raw-history scan. Pure/no I/O by design (same reasoning as
+// computeOutages/telegramNotifier.computeTransitions being pure) so it can
+// be unit-tested with plain objects the same way computeOutages already is,
+// rather than needing a real Mongoose document or a database - the actual
+// persistence (mutating Station.openOutages, writing a closed StationOutage
+// row) is the caller's job, see ingestService.js's advanceOutageState.
+//
+// `openOutages` is `[{region, startedAt}]` (region compared via String() so
+// this works with either a real ObjectId or a plain string/test id).
+// Returns the next `openOutages` array and, if this snapshot closed a
+// streak, the row to persist as `closedOutage` (`{region, start, end,
+// durationMinutes}`) - `null` when nothing closed this tick.
+function advanceOutageStreak(openOutages, regionId, status, polledAt) {
+  const idx = openOutages.findIndex((entry) => String(entry.region) === String(regionId));
+
+  if (status === 'not_available') {
+    if (idx !== -1) return { openOutages, closedOutage: null };
+    return { openOutages: [...openOutages, { region: regionId, startedAt: polledAt }], closedOutage: null };
+  }
+
+  if (idx !== -1 && RECOVERY_STATUSES.has(status)) {
+    const entry = openOutages[idx];
+    const durationMinutes = (polledAt.getTime() - entry.startedAt.getTime()) / 60000;
+    return {
+      openOutages: [...openOutages.slice(0, idx), ...openOutages.slice(idx + 1)],
+      closedOutage: { region: regionId, start: entry.startedAt, end: polledAt, durationMinutes },
+    };
+  }
+
+  // status === 'no_data' (or not_available with a streak already open):
+  // ambiguous/unchanged, same passthrough computeOutages applies.
+  return { openOutages, closedOutage: null };
 }
 
 /**
@@ -510,105 +554,71 @@ function computeOutages(history) {
 async function getStationMetricsUncached(regionId, { from, to }) {
   const match = buildMatch(regionId, from, to);
 
-  // One fetch, not two: this used to run a separate $unwind+$group
-  // aggregation for the per-fuel-type counts *and* a full raw find() for
-  // computeOutages's own sequential scan - both reading the exact same
-  // ~region x date-range set of documents (measured live on a 7-day/101-
-  // station region: ~66k docs, ~900ms for the raw find alone, the
-  // aggregation pass comparable). The raw docs already carry everything
-  // both steps need, so this reads them once and does the unwind-equivalent
-  // counting in-process instead of paying for a second Mongo round trip
-  // over the same data - this was the single biggest contributor to the
-  // reports page's slow first load (see this function's own git history).
-  const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1, fuelStatuses: 1 })
-    .sort({ station: 1, polledAt: 1 })
-    .lean();
-  if (!historyRows.length) return [];
-
-  const byStation = new Map();
-  for (const row of historyRows) {
-    const key = String(row.station);
-    let bucket = byStation.get(key);
-    if (!bucket) {
-      bucket = {
-        stationId: row.station,
-        // Outage/recovery-time below is deliberately still based on each
-        // snapshot's one blanket overall `status`, not CORE_FUEL_TYPES -
-        // "how long was the station down" is a per-station timeline
-        // question (a discrete start/end streak), and there's no settled
-        // answer yet for what a per-fuel-type version of the same question
-        // would even mean (does 92 going down while 95 stays up count as
-        // an outage?) - a separate design question from availablePct
-        // below, left alone for now.
-        history: [],
-        counts: { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 },
-      };
-      byStation.set(key, bucket);
-    }
-    bucket.history.push(row);
-    // Same "one vote per core-fuel-type reading, zero votes for a snapshot
-    // with no 92/95 reading at all" rule CORE_FUEL_UNWIND_STAGES used to
-    // enforce via $unwind - a diesel/propane-only snapshot contributes
-    // nothing here either.
-    for (const f of row.fuelStatuses || []) {
-      if (!CORE_FUEL_TYPES.includes(f.fuelType)) continue;
-      bucket.counts.total += 1;
-      if (f.status === 'available') bucket.counts.available += 1;
-      else if (f.status === 'maybe_available') bucket.counts.maybeAvailable += 1;
-      else if (f.status === 'not_available') bucket.counts.notAvailable += 1;
-      else if (f.status === 'no_data') bucket.counts.noData += 1;
-    }
-  }
-
+  // $group by station instead of a raw find() + in-process loop - the raw
+  // approach used to materialize every snapshot doc in the range as a JS
+  // array (fine for a week, OOM-killed mongod on a real ~72-day report: see
+  // this function's own git history) even though it's the exact same
+  // $unwind+$group shape getAvailabilityTrend/getHeatmap already use safely
+  // (just grouped by station instead of a time bucket) - nothing here needs
+  // per-poll ordering, only outageCount/avgOutageMinutes below did, and
+  // those now read from the separately-maintained StationOutage log instead
+  // (see that model's own doc comment) rather than re-deriving streaks from
+  // raw history on every request.
+  const rows = await StationSnapshot.aggregate([
+    { $match: match },
+    ...CORE_FUEL_UNWIND_STAGES,
+    { $group: { _id: '$station', ...STATUS_COUNTS_GROUP } },
+  ]);
   // A station with zero core-fuel-type readings across the whole range
-  // (sells only diesel/propane, say) produced zero rows through the old
-  // $unwind and so never appeared in its $group output either - matched
-  // here by dropping any bucket whose counts.total never left 0, rather
-  // than returning it with an all-null availability line that never used
-  // to exist.
-  const stationIds = [];
-  for (const [key, bucket] of byStation) {
-    if (bucket.counts.total === 0) byStation.delete(key);
-    else stationIds.push(bucket.stationId);
-  }
-  if (!stationIds.length) return [];
+  // (sells only diesel/propane, say) never produces a row through the
+  // $unwind above - same exclusion the old per-station loop applied by hand.
+  if (!rows.length) return [];
 
+  const stationIds = rows.map((row) => row._id);
   const stationDocs = await Station.find({ _id: { $in: stationIds } }, { name: 1, address: 1 }).lean();
   const stationInfoById = new Map(stationDocs.map((s) => [String(s._id), s]));
 
+  // Scoped by region same as `match` above - a station in two overlapping
+  // regions (Station.regions is an array) has independently-tracked outage
+  // streaks per region (see Station.openOutages's own doc comment), so an
+  // unscoped lookup here would double-count or misattribute outages from
+  // the station's *other* region.
+  const outageRows = await StationOutage.aggregate([
+    { $match: { region: regionId, station: { $in: stationIds }, end: { $gte: from, $lte: to } } },
+    { $group: { _id: '$station', outageCount: { $sum: 1 }, avgOutageMinutes: { $avg: '$durationMinutes' } } },
+  ]);
+  const outagesByStation = new Map(outageRows.map((row) => [String(row._id), row]));
+
   // The shrinkage target rankScore below pulls toward (see
-  // scoreAvailability's doc comment) - computed by pooling the exact same
-  // per-station counts already sitting in `byStation` rather than issuing a
-  // second aggregation for the same data. getSingleStationMetrics/getHeatmap
-  // don't need this at all - see their own doc comments on why they only
-  // ever expose the plain unshrunk rate.
+  // scoreAvailability's doc comment) - pooled from the same per-station rows
+  // just fetched (~100 of them), not a second pass over raw data.
   const regionTotals = { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
-  for (const bucket of byStation.values()) {
-    regionTotals.total += bucket.counts.total;
-    regionTotals.available += bucket.counts.available;
-    regionTotals.maybeAvailable += bucket.counts.maybeAvailable;
-    regionTotals.notAvailable += bucket.counts.notAvailable;
-    regionTotals.noData += bucket.counts.noData;
+  for (const row of rows) {
+    regionTotals.total += row.total;
+    regionTotals.available += row.available;
+    regionTotals.maybeAvailable += row.maybeAvailable;
+    regionTotals.notAvailable += row.notAvailable;
+    regionTotals.noData += row.noData;
   }
   const regionPrior = scoreAvailability(regionTotals);
   // Proportional to *this* query's own average known-reading count per
   // station (see AVAILABILITY_SHRINKAGE_FRACTION's doc comment) - an hourly
   // digest's ~6 known readings/station gets a correspondingly small m
   // instead of one calibrated for a 24h period's ~180.
-  const shrinkM = shrinkageM((regionTotals.total - regionTotals.noData) / byStation.size);
+  const shrinkM = shrinkageM((regionTotals.total - regionTotals.noData) / rows.length);
 
-  return [...byStation.values()].map((bucket) => {
-    const key = String(bucket.stationId);
+  return rows.map((row) => {
+    const key = String(row._id);
     const info = stationInfoById.get(key);
-    const { outageCount, avgOutageMinutes } = computeOutages(bucket.history);
+    const outage = outagesByStation.get(key);
     return {
-      stationId: bucket.stationId,
+      stationId: row._id,
       name: info?.name ?? null,
       address: info?.address ?? null,
-      totalPolls: bucket.counts.total,
-      outageCount,
-      avgOutageMinutes,
-      ...withKnownPct(bucket.counts),
+      totalPolls: row.total,
+      outageCount: outage?.outageCount ?? 0,
+      avgOutageMinutes: outage?.avgOutageMinutes ?? null,
+      ...withKnownPct(row),
       // Overrides withKnownPct's own strict availablePct with the
       // maybe_available-weighted (but *not* shrunk) rate - this is what
       // gets printed next to a station's name, so it needs to always
@@ -616,7 +626,7 @@ async function getStationMetricsUncached(regionId, { from, to }) {
       // period must read 100%, full stop, not a discounted estimate a
       // reader has no way to see coming. See scoreAvailability's own doc
       // comment.
-      availablePct: scoreAvailability(bucket.counts),
+      availablePct: scoreAvailability(row),
       // The shrunk version - *only* for deciding which stations count as
       // "top"/"bottom" (ReportsView.vue's highlightedStations sort,
       // telegramDigestData's topAvailableStations), never printed as a
@@ -628,7 +638,7 @@ async function getStationMetricsUncached(regionId, { from, to }) {
       // and a reader has no way to know those are two different things.
       // Splitting the fields keeps the anti-small-sample-luck protection
       // for *ranking* while every printed percentage stays literally true.
-      rankScore: scoreAvailability(bucket.counts, { prior: regionPrior, m: shrinkM }),
+      rankScore: scoreAvailability(row, { prior: regionPrior, m: shrinkM }),
     };
   });
 }
@@ -822,42 +832,36 @@ function truncateToBucketStart(date, unit, binSize) {
  * availability chart itself switches to - both read as "this chart is
  * broken" even though the underlying data was correct.
  */
-async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24 }) {
+async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24, tz = DEFAULT_TZ }) {
   const unit = bucketHours >= 24 && bucketHours % 24 === 0 ? 'day' : 'hour';
   const binSize = unit === 'day' ? bucketHours / 24 : bucketHours;
 
-  const match = buildMatch(regionId, from, to);
-  const historyRows = await StationSnapshot.find(match, { station: 1, polledAt: 1, status: 1 })
-    .sort({ station: 1, polledAt: 1 })
-    .lean();
+  // $group/$dateTrunc directly over the persisted StationOutage log (see
+  // that model's own doc comment) instead of a raw StationSnapshot find() +
+  // per-station computeOutages loop - the old approach re-derived every
+  // outage streak in the range from scratch on every request, the same
+  // OOM-risking pattern getStationMetricsUncached used to have. $dateTrunc's
+  // own timezone handling replaces the old truncateToBucketStart JS
+  // approximation (still exported/tested for other callers) - equivalent
+  // for Moscow specifically (fixed UTC+3, no DST) but now correct for any
+  // tz this ever gets called with.
+  const rows = await StationOutage.aggregate([
+    { $match: { region: regionId, end: { $gte: from, $lte: to } } },
+    {
+      $group: {
+        _id: { $dateTrunc: { date: '$end', unit, binSize, timezone: tz } },
+        totalMinutes: { $sum: '$durationMinutes' },
+        outageCount: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
 
-  const historyByStation = new Map();
-  for (const row of historyRows) {
-    const key = String(row.station);
-    if (!historyByStation.has(key)) historyByStation.set(key, []);
-    historyByStation.get(key).push(row);
-  }
-
-  const byBucket = new Map(); // bucketStart ms -> { totalMinutes, outageCount }
-  for (const history of historyByStation.values()) {
-    const { outages } = computeOutages(history);
-    for (const outage of outages) {
-      const bucketStart = truncateToBucketStart(outage.end, unit, binSize);
-      const key = bucketStart.getTime();
-      const entry = byBucket.get(key) || { totalMinutes: 0, outageCount: 0 };
-      entry.totalMinutes += outage.durationMinutes;
-      entry.outageCount += 1;
-      byBucket.set(key, entry);
-    }
-  }
-
-  return Array.from(byBucket.entries())
-    .map(([bucketStartMs, entry]) => ({
-      bucketStart: new Date(bucketStartMs),
-      avgRecoveryMinutes: entry.totalMinutes / entry.outageCount,
-      outageCount: entry.outageCount,
-    }))
-    .sort((a, b) => a.bucketStart - b.bucketStart);
+  return rows.map((row) => ({
+    bucketStart: row._id,
+    avgRecoveryMinutes: row.totalMinutes / row.outageCount,
+    outageCount: row.outageCount,
+  }));
 }
 
 const getRecoveryTrend = memoizeAsync(getRecoveryTrendUncached, {
@@ -876,6 +880,12 @@ module.exports = {
   getHeatmap,
   getRecoveryTrend,
   computeOutages,
+  // Shared with ingestService.js's incremental outage-tracking hook (see
+  // Station.openOutages's own doc comment) so the two "what counts as
+  // recovered" rules can't drift apart - computeOutages's raw-history scan
+  // and the incremental state machine must agree byte-for-byte.
+  advanceOutageStreak,
+  RECOVERY_STATUSES,
   CORE_FUEL_TYPES,
   deriveCoreStatus,
   METRICS_CACHE_TTL_MS,

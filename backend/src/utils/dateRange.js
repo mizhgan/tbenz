@@ -17,13 +17,26 @@ const RANGE_ROUND_MS = 5 * 60 * 1000;
 // page's widest 30-day preset without ever being load-tested - a real
 // 72-day custom report (free-typed into the datetime-local inputs, not one
 // of the preset buttons) OOM-killed mongod in production: getStationMetrics
-// et al materialize every raw snapshot doc for the whole window in memory,
-// and ~100 stations x 72 days x 144 polls/day is ~1M docs. Measured live on
-// that incident's own host (3.8GB RAM, 2 CPU): a 61-day range already took
-// ~19s for the heaviest endpoints; 72 days pushed mongod's RSS to 1.86GB and
-// it got OOM-killed mid-query. 35 days keeps clear of that cliff while still
-// giving custom ranges real headroom over the 30-day preset.
-const MAX_SAFE_RANGE_MS = 35 * 24 * 60 * 60 * 1000;
+// et al used to materialize every raw snapshot doc for the whole window in
+// memory (~100 stations x 72 days x 144 polls/day is ~1M docs). Dropped to
+// 35 days as an immediate stopgap after that incident.
+//
+// Since then, getStationMetrics/getRecoveryTrend were rewritten to a
+// Mongo $group aggregation plus a separately-maintained StationOutage log
+// (see that model's own doc comment) instead of pulling raw docs into
+// Node - the OOM mechanism itself is gone, not just capped further away
+// from. Re-measured live on production after that rewrite (3.8GB RAM, 2
+// CPU host, same one that crashed): 35 days ~2s, the region's full 66-day
+// history (all the data that exists so far) ~3.9s for getStationMetrics,
+// getRecoveryTrend down to tens of milliseconds regardless of range (reads
+// the small outage log, not raw snapshots). 180 days extrapolates to a
+// comfortably non-dangerous ~10s worst case from that trend - real crash
+// risk is gone, cost now is response latency, not memory. The region has no
+// data older than ~66 days yet, so a true ~366-day range is unmeasurable
+// for real until history actually accumulates that far - re-measure then
+// before raising this further, same as last time: from real numbers, not a
+// guess.
+const MAX_SAFE_RANGE_MS = 180 * 24 * 60 * 60 * 1000;
 
 function roundDown(date) {
   return new Date(Math.floor(date.getTime() / RANGE_ROUND_MS) * RANGE_ROUND_MS);

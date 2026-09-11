@@ -120,6 +120,25 @@ const stationSchema = new Schema(
         status: { type: String },
       },
     ],
+    // In-progress (not yet recovered) outage streaks, one entry per region
+    // this station is currently down in - see StationOutage.js's own doc
+    // comment for why this is per-region rather than a single station-wide
+    // flag (regions is an array above; two overlapping regions poll this
+    // station independently and can disagree about whether it's "down" at
+    // any given moment). Advanced incrementally by ingestService.js's
+    // ingestRegion right where it already computes computeTransitions for
+    // Telegram alerts, one snapshot at a time, mirroring
+    // metricsService.computeOutages's own not_available-streak rules exactly
+    // (a 'no_data' reading is ambiguous and leaves this untouched). An entry
+    // moves from here into a closed StationOutage document the moment the
+    // station is next seen available/maybe_available in that region.
+    openOutages: [
+      {
+        _id: false,
+        region: { type: Schema.Types.ObjectId, ref: 'Region', required: true },
+        startedAt: { type: Date, required: true },
+      },
+    ],
     // Full raw payload for this station as last received from the source API,
     // kept so nothing is lost if our field-mapping assumptions above change.
     lastRaw: { type: Schema.Types.Mixed, default: null },

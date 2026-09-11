@@ -3,12 +3,37 @@ const { fetchStations } = tbankClient;
 const { extractStationsArray, parseStation } = require('./stationParser');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
+const StationOutage = require('../models/StationOutage');
 const telegramNotifier = require('./telegramNotifier');
 const { ingestSecondarySourceRegion, remergeStationsForTick } = require('./secondarySourceIngestService');
 const { listSources } = require('./sourceRegistry');
 const { recordPollAttempt } = require('./pollLogService');
 const { capRawResponse } = require('../utils/rawResponseCap');
 const logger = require('../utils/logger');
+const { advanceOutageStreak } = require('./metricsService');
+
+// Advances one station's per-region outage-streak state by exactly one tick,
+// via metricsService.advanceOutageStreak's pure logic (see that function's
+// own doc comment for the streak rules) - this wrapper is just the I/O: read
+// the station's current openOutages, apply the pure transition, persist the
+// result. Must run after any secondary-source remerge for this tick
+// (station.lastStatus is already the final, post-merge value by the time the
+// caller reaches this - see ingestRegion's own comment on why the
+// transitions loop below has to wait for that too), and mutates `station` in
+// place so the caller's own station.save() picks up the openOutages change
+// for free instead of triggering a second write.
+async function advanceOutageState(station, region, polledAt) {
+  const { openOutages, closedOutage } = advanceOutageStreak(
+    station.openOutages,
+    region._id,
+    station.lastStatus,
+    polledAt
+  );
+  station.openOutages = openOutages;
+  if (closedOutage) {
+    await StationOutage.create({ station: station._id, ...closedOutage });
+  }
+}
 
 async function storeStation(parsed, region, polledAt) {
   // yandexOrgId identifies the physical business location and is stable
@@ -225,6 +250,7 @@ async function ingestRegion(region) {
           station.lastFuelStatuses
         );
         station.confirmedFuelStatuses = nextConfirmedFuelStatuses;
+        await advanceOutageState(station, region, polledAt);
         await station.save();
         if (transitions.length) stationEvents.push({ station, transitions });
       }
