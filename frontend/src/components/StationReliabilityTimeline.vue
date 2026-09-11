@@ -69,19 +69,30 @@ function segmentStyle(seg) {
 // timestamps, which don't line up with midnight, so these are computed
 // independently rather than derived from segment edges. Shared by both
 // rows (same underlying history, same range for each).
+// Caps how many "DD.MM" labels ever render along the ribbon - with `from`/
+// `to` now able to carry the reports page's own period (up to 90/180 days,
+// not just this component's own 7-day LOOKBACK_DAYS default), one label per
+// day stopped fitting: ~30px per label on a ribbon that's often 300-500px
+// wide overlaps into an unreadable jumble well before 15-20 days. Evenly
+// thinning (skip every Nth day) rather than truncating the tail keeps
+// spacing even across the whole ribbon instead of bunching near one end.
+const MAX_DAY_TICKS = 12;
+
 const dayTicks = computed(() => {
   if (!rangeStart.value || !rangeEnd.value) return [];
   const totalMs = rangeEnd.value - rangeStart.value;
   if (totalMs <= 0) return [];
-  const ticks = [];
+  const allTicks = [];
   const d = new Date(rangeStart.value);
   d.setHours(24, 0, 0, 0); // first midnight strictly after rangeStart
   while (d < rangeEnd.value) {
     const pct = ((d - rangeStart.value) / totalMs) * 100;
-    ticks.push({ pct, label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) });
+    allTicks.push({ pct, label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) });
     d.setDate(d.getDate() + 1);
   }
-  return ticks;
+  if (allTicks.length <= MAX_DAY_TICKS) return allTicks;
+  const step = Math.ceil(allTicks.length / MAX_DAY_TICKS);
+  return allTicks.filter((_, i) => i % step === 0);
 });
 
 async function load() {

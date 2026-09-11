@@ -505,9 +505,10 @@ function layoutCard(
       // static image has no hover interaction to explain - but day-boundary
       // date labels ARE kept, same approach as the live ribbon
       // (StationReliabilityTimeline.vue's own dayTicks): every local
-      // midnight within the range, not just the two endpoints - confirmed
-      // live a single "start – end" label pair wasn't enough to place a
-      // mid-week block in time at a glance.
+      // midnight within the range gets a tick, auto-thinned by
+      // computeLabelStep below once there are too many to fit without
+      // overlapping - a single "start – end" label pair alone wasn't enough
+      // to place a mid-week block in time at a glance, confirmed live.
       if (s.ribbon && s.ribbon.length) {
         y += 10;
         const ribbonHeight = 14;
@@ -533,16 +534,33 @@ function layoutCard(
         if (draw) {
           ctx.fillStyle = '#94a3b8';
           ctx.font = '15px -apple-system, "Segoe UI", Roboto, sans-serif';
+          const dayTicks = [];
           const d = new Date(rangeStart);
           d.setHours(24, 0, 0, 0); // first midnight strictly after rangeStart
           while (d.getTime() < rangeEnd) {
-            const tx = ribbonX + ((d.getTime() - rangeStart) / totalMs) * ribbonWidth;
-            const label = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-            const labelWidth = ctx.measureText(label).width;
-            const clampedX = Math.min(Math.max(tx - labelWidth / 2, ribbonX), ribbonX + ribbonWidth - labelWidth);
-            ctx.fillText(label, clampedX, y);
+            dayTicks.push({
+              tx: ribbonX + ((d.getTime() - rangeStart) / totalMs) * ribbonWidth,
+              label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+            });
             d.setDate(d.getDate() + 1);
           }
+          // Same collision-avoidance computeLabelStep already gives the
+          // trend/recovery charts above, applied here too - the reports
+          // page's own period can now reach 90+ days (see
+          // ReportsView.vue's presets), and one label per calendar day
+          // crammed into this ribbon's width used to render as an
+          // unreadable jumble of digits well before that (confirmed live).
+          const step = computeLabelStep(
+            ctx,
+            dayTicks.map((t) => t.label),
+            ribbonWidth / Math.max(1, dayTicks.length)
+          );
+          dayTicks.forEach((tick, i) => {
+            if (i % step !== 0) return;
+            const labelWidth = ctx.measureText(tick.label).width;
+            const clampedX = Math.min(Math.max(tick.tx - labelWidth / 2, ribbonX), ribbonX + ribbonWidth - labelWidth);
+            ctx.fillText(tick.label, clampedX, y);
+          });
         }
       }
     }

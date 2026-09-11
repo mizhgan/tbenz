@@ -10,7 +10,6 @@ import { canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
 import TrendChart from '../components/TrendChart.vue';
 import RecoveryTrendChart from '../components/RecoveryTrendChart.vue';
-import BrandsChart from '../components/BrandsChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationHighlightCards from '../components/StationHighlightCards.vue';
 import StationsTable from '../components/StationsTable.vue';
@@ -82,7 +81,6 @@ const trendBuckets = ref([]);
 const forecastBuckets = ref([]);
 const forecastDirection = ref('unknown');
 const stations = ref([]);
-const brands = ref([]);
 const heatmapCells = ref([]);
 const recoveryTrendBuckets = ref([]);
 const stationsSort = ref('best');
@@ -91,7 +89,6 @@ const sectionErrors = ref({
   trend: '',
   forecast: '',
   stations: '',
-  brands: '',
   heatmap: '',
   recoveryTrend: '',
 });
@@ -307,8 +304,26 @@ function describeFailure(result) {
 // silently leave every section showing stale data from the previous period
 // with no indication anything went wrong; Promise.allSettled lets each
 // section update (or report its own error) on its own.
+//
+// `requestToken` guards against a *slower older* call clobbering a *faster
+// newer* one - loadMetrics is re-triggered on region change, every preset
+// button, and every custom date edit, with no cancellation between calls.
+// Reported live: clicking a period preset shortly after the page's own
+// initial (default 7-day) load could still have that first call in flight;
+// whichever of the two happened to resolve *last* won the final
+// trendBuckets/recoveryTrendBuckets assignment regardless of which was
+// requested more recently - the generated report card then showed the
+// correct header/KPI/station-ribbon dates (those come from fresh reads at
+// generate time) next to trend/recovery charts still drawing the stale
+// period, reading as a jumble of mismatched dates on one image. Each call
+// captures its own token; a call whose token no longer matches the module-
+// level counter by the time its requests settle was superseded and skips
+// applying its (now-stale) results entirely.
+let requestToken = 0;
+
 async function loadMetrics() {
   if (!selectedRegionId.value) return;
+  const myToken = ++requestToken;
   loading.value = true;
   errorMessage.value = '';
   // A stale preview from a previous region/period would be misleading once
@@ -319,15 +334,16 @@ async function loadMetrics() {
   const from = fromIso.value;
   const to = toIso.value;
 
-  const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult, recoveryTrendResult] =
+  const [trendResult, forecastResult, stationsResult, heatmapResult, recoveryTrendResult] =
     await Promise.allSettled([
       metricsApi.trend(regionId, { from, to, bucketHours: bucketHours.value }),
       metricsApi.trendForecast(regionId, { from, to, bucketHours: bucketHours.value }),
       metricsApi.stations(regionId, { from, to }),
-      metricsApi.brands(regionId, { from, to }),
       metricsApi.heatmap(regionId, { from, to }),
       metricsApi.recoveryTrend(regionId, { from, to, bucketHours: bucketHours.value }),
     ]);
+
+  if (myToken !== requestToken) return; // superseded by a newer call - discard
 
   if (trendResult.status === 'fulfilled') {
     trendBuckets.value = trendResult.value.buckets;
@@ -353,14 +369,6 @@ async function loadMetrics() {
   } else {
     stations.value = [];
     sectionErrors.value.stations = describeFailure(stationsResult);
-  }
-
-  if (brandsResult.status === 'fulfilled') {
-    brands.value = brandsResult.value.brands;
-    sectionErrors.value.brands = '';
-  } else {
-    brands.value = [];
-    sectionErrors.value.brands = describeFailure(brandsResult);
   }
 
   if (heatmapResult.status === 'fulfilled') {
@@ -547,16 +555,10 @@ onMounted(async () => {
       </div>
 
       <div class="card section">
-        <h2>Сравнение по сетям <span class="hint small">(АИ-92, АИ-95)</span></h2>
-        <p v-if="sectionErrors.brands" class="error-text">{{ sectionErrors.brands }}</p>
-        <BrandsChart :brands="brands" />
+        <h2>Доступность по дню недели и часу <span class="hint small">(АИ-92, АИ-95)</span></h2>
+        <p v-if="sectionErrors.heatmap" class="error-text">{{ sectionErrors.heatmap }}</p>
+        <AvailabilityHeatmap :cells="heatmapCells" />
       </div>
-    </div>
-
-    <div class="card section">
-      <h2>Доступность по дню недели и часу <span class="hint small">(АИ-92, АИ-95)</span></h2>
-      <p v-if="sectionErrors.heatmap" class="error-text">{{ sectionErrors.heatmap }}</p>
-      <AvailabilityHeatmap :cells="heatmapCells" />
     </div>
 
     <div class="card section">
@@ -657,8 +659,8 @@ onMounted(async () => {
 
 /* Grid items default to min-width: auto, which refuses to shrink narrower
    than their content's intrinsic size - without this, the wider of the two
-   cards (station cards with ribbons, or the brands chart) would drag the
-   whole page into horizontal scroll on a narrow viewport instead of each
+   cards (station cards with ribbons, or the 24-hour-wide heatmap) would drag
+   the whole page into horizontal scroll on a narrow viewport instead of each
    card's own overflow handling taking over. */
 .two-col > * {
   min-width: 0;

@@ -70,10 +70,10 @@ const emit = defineEmits(['select']);
   display: flex;
   flex-direction: column;
   gap: 20px;
-  /* Fixed height + its own scroll, same idea as BrandsChart.vue's own
-     max-height: 480px cap next to it in the two-column layout - up to 5
-     full ribbon cards stacked would otherwise push this column far past
-     its neighbor's natural height. */
+  /* Fixed height + its own scroll - up to 5 full ribbon cards stacked would
+     otherwise push this column far past its neighbor's natural height (the
+     day/hour heatmap next to it in the two-column layout, much shorter and
+     fixed-height regardless of period). */
   max-height: 480px;
   overflow-y: auto;
   padding-right: 4px;

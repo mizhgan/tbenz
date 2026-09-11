@@ -49,14 +49,6 @@ const getStations = asyncHandler(async (req, res) => {
   res.json({ from, to, stations });
 });
 
-const getBrands = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
-  const { from, to } = parseRange(req.query);
-  const brands = await metricsService.getBrandMetrics(regionId, { from, to });
-  res.set('Cache-Control', METRICS_MAX_AGE);
-  res.json({ from, to, brands });
-});
-
 const getHeatmap = asyncHandler(async (req, res) => {
   const regionId = new mongoose.Types.ObjectId(req.params.id);
   const { from, to } = parseRange(req.query);
@@ -88,4 +80,4 @@ const getTrendForecast = asyncHandler(async (req, res) => {
   res.json({ from, to, bucketHours, ...result });
 });
 
-module.exports = { getTrend, getStations, getBrands, getHeatmap, getRecoveryTrend, getTrendForecast };
+module.exports = { getTrend, getStations, getHeatmap, getRecoveryTrend, getTrendForecast };

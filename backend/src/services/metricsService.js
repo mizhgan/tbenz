@@ -9,8 +9,9 @@ const DEFAULT_TZ = 'Europe/Moscow';
 // Snapshots land every pollIntervalMinutes (10 by default), so recomputing
 // these aggregations more than once every few minutes buys nothing but load.
 // A short TTL plus in-flight dedup is enough to collapse both same-user
-// re-renders and the reports page's own redundant internal calls (e.g.
-// getBrandMetrics -> getStationMetrics) into a single query.
+// re-renders and internal reuse (e.g. telegramDigestData.js's own
+// back-to-back getStationMetrics calls) into a single query where the exact
+// same range/regionId repeats.
 const METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 function rangeKey(regionId, { from, to, bucketHours, tz } = {}) {
@@ -710,38 +711,6 @@ const getSingleStationMetrics = memoizeAsync(getSingleStationMetricsUncached, {
 });
 
 /**
- * Availability grouped by station "name" (the source's brand/network field,
- * e.g. "Лукойл", "Роснефть") - built on top of per-station metrics rather
- * than a separate query, since the grouping key lives on Station, not the
- * snapshot.
- */
-async function getBrandMetrics(regionId, range) {
-  const stations = await getStationMetrics(regionId, range);
-  const byName = new Map();
-
-  for (const s of stations) {
-    const key = s.name || 'Без названия';
-    if (!byName.has(key)) {
-      byName.set(key, { name: key, stationCount: 0, sumAvailablePct: 0, countWithData: 0 });
-    }
-    const entry = byName.get(key);
-    entry.stationCount += 1;
-    if (s.availablePct !== null) {
-      entry.sumAvailablePct += s.availablePct;
-      entry.countWithData += 1;
-    }
-  }
-
-  return Array.from(byName.values())
-    .map((e) => ({
-      name: e.name,
-      stationCount: e.stationCount,
-      avgAvailablePct: e.countWithData > 0 ? e.sumAvailablePct / e.countWithData : null,
-    }))
-    .sort((a, b) => (b.avgAvailablePct ?? -1) - (a.avgAvailablePct ?? -1));
-}
-
-/**
  * Average availability by ISO weekday (1=Mon..7=Sun) and hour-of-day (0-23)
  * in the given timezone - reveals patterns like "mornings before restock".
  */
@@ -876,7 +845,6 @@ module.exports = {
   getAvailabilitySeries,
   getStationMetrics,
   getSingleStationMetrics,
-  getBrandMetrics,
   getHeatmap,
   getRecoveryTrend,
   computeOutages,

@@ -16,7 +16,6 @@ const {
 const {
   getTrend,
   getStations,
-  getBrands,
   getHeatmap,
   getRecoveryTrend,
   getTrendForecast,
@@ -36,7 +35,6 @@ router.get('/:id/snapshot-times', getSnapshotTimes);
 router.get('/:id/snapshot', getRegionSnapshot);
 router.get('/:id/metrics/trend', getTrend);
 router.get('/:id/metrics/stations', getStations);
-router.get('/:id/metrics/brands', getBrands);
 router.get('/:id/metrics/heatmap', getHeatmap);
 router.get('/:id/metrics/recovery-trend', getRecoveryTrend);
 router.get('/:id/metrics/trend-forecast', getTrendForecast);
