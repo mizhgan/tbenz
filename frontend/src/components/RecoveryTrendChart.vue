@@ -1,10 +1,11 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Chart from 'chart.js/auto';
-import { formatMinutes } from '../utils/colorScale';
+import { formatMinutes, bucketPeriodLabel } from '../utils/colorScale';
 
 const props = defineProps({
   buckets: { type: Array, default: () => [] },
+  bucketHours: { type: Number, default: 24 },
 });
 
 const canvasRef = ref(null);
@@ -59,7 +60,10 @@ function renderChart() {
           callbacks: {
             label: (ctx) => {
               const bucket = props.buckets[ctx.dataIndex];
-              return [`${formatMinutes(bucket.avgRecoveryMinutes)} в среднем`, `${bucket.outageCount} отключений за день`];
+              return [
+                `${formatMinutes(bucket.avgRecoveryMinutes)} в среднем`,
+                `${bucket.outageCount} отключений ${bucketPeriodLabel(props.bucketHours)}`,
+              ];
             },
           },
         },
@@ -75,7 +79,7 @@ function renderChart() {
 }
 
 onMounted(renderChart);
-watch(() => props.buckets, renderChart, { deep: true });
+watch(() => [props.buckets, props.bucketHours], renderChart, { deep: true });
 onBeforeUnmount(() => {
   if (chart) chart.destroy();
 });

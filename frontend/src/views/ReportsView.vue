@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { regionsApi, stationsApi } from '../api/regions';
 import { metricsApi } from '../api/metrics';
-import { formatMinutes, formatPct } from '../utils/colorScale';
+import { formatMinutes, formatPct, bucketPeriodLabel } from '../utils/colorScale';
 import { computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { renderRegionReportCard } from '../utils/regionReportCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
@@ -72,6 +72,11 @@ const toMs = ref(now);
 // fixed last-7-days regardless of what period was picked here.
 const fromIso = computed(() => new Date(fromMs.value).toISOString());
 const toIso = computed(() => new Date(toMs.value).toISOString());
+// Single source of truth for the period's chosen bucket size - loadMetrics
+// uses it for every bucketed API call, RecoveryTrendChart.vue and the hint
+// text below it use it to phrase "за день"/"за неделю" instead of each
+// guessing independently (see bucketPeriodLabel's own doc comment).
+const bucketHours = computed(() => pickBucketHours(toMs.value - fromMs.value));
 
 const trendBuckets = ref([]);
 const forecastBuckets = ref([]);
@@ -131,10 +136,17 @@ function setPreset(hours) {
   loadMetrics();
 }
 
+// Daily threshold raised from 14 to 90 days - at 14, a 30-day report (the
+// widest preset button) fell into weekly buckets and rendered as ~5 points,
+// most of the "Динамика доступности" chart empty past that. Chart.js
+// already auto-thins x-axis labels regardless of point count (see
+// TrendChart.vue), so 90 daily points renders fine - no need for a fancier
+// adaptive scheme, just moving the cliff somewhere the still-fixed 30/7/90
+// preset buttons don't land right on top of it.
 function pickBucketHours(spanMs) {
   const spanHours = spanMs / 3600000;
   if (spanHours <= 48) return 1;
-  if (spanHours <= 24 * 14) return 24;
+  if (spanHours <= 24 * 90) return 24;
   return 24 * 7;
 }
 
@@ -306,16 +318,15 @@ async function loadMetrics() {
   const regionId = selectedRegionId.value;
   const from = fromIso.value;
   const to = toIso.value;
-  const bucketHours = pickBucketHours(toMs.value - fromMs.value);
 
   const [trendResult, forecastResult, stationsResult, brandsResult, heatmapResult, recoveryTrendResult] =
     await Promise.allSettled([
-      metricsApi.trend(regionId, { from, to, bucketHours }),
-      metricsApi.trendForecast(regionId, { from, to, bucketHours }),
+      metricsApi.trend(regionId, { from, to, bucketHours: bucketHours.value }),
+      metricsApi.trendForecast(regionId, { from, to, bucketHours: bucketHours.value }),
       metricsApi.stations(regionId, { from, to }),
       metricsApi.brands(regionId, { from, to }),
       metricsApi.heatmap(regionId, { from, to }),
-      metricsApi.recoveryTrend(regionId, { from, to, bucketHours }),
+      metricsApi.recoveryTrend(regionId, { from, to, bucketHours: bucketHours.value }),
     ]);
 
   if (trendResult.status === 'fulfilled') {
@@ -409,6 +420,7 @@ onMounted(async () => {
         <button class="btn secondary" @click="setPreset(24)">24ч</button>
         <button class="btn secondary" @click="setPreset(24 * 7)">7д</button>
         <button class="btn secondary" @click="setPreset(24 * 30)">30д</button>
+        <button class="btn secondary" @click="setPreset(24 * 90)">90д</button>
       </div>
 
       <button class="btn" :disabled="loading" @click="loadMetrics">
@@ -496,10 +508,10 @@ onMounted(async () => {
     <div class="card section">
       <h2>Время восстановления после отключений <span class="hint small">(АИ-92, АИ-95)</span></h2>
       <p v-if="sectionErrors.recoveryTrend" class="error-text">{{ sectionErrors.recoveryTrend }}</p>
-      <RecoveryTrendChart :buckets="recoveryTrendBuckets" />
+      <RecoveryTrendChart :buckets="recoveryTrendBuckets" :bucket-hours="bucketHours" />
       <p class="hint small">
-        Среднее время от «пропало» до «появилось» по всем станциям района за день — растущий
-        график значит, что топливо не только реже есть, но и дольше не появляется.
+        Среднее время от «пропало» до «появилось» по всем станциям района {{ bucketPeriodLabel(bucketHours) }} —
+        растущий график значит, что топливо не только реже есть, но и дольше не появляется.
       </p>
     </div>
 

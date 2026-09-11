@@ -13,6 +13,19 @@ export function formatPct(pct, fractionDigits = 0) {
   return `${pct.toFixed(fractionDigits)}%`;
 }
 
+// Shared by ReportsView.vue's recovery-trend hint text and
+// RecoveryTrendChart.vue's own tooltip - both used to hardcode "за день"
+// regardless of the period's actual bucket size, which reads as a bug once
+// a period wide enough to fall into weekly buckets, not daily, is selected
+// (a bar's tooltip claiming "N отключений за день" when it's really a
+// week's worth). One function so the two spots can't drift apart on the
+// same threshold again.
+export function bucketPeriodLabel(bucketHours) {
+  if (bucketHours >= 24 * 7) return 'за неделю';
+  if (bucketHours >= 24) return 'за день';
+  return 'за бакет';
+}
+
 export function formatMinutes(minutes) {
   if (minutes === null || minutes === undefined || Number.isNaN(minutes)) return '—';
   if (minutes < 60) return `${Math.round(minutes)} мин`;
