@@ -219,10 +219,19 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
 // doc comment) rather than trying to caption every single bar - with up to
 // ~30 for a 30-day/daily selection there still isn't room for all of them
 // individually, but a readable handful beats none.
-function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
+//
+// `forecastLen` reserves that many extra trailing slots in the width/spacing
+// math (no bar ever drawn there) purely so this chart's bars land at the
+// same per-slot width as drawStackedTrend's own buckets+forecast above -
+// otherwise the two charts (bare bucket count here vs. buckets+forecast
+// there) stretch across the same card width at different densities and the
+// same date ends up at two different x positions, reported live as the two
+// charts visibly not lining up.
+function drawRecoveryBars(ctx, buckets, forecastLen, x, y, width, height, draw) {
   if (!draw || !buckets.length) return;
-  const gap = Math.min(8, width / buckets.length / 4);
-  const barWidth = (width - gap * (buckets.length - 1)) / buckets.length;
+  const totalSlots = buckets.length + forecastLen;
+  const gap = Math.min(8, width / totalSlots / 4);
+  const barWidth = (width - gap * (totalSlots - 1)) / totalSlots;
   const perBucketWidth = barWidth + gap;
   const xAt = (i) => x + i * perBucketWidth + barWidth / 2;
 
@@ -232,7 +241,7 @@ function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
   // above this chart.
   const valueLabelSpace = 22;
   const barsAreaHeight = height - valueLabelSpace;
-  const maxMinutes = Math.max(1, ...buckets.map((b) => b.avgRecoveryMinutes));
+  const maxMinutes = Math.max(1, ...buckets.map((b) => b.avgRecoveryMinutes ?? 0));
 
   const valueFont = '600 14px -apple-system, "Segoe UI", Roboto, sans-serif';
   const axisFont = '14px -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -253,6 +262,10 @@ function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
 
   ctx.textAlign = 'center';
   buckets.forEach((b, i) => {
+    // A gap-filled bucket (no recovered outage that period) draws no bar at
+    // all, not a token stub - a stub reads as "a very short recovery",
+    // which isn't what a quiet bucket means.
+    if (b.avgRecoveryMinutes === null) return;
     const barHeight = Math.max(3, (b.avgRecoveryMinutes / maxMinutes) * barsAreaHeight);
     const bx = x + i * perBucketWidth;
     const by = y + height - barHeight;
@@ -436,14 +449,20 @@ function layoutCard(
   }
   y += 22;
 
-  if (recoveryTrendBuckets.length) {
+  // getRecoveryTrend now gap-fills every expected bucket (see
+  // metricsService.js's enumerateBucketStarts), so recoveryTrendBuckets is
+  // never [] as long as the period spans at least one bucket - it's an
+  // all-null array instead. "No data" now means "no bucket actually had a
+  // recovered outage", not "the array is empty".
+  const recoveryBucketsWithData = recoveryTrendBuckets.filter((b) => b.outageCount > 0);
+  if (recoveryBucketsWithData.length) {
     const barsHeight = 90;
-    drawRecoveryBars(ctx, recoveryTrendBuckets, PADDING, y, contentWidth, barsHeight, draw);
+    drawRecoveryBars(ctx, recoveryTrendBuckets, forecastBuckets.length, PADDING, y, contentWidth, barsHeight, draw);
     // Same +24 as drawStackedTrend above, for its own new time-axis label row.
     y += barsHeight + 52;
 
     if (draw) {
-      const worst = recoveryTrendBuckets.reduce((a, b) => (b.avgRecoveryMinutes > a.avgRecoveryMinutes ? b : a));
+      const worst = recoveryBucketsWithData.reduce((a, b) => (b.avgRecoveryMinutes > a.avgRecoveryMinutes ? b : a));
       ctx.fillStyle = '#64748b';
       ctx.font = '600 20px -apple-system, "Segoe UI", Roboto, sans-serif';
       ctx.fillText(`Дольше всего — ${formatMinutes(worst.avgRecoveryMinutes)} в среднем`, PADDING, y);

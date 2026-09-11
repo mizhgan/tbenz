@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { computeOutages, advanceOutageStreak, truncateToBucketStart } = require('../src/services/metricsService');
+const {
+  computeOutages,
+  advanceOutageStreak,
+  truncateToBucketStart,
+  enumerateBucketStarts,
+} = require('../src/services/metricsService');
 
 function snap(status, isoTime) {
   return { status, polledAt: new Date(isoTime) };
@@ -198,4 +203,47 @@ test('truncateToBucketStart: idempotent - truncating an already-truncated instan
   const once = truncateToBucketStart(new Date('2026-01-01T22:30:00Z'), 'day', 1);
   const twice = truncateToBucketStart(once, 'day', 1);
   assert.equal(once.toISOString(), twice.toISOString());
+});
+
+test('enumerateBucketStarts: hour buckets cover every hour in range, none skipped', () => {
+  const starts = enumerateBucketStarts(new Date('2026-01-01T10:00:00Z'), new Date('2026-01-01T14:00:00Z'), 'hour', 1);
+  assert.deepEqual(
+    starts.map((d) => d.toISOString()),
+    [
+      '2026-01-01T10:00:00.000Z',
+      '2026-01-01T11:00:00.000Z',
+      '2026-01-01T12:00:00.000Z',
+      '2026-01-01T13:00:00.000Z',
+    ]
+  );
+});
+
+test('enumerateBucketStarts: day buckets use the same Moscow-local boundary truncateToBucketStart does', () => {
+  const starts = enumerateBucketStarts(new Date('2026-01-01T22:30:00Z'), new Date('2026-01-04T00:00:00Z'), 'day', 1);
+  assert.deepEqual(
+    starts.map((d) => d.toISOString()),
+    ['2026-01-01T21:00:00.000Z', '2026-01-02T21:00:00.000Z', '2026-01-03T21:00:00.000Z']
+  );
+});
+
+test('enumerateBucketStarts: an exact multiple-of-bucketMs range excludes the boundary at `to` itself', () => {
+  // Matches getAvailabilitySeries' own loop convention (`t < to`, not <=) -
+  // a bucket starting exactly at `to` is the *next* period's first bucket,
+  // not part of this one.
+  const starts = enumerateBucketStarts(new Date('2026-01-01T10:00:00Z'), new Date('2026-01-01T12:00:00Z'), 'hour', 1);
+  assert.deepEqual(
+    starts.map((d) => d.toISOString()),
+    ['2026-01-01T10:00:00.000Z', '2026-01-01T11:00:00.000Z']
+  );
+});
+
+test('enumerateBucketStarts: same bucket count regardless of how sparse the underlying data is - this is the whole point (keeps getAvailabilityTrend and getRecoveryTrend in sync)', () => {
+  // from/to both land exactly on a Moscow-local day boundary (21:00 UTC) so
+  // the count is a clean 7, not 8 - see the boundary-truncation test above:
+  // a `from` that instead falls mid-day gets an extra leading bucket
+  // (the Moscow day that *contains* `from`, which can start before it).
+  const from = new Date('2026-02-28T21:00:00Z');
+  const to = new Date('2026-03-07T21:00:00Z');
+  const starts = enumerateBucketStarts(from, to, 'day', 1);
+  assert.equal(starts.length, 7);
 });

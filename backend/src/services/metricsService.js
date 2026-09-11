@@ -363,16 +363,24 @@ async function getAvailabilityTrendUncached(regionId, { from, to, bucketHours = 
     },
     { $sort: { _id: 1 } },
   ]);
+  const rowByBucketStartMs = new Map(rows.map((row) => [row._id.getTime(), row]));
 
-  return rows.map((row) => ({
-    bucketStart: row._id,
-    total: row.total,
-    available: row.available,
-    maybeAvailable: row.maybeAvailable,
-    notAvailable: row.notAvailable,
-    noData: row.noData,
-    ...withKnownPct(row),
-  }));
+  // Fills every expected boundary, not just ones $group actually returned -
+  // see enumerateBucketStarts' own doc comment for why (keeps this chart's
+  // bucket count in sync with getRecoveryTrend's own).
+  return enumerateBucketStarts(from, to, unit, binSize).map((bucketStart) => {
+    const row = rowByBucketStartMs.get(bucketStart.getTime());
+    const counts = row || { total: 0, available: 0, maybeAvailable: 0, notAvailable: 0, noData: 0 };
+    return {
+      bucketStart,
+      total: counts.total,
+      available: counts.available,
+      maybeAvailable: counts.maybeAvailable,
+      notAvailable: counts.notAvailable,
+      noData: counts.noData,
+      ...withKnownPct(counts),
+    };
+  });
 }
 
 const getAvailabilityTrend = memoizeAsync(getAvailabilityTrendUncached, {
@@ -779,6 +787,36 @@ function truncateToBucketStart(date, unit, binSize) {
   return new Date(truncatedLocalMs - MOSCOW_OFFSET_MS);
 }
 
+// Every expected bucket boundary between `from` and `to` at the given
+// {unit, binSize} granularity, in order - $group (used by both
+// getAvailabilityTrend and getRecoveryTrend below) only ever returns
+// buckets that actually had a matching document, so a quiet stretch (no
+// polls, or no outages) silently disappears from the result instead of
+// showing as a zero. Reported live: that shrinks whichever chart hit the
+// gap down to fewer points than its sibling drawn right below it on the
+// reports page - both stretch however many points they got across the same
+// container width, so a quiet week made "Время восстановления" noticeably
+// narrower-spaced than "Динамика доступности" right above it even though
+// both cover the exact same period. Filling every boundary on both call
+// sites keeps their bucket counts equal so the same date lands at the same
+// x position in both - the same "fill every boundary" fix
+// getAvailabilitySeries already applies for its own (different, minute-
+// granularity) buckets. Reuses truncateToBucketStart's fixed-Moscow-offset
+// math for the first boundary (accurate for every real caller - none of
+// them ever pass a tz other than the Moscow default) rather than
+// replicating $dateTrunc's own general timezone handling here.
+function enumerateBucketStarts(from, to, unit, binSize) {
+  const bucketMs = (unit === 'hour' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000) * binSize;
+  const starts = [];
+  let t = truncateToBucketStart(from, unit, binSize).getTime();
+  const endMs = to.getTime();
+  while (t < endMs) {
+    starts.push(new Date(t));
+    t += bucketMs;
+  }
+  return starts;
+}
+
 /**
  * Region-wide average recovery time, bucketed the same way
  * getAvailabilityTrend's own bucketHours does (hour buckets for a short
@@ -809,11 +847,11 @@ async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24, 
   // that model's own doc comment) instead of a raw StationSnapshot find() +
   // per-station computeOutages loop - the old approach re-derived every
   // outage streak in the range from scratch on every request, the same
-  // OOM-risking pattern getStationMetricsUncached used to have. $dateTrunc's
-  // own timezone handling replaces the old truncateToBucketStart JS
-  // approximation (still exported/tested for other callers) - equivalent
-  // for Moscow specifically (fixed UTC+3, no DST) but now correct for any
-  // tz this ever gets called with.
+  // OOM-risking pattern getStationMetricsUncached used to have. The actual
+  // grouping below uses Mongo's own tz-aware $dateTrunc, not the JS
+  // truncateToBucketStart approximation - that one only comes back in via
+  // enumerateBucketStarts further down, purely to enumerate the boundaries
+  // to gap-fill, not to redo the grouping itself.
   const rows = await StationOutage.aggregate([
     { $match: { region: regionId, end: { $gte: from, $lte: to } } },
     {
@@ -825,12 +863,21 @@ async function getRecoveryTrendUncached(regionId, { from, to, bucketHours = 24, 
     },
     { $sort: { _id: 1 } },
   ]);
+  const rowByBucketStartMs = new Map(rows.map((row) => [row._id.getTime(), row]));
 
-  return rows.map((row) => ({
-    bucketStart: row._id,
-    avgRecoveryMinutes: row.totalMinutes / row.outageCount,
-    outageCount: row.outageCount,
-  }));
+  // Fills every expected boundary, not just ones $group actually returned
+  // (a quiet stretch with zero outages is real, common data, not an
+  // exceptional case) - see enumerateBucketStarts' own doc comment for why
+  // this keeps this chart's bucket count in sync with getAvailabilityTrend's
+  // own, so the two line up on the reports page instead of drifting apart.
+  return enumerateBucketStarts(from, to, unit, binSize).map((bucketStart) => {
+    const row = rowByBucketStartMs.get(bucketStart.getTime());
+    return {
+      bucketStart,
+      avgRecoveryMinutes: row ? row.totalMinutes / row.outageCount : null,
+      outageCount: row ? row.outageCount : 0,
+    };
+  });
 }
 
 const getRecoveryTrend = memoizeAsync(getRecoveryTrendUncached, {
@@ -858,6 +905,7 @@ module.exports = {
   deriveCoreStatus,
   METRICS_CACHE_TTL_MS,
   truncateToBucketStart,
+  enumerateBucketStarts,
   // Exported so every other "one number that matters" availability
   // computation in the app (telegramDigestData.js/telegramAlertMapImage.js's
   // current-snapshot percentages today) uses the exact same

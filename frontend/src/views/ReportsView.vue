@@ -516,7 +516,11 @@ onMounted(async () => {
     <div class="card section">
       <h2>Время восстановления после отключений <span class="hint small">(АИ-92, АИ-95)</span></h2>
       <p v-if="sectionErrors.recoveryTrend" class="error-text">{{ sectionErrors.recoveryTrend }}</p>
-      <RecoveryTrendChart :buckets="recoveryTrendBuckets" :bucket-hours="bucketHours" />
+      <RecoveryTrendChart
+        :buckets="recoveryTrendBuckets"
+        :bucket-hours="bucketHours"
+        :forecast-buckets="forecastBuckets"
+      />
       <p class="hint small">
         Среднее время от «пропало» до «появилось» по всем станциям района {{ bucketPeriodLabel(bucketHours) }} —
         растущий график значит, что топливо не только реже есть, но и дольше не появляется.
