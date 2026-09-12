@@ -40,7 +40,7 @@ function computeTrendDelta(buckets) {
   return known[known.length - 1].availablePct - known[0].availablePct;
 }
 
-// Same status colors as TrendChart.vue (the full chart on the reports
+// Same status colors as AvailabilityRecoveryChart.vue (the full chart on the reports
 // page), so the compact card reads as "the same chart, smaller" rather
 // than introducing its own unrelated color language.
 const STATUS_COLORS = {
@@ -52,7 +52,7 @@ const FORECAST_COLOR = '#2563eb';
 
 // Carries the nearest known value forward (then back-fills any leading
 // gap) instead of leaving a hole - a simple stand-in for Chart.js's
-// spanGaps:true, which is what TrendChart.vue itself uses for the exact
+// spanGaps:true, which is what AvailabilityRecoveryChart.vue itself uses for the exact
 // same buckets. Deliberately bridges gaps rather than breaking the line
 // there (unlike the Telegram digest sparkline), to match what the on-page
 // chart already does with this same data.
@@ -73,9 +73,9 @@ function fillGaps(values) {
 // proportional timeline). Both charts below space their buckets evenly by
 // array index, not by real elapsed time (a bucket with zero data just
 // doesn't exist in the array at all, rather than leaving a stretched-out
-// gap) - same convention TrendChart.vue/RecoveryTrendChart.vue already use
-// live on the page, so labels positioned any other way would drift out of
-// alignment with the bars/points they're meant to describe.
+// gap) - same convention AvailabilityRecoveryChart.vue already uses live on
+// the page, so labels positioned any other way would drift out of alignment
+// with the bars/points they're meant to describe.
 //
 // Picks hour-of-day labels ("14:00") for a span under ~36h, day labels
 // ("14.07") otherwise - mirrors StationHistoryChart.vue's own Chart.js
@@ -122,7 +122,7 @@ function drawBucketAxisLabels(ctx, buckets, labels, xAt, step, y, chartX, chartW
 
 // Stacked-area mini chart (available/maybe/not_available bands, bottom to
 // top) plus a dashed forecast continuation - the compact equivalent of
-// TrendChart.vue's full chart, not a single arbitrary-colored trend line:
+// AvailabilityRecoveryChart.vue's full chart, not a single arbitrary-colored trend line:
 // the graph shows *availability*, so it should use the app's own
 // green/amber/red for that, not a color chosen by whether the trend is
 // currently improving or worsening (a different, and previously
@@ -209,7 +209,7 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
 }
 
 // Simple bar chart for average recovery time per bucket - same underlying
-// data/bucketing as RecoveryTrendChart.vue's Chart.js bars on the reports
+// data/bucketing as AvailabilityRecoveryChart.vue's Chart.js bars on the reports
 // page itself, redrawn in plain Canvas 2D like the rest of this card. No
 // per-bar date labels (unlike the on-page version) - with up to ~19 bars
 // for a 24h/hourly selection there isn't room to keep them legible at this
@@ -431,7 +431,7 @@ function layoutCard(
   y += 16;
 
   // Recovery-time bars - same data/bucketing as the reports page's own
-  // "Время восстановления после отключений" section (RecoveryTrendChart.vue).
+  // "Время восстановления после отключений" section (AvailabilityRecoveryChart.vue).
   // Qualifier drawn on its own line below the title, not appended inline
   // like the shorter "Динамика доступности" heading above - this title is
   // already long enough that appending " (АИ-92, АИ-95)" at 1000px card

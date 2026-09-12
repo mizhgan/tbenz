@@ -3,13 +3,12 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { regionsApi, stationsApi } from '../api/regions';
 import { metricsApi } from '../api/metrics';
-import { formatMinutes, formatPct, bucketPeriodLabel } from '../utils/colorScale';
+import { formatMinutes, formatPct } from '../utils/colorScale';
 import { computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
 import { renderRegionReportCard } from '../utils/regionReportCard';
 import { canCopyImageToClipboard } from '../utils/stationCard';
 import { canShareFile } from '../utils/mapExport';
-import TrendChart from '../components/TrendChart.vue';
-import RecoveryTrendChart from '../components/RecoveryTrendChart.vue';
+import AvailabilityRecoveryChart from '../components/AvailabilityRecoveryChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationHighlightCards from '../components/StationHighlightCards.vue';
 import StationsTable from '../components/StationsTable.vue';
@@ -72,9 +71,10 @@ const toMs = ref(now);
 const fromIso = computed(() => new Date(fromMs.value).toISOString());
 const toIso = computed(() => new Date(toMs.value).toISOString());
 // Single source of truth for the period's chosen bucket size - loadMetrics
-// uses it for every bucketed API call, RecoveryTrendChart.vue and the hint
-// text below it use it to phrase "за день"/"за неделю" instead of each
-// guessing independently (see bucketPeriodLabel's own doc comment).
+// uses it for every bucketed API call, AvailabilityRecoveryChart.vue's own
+// recovery-trend tooltip and hint text use it to phrase "за день"/"за
+// неделю" instead of guessing independently (see bucketPeriodLabel's own
+// doc comment).
 const bucketHours = computed(() => pickBucketHours(toMs.value - fromMs.value));
 
 const trendBuckets = ref([]);
@@ -92,13 +92,6 @@ const sectionErrors = ref({
   heatmap: '',
   recoveryTrend: '',
 });
-
-const DIRECTION_META = {
-  improving: { label: 'Улучшается', icon: '📈', color: '#16a34a' },
-  worsening: { label: 'Ухудшается', icon: '📉', color: '#dc2626' },
-  stable: { label: 'Стабильно', icon: '➖', color: '#6b7280' },
-  unknown: { label: 'Недостаточно данных', icon: '❔', color: '#6b7280' },
-};
 
 function msToLocalInputValue(ms) {
   const d = new Date(ms);
@@ -137,9 +130,9 @@ function setPreset(hours) {
 // widest preset button) fell into weekly buckets and rendered as ~5 points,
 // most of the "Динамика доступности" chart empty past that. Chart.js
 // already auto-thins x-axis labels regardless of point count (see
-// TrendChart.vue), so 90 daily points renders fine - no need for a fancier
-// adaptive scheme, just moving the cliff somewhere the still-fixed 30/7/90
-// preset buttons don't land right on top of it.
+// AvailabilityRecoveryChart.vue), so 90 daily points renders fine - no need
+// for a fancier adaptive scheme, just moving the cliff somewhere the
+// still-fixed 30/7/90 preset buttons don't land right on top of it.
 function pickBucketHours(spanMs) {
   const spanHours = spanMs / 3600000;
   if (spanHours <= 48) return 1;
@@ -496,36 +489,15 @@ onMounted(async () => {
       <p v-if="cardError" class="error-text">{{ cardError }}</p>
     </div>
 
-    <div class="card section">
-      <div class="section-header">
-        <h2>Динамика доступности <span class="hint small">(АИ-92, АИ-95)</span></h2>
-        <span class="direction-badge" :style="{ color: DIRECTION_META[forecastDirection].color }">
-          {{ DIRECTION_META[forecastDirection].icon }} {{ DIRECTION_META[forecastDirection].label }}
-        </span>
-      </div>
-      <p v-if="sectionErrors.trend || sectionErrors.forecast" class="error-text">
-        {{ sectionErrors.trend || sectionErrors.forecast }}
-      </p>
-      <TrendChart :buckets="trendBuckets" :forecast-buckets="forecastBuckets" />
-      <p class="hint small">
-        Пунктир — простая линейная экстраполяция последних данных, а не точный прогноз: это
-        грубая оценка направления тренда, без учёта сезонности.
-      </p>
-    </div>
-
-    <div class="card section">
-      <h2>Время восстановления после отключений <span class="hint small">(АИ-92, АИ-95)</span></h2>
-      <p v-if="sectionErrors.recoveryTrend" class="error-text">{{ sectionErrors.recoveryTrend }}</p>
-      <RecoveryTrendChart
-        :buckets="recoveryTrendBuckets"
-        :bucket-hours="bucketHours"
-        :forecast-buckets="forecastBuckets"
-      />
-      <p class="hint small">
-        Среднее время от «пропало» до «появилось» по всем станциям района {{ bucketPeriodLabel(bucketHours) }} —
-        растущий график значит, что топливо не только реже есть, но и дольше не появляется.
-      </p>
-    </div>
+    <AvailabilityRecoveryChart
+      :trend-buckets="trendBuckets"
+      :forecast-buckets="forecastBuckets"
+      :recovery-buckets="recoveryTrendBuckets"
+      :bucket-hours="bucketHours"
+      :direction="forecastDirection"
+      :trend-error-message="sectionErrors.trend || sectionErrors.forecast"
+      :recovery-error-message="sectionErrors.recoveryTrend"
+    />
 
     <div class="two-col">
       <div class="card section">
@@ -634,11 +606,6 @@ onMounted(async () => {
 
 .section-header h2 {
   margin: 0;
-}
-
-.direction-badge {
-  font-size: 14px;
-  font-weight: 600;
 }
 
 .sort-toggle {
