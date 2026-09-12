@@ -1,6 +1,32 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { linearRegression, blendHourForecast, currentCoreStatusToPct } = require('../src/services/forecastService');
+const {
+  linearRegression,
+  blendHourForecast,
+  currentCoreStatusToPct,
+  resolveBucketsAhead,
+} = require('../src/services/forecastService');
+
+test('resolveBucketsAhead: an explicit value always wins, regardless of history length', () => {
+  assert.equal(resolveBucketsAhead(10, 7), 10);
+  assert.equal(resolveBucketsAhead(1, 400), 1);
+});
+
+test('resolveBucketsAhead: a short history (the reports page\'s own default 7-day period) is floored, not left at the old flat 6', () => {
+  // ceil(7 * 0.2) = 2, which is also the MIN - so 2, not the old fixed 6
+  // that used to be ~half of a 7-bucket chart.
+  assert.equal(resolveBucketsAhead(undefined, 7), 2);
+});
+
+test('resolveBucketsAhead: a long history is capped at the old 6-bucket default, not left growing with the fraction', () => {
+  // ceil(90 * 0.2) = 18, capped down to MAX = 6
+  assert.equal(resolveBucketsAhead(undefined, 90), 6);
+});
+
+test('resolveBucketsAhead: scales in between the floor and cap for a mid-length history', () => {
+  // ceil(20 * 0.2) = 4
+  assert.equal(resolveBucketsAhead(undefined, 20), 4);
+});
 
 test('linearRegression: recovers slope/intercept exactly for a perfect line', () => {
   const points = [

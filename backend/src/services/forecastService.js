@@ -468,13 +468,38 @@ function linearRegression(points) {
 
 const SLOPE_THRESHOLD_PCT_PER_BUCKET = 1;
 
+// A fixed forecast horizon (the old default was a flat 6 buckets regardless
+// of period length) reads fine on a long report - 6 of 90 daily buckets is a
+// small tail - but on the page's own default 7-day period, 6 of 13 buckets
+// is nearly half the chart's width, drowning out the actual history it's
+// supposed to extrapolate from. Scaling the horizon to a fraction of however
+// much history is actually on screen keeps the forecast a tail at any period
+// length; MIN keeps a short period from collapsing to a single forecast
+// point, MAX keeps the old 6-bucket cap for long periods where the fraction
+// alone would otherwise keep growing.
+const AUTO_BUCKETS_AHEAD_FRACTION = 0.2;
+const AUTO_BUCKETS_AHEAD_MIN = 2;
+const AUTO_BUCKETS_AHEAD_MAX = 6;
+
+// Pulled out as its own pure function (rather than inlined) so it's unit-
+// testable without a DB-backed getAvailabilityTrend call, same reasoning as
+// linearRegression/blendHourForecast below.
+function resolveBucketsAhead(explicitBucketsAhead, historyLength) {
+  if (explicitBucketsAhead !== undefined && explicitBucketsAhead !== null) return explicitBucketsAhead;
+  return Math.min(AUTO_BUCKETS_AHEAD_MAX, Math.max(AUTO_BUCKETS_AHEAD_MIN, Math.ceil(historyLength * AUTO_BUCKETS_AHEAD_FRACTION)));
+}
+
 /**
  * Naive linear extrapolation of the region's recent availability trend -
  * NOT a real time-series model (no seasonality, no confidence interval),
  * just a rough "is it getting better or worse" signal with a projected
  * continuation of the line, clamped to a valid percentage range.
+ *
+ * `bucketsAhead` is optional - omit it (as the reports page does) to scale
+ * the horizon to the period's own history length instead of a fixed count;
+ * pass it explicitly to force a specific horizon regardless of period length.
  */
-async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bucketsAhead = 6, tz } = {}) {
+async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bucketsAhead, tz } = {}) {
   const buckets = await getAvailabilityTrend(regionId, { from, to, bucketHours, tz });
 
   if (buckets.length < 3) {
@@ -487,10 +512,12 @@ async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bu
     return { direction: 'unknown', slopePerBucket: null, buckets, forecast: [] };
   }
 
+  const effectiveBucketsAhead = resolveBucketsAhead(bucketsAhead, buckets.length);
+
   const lastBucketStartMs = buckets[buckets.length - 1].bucketStart.getTime();
   const bucketMs = bucketHours * 60 * 60 * 1000;
   const forecast = [];
-  for (let i = 1; i <= bucketsAhead; i++) {
+  for (let i = 1; i <= effectiveBucketsAhead; i++) {
     const x = buckets.length - 1 + i;
     const yRaw = reg.slope * x + reg.intercept;
     forecast.push({
@@ -522,4 +549,5 @@ module.exports = {
   currentCoreStatusToPct,
   linearRegression,
   isoWeekdayAndHour,
+  resolveBucketsAhead,
 };

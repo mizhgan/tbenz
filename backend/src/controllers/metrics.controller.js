@@ -73,7 +73,16 @@ const getTrendForecast = asyncHandler(async (req, res) => {
   const bucketHours = parseBucketHours(req.query);
   const tz = req.query.tz || undefined;
 
-  const bucketsAhead = Math.min(Math.max(Number(req.query.bucketsAhead) || 6, 1), 30);
+  // Undefined (no explicit query param) lets getRegionTrendForecast scale
+  // the forecast horizon to the period's own history length instead of
+  // always drawing a fixed 6 buckets - on a short default period those 6
+  // buckets ended up as roughly half the chart's width (see its own doc
+  // comment). An explicit ?bucketsAhead= still overrides for callers that
+  // want a fixed horizon regardless of period length.
+  const bucketsAhead =
+    req.query.bucketsAhead !== undefined
+      ? Math.min(Math.max(Number(req.query.bucketsAhead) || 6, 1), 30)
+      : undefined;
 
   const result = await getRegionTrendForecast(regionId, { from, to, bucketHours, bucketsAhead, tz });
   res.set('Cache-Control', METRICS_MAX_AGE);
