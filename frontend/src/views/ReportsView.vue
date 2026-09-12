@@ -155,6 +155,22 @@ function setPreset(hours) {
   loadMetrics();
 }
 
+// Reported live: with all four preset buttons always the same gray, there
+// was no way to tell at a glance whether "24ч"/"7д"/"30д"/"90д" (or none of
+// them - a manually-typed custom range) was actually the period currently
+// shown below. Compares the *selected span*, not just from/to against
+// "now" - the datetime-local inputs stay editable/pickable independently of
+// these buttons, so an active button reflects "this is a preset-sized
+// range" rather than tracking which control was last touched. A small
+// tolerance (not exact equality) covers datetime-local's own minute-only
+// precision: typing exactly one of these spans in by hand still lights up
+// the matching button instead of silently falling through to "custom".
+const PRESET_HOURS = [24, 24 * 7, 24 * 30, 24 * 90];
+const activePresetHours = computed(() => {
+  const spanHours = (toMs.value - fromMs.value) / 3600000;
+  return PRESET_HOURS.find((h) => Math.abs(spanHours - h) < 1 / 30) ?? null; // ~2 min tolerance
+});
+
 // Daily threshold raised from 14 to 90 days - at 14, a 30-day report (the
 // widest preset button) fell into weekly buckets and rendered as ~5 points,
 // most of the "Динамика доступности" chart empty past that. Chart.js
@@ -503,10 +519,38 @@ onMounted(async () => {
       </div>
 
       <div class="presets">
-        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24)">24ч</button>
-        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 7)">7д</button>
-        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 30)">30д</button>
-        <button class="btn secondary" :disabled="!regions.length" @click="setPreset(24 * 90)">90д</button>
+        <button
+          class="btn secondary"
+          :class="{ active: activePresetHours === 24 }"
+          :disabled="!regions.length"
+          @click="setPreset(24)"
+        >
+          24ч
+        </button>
+        <button
+          class="btn secondary"
+          :class="{ active: activePresetHours === 24 * 7 }"
+          :disabled="!regions.length"
+          @click="setPreset(24 * 7)"
+        >
+          7д
+        </button>
+        <button
+          class="btn secondary"
+          :class="{ active: activePresetHours === 24 * 30 }"
+          :disabled="!regions.length"
+          @click="setPreset(24 * 30)"
+        >
+          30д
+        </button>
+        <button
+          class="btn secondary"
+          :class="{ active: activePresetHours === 24 * 90 }"
+          :disabled="!regions.length"
+          @click="setPreset(24 * 90)"
+        >
+          90д
+        </button>
       </div>
 
       <button class="btn" :disabled="loading" @click="loadMetrics">
@@ -682,6 +726,13 @@ onMounted(async () => {
   gap: 6px;
 }
 
+/* Same active-state look as .sort-toggle .btn.active below - one visual
+   language for "this button reflects the current state" across the page. */
+.presets .btn.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .date-echo {
   font-size: 12px;
   color: #667;
@@ -777,7 +828,8 @@ onMounted(async () => {
   border-color: #334155;
 }
 
-[data-theme='dark'] .sort-toggle .btn.active {
+[data-theme='dark'] .sort-toggle .btn.active,
+[data-theme='dark'] .presets .btn.active {
   background: #1e3a5f;
   color: #93c5fd;
 }
