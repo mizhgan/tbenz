@@ -123,8 +123,46 @@ function tooltipFor(weekday, hour) {
 </template>
 
 <style scoped>
+/* 24 hourly columns (36px label + 24*22px cells, see .grid below) overflow
+   a typical mobile card width well before every hour fits - confirmed live,
+   a phone screen only shows roughly hours 0-10 with no hint the rest is one
+   swipe away. The classic pure-CSS "scroll shadow" fixes that without JS: a
+   solid-to-transparent fade at each edge only shows once there's actually
+   more content that way (background-attachment: local scrolls the "solid"
+   layer WITH the content, so once you've scrolled all the way to an edge,
+   that edge's own fade scrolls off past it and disappears; :scroll keeps
+   the darker edge-shadow layers fixed to the *viewport* edge regardless of
+   scroll position, so they stay visible as long as any fade layer is still
+   in view on that side). Same idea reused on StationsTable.vue's own
+   .table-wrap. Colors match .card's own background (main.css) since this
+   scrolls *inside* one with no extra inset - a mismatched fade color would
+   show as a visible seam instead of blending in.
+   https://css-tricks.com/scroll-shadows-with-background-attachment-local/ */
 .heatmap {
   overflow-x: auto;
+  background:
+    linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to right, rgba(255, 255, 255, 0), #fff 70%) 100% 0,
+    linear-gradient(to right, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: #fff;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
+}
+
+[data-theme='dark'] .heatmap {
+  background:
+    linear-gradient(to right, #0f172a 30%, rgba(15, 23, 42, 0)),
+    linear-gradient(to right, rgba(15, 23, 42, 0), #0f172a 70%) 100% 0,
+    linear-gradient(to right, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: #0f172a;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
 }
 
 .grid {

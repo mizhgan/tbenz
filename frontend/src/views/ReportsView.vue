@@ -70,6 +70,13 @@ const toMs = ref(now);
 // fixed last-7-days regardless of what period was picked here.
 const fromIso = computed(() => new Date(fromMs.value).toISOString());
 const toIso = computed(() => new Date(toMs.value).toISOString());
+// The period immediately preceding the selected one, same length - lets the
+// KPI cards show "+3% vs previous period" instead of a bare number with no
+// sense of whether that's an improvement. Same length both sides so the
+// comparison is apples-to-apples (a 90-day count of outages is naturally
+// bigger than a 7-day one regardless of any real trend).
+const prevFromIso = computed(() => new Date(2 * fromMs.value - toMs.value).toISOString());
+const prevToIso = computed(() => fromIso.value);
 // Single source of truth for the period's chosen bucket size - loadMetrics
 // uses it for every bucketed API call, AvailabilityRecoveryChart.vue's own
 // recovery-trend tooltip and hint text use it to phrase "за день"/"за
@@ -81,6 +88,9 @@ const trendBuckets = ref([]);
 const forecastBuckets = ref([]);
 const forecastDirection = ref('unknown');
 const stations = ref([]);
+// Previous-period stations, fetched purely to compute previousSummary below
+// (see summary's own delta computeds) - never rendered as its own table/list.
+const previousStations = ref([]);
 const heatmapCells = ref([]);
 const recoveryTrendBuckets = ref([]);
 const stationsSort = ref('best');
@@ -97,6 +107,25 @@ function msToLocalInputValue(ms) {
   const d = new Date(ms);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// A native <input type="datetime-local"> renders its own displayed text in
+// whatever format the visitor's OS locale gives Chromium - confirmed live,
+// that's US-style "MM/DD/YYYY, hh:mm AM/PM" even with the page (and even an
+// explicit Playwright browser-context locale) set to ru-RU, since it's tied
+// to the OS itself, something this app has no way to override. On a
+// Russian-language page that reads as ambiguous at best ("09/05" - which is
+// the month?) - this plain-text echo underneath is always formatted the
+// same way regardless of the visitor's own OS, so there's at least one
+// unambiguous confirmation of what's actually selected.
+function formatRuDateTime(ms) {
+  return new Date(ms).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 const fromInput = computed({
@@ -140,14 +169,17 @@ function pickBucketHours(spanMs) {
   return 24 * 7;
 }
 
-const summary = computed(() => {
+// Shared by summary/previousSummary below so the two can't quietly drift
+// apart on how they weight/aggregate - previousSummary exists purely to
+// diff against, so it has to be computed exactly the same way.
+function summarize(stationList) {
   let weightedAvailable = 0;
   let weightForAvailable = 0;
   let weightedRecovery = 0;
   let outagesForRecovery = 0;
   let totalOutages = 0;
 
-  for (const s of stations.value) {
+  for (const s of stationList) {
     if (s.availablePct !== null) {
       weightedAvailable += s.availablePct * s.totalPolls;
       weightForAvailable += s.totalPolls;
@@ -160,12 +192,53 @@ const summary = computed(() => {
   }
 
   return {
-    stationCount: stations.value.length,
+    stationCount: stationList.length,
     overallAvailablePct: weightForAvailable > 0 ? weightedAvailable / weightForAvailable : null,
     totalOutages,
     avgRecoveryMinutes: outagesForRecovery > 0 ? weightedRecovery / outagesForRecovery : null,
   };
+}
+
+const summary = computed(() => summarize(stations.value));
+// Only ever read for the KPI cards' own delta line below - not otherwise
+// exposed (no "previous period" table/section of its own).
+const previousSummary = computed(() => summarize(previousStations.value));
+
+// null when either side has no comparable data (a period with zero known
+// polls, or the previous period predating the region's own history) - the
+// KPI card simply omits its delta line in that case rather than showing a
+// misleading comparison against nothing.
+const availabilityDelta = computed(() => {
+  if (summary.value.overallAvailablePct === null || previousSummary.value.overallAvailablePct === null) return null;
+  return summary.value.overallAvailablePct - previousSummary.value.overallAvailablePct;
 });
+const outagesDelta = computed(() => {
+  if (!previousStations.value.length) return null;
+  return summary.value.totalOutages - previousSummary.value.totalOutages;
+});
+const recoveryDelta = computed(() => {
+  if (summary.value.avgRecoveryMinutes === null || previousSummary.value.avgRecoveryMinutes === null) return null;
+  return summary.value.avgRecoveryMinutes - previousSummary.value.avgRecoveryMinutes;
+});
+
+// formatPct/formatMinutes both size their unit to the *magnitude* of the
+// number (60+ minutes becomes "X.X ч", not "60+ мин") - correct for a plain
+// reading, but applied directly to a *signed* delta it breaks for a
+// negative-but-large one (formatMinutes(-130) reads "minutes < 60" as true
+// and prints "-130 мин" instead of "-2.2 ч"). Formatting the magnitude and
+// prepending the sign here keeps the same unit-scaling these deltas'
+// non-delta siblings already use.
+function formatSignedPct(delta) {
+  const sign = delta > 0 ? '+' : delta < 0 ? '-' : '';
+  return `${sign}${formatPct(Math.abs(delta))}`;
+}
+function formatSignedMinutes(delta) {
+  const sign = delta > 0 ? '+' : delta < 0 ? '-' : '';
+  return `${sign}${formatMinutes(Math.abs(delta))}`;
+}
+function formatSignedCount(delta) {
+  return delta > 0 ? `+${delta}` : `${delta}`;
+}
 
 // Sorted/selected by rankScore (shrunk toward the region's own rate, so a
 // station with barely any evidence this period can't win "лучшая"/"худшая"
@@ -326,14 +399,22 @@ async function loadMetrics() {
   const regionId = selectedRegionId.value;
   const from = fromIso.value;
   const to = toIso.value;
+  const prevFrom = prevFromIso.value;
+  const prevTo = prevToIso.value;
 
-  const [trendResult, forecastResult, stationsResult, heatmapResult, recoveryTrendResult] =
+  const [trendResult, forecastResult, stationsResult, heatmapResult, recoveryTrendResult, previousStationsResult] =
     await Promise.allSettled([
       metricsApi.trend(regionId, { from, to, bucketHours: bucketHours.value }),
       metricsApi.trendForecast(regionId, { from, to, bucketHours: bucketHours.value }),
       metricsApi.stations(regionId, { from, to }),
       metricsApi.heatmap(regionId, { from, to }),
       metricsApi.recoveryTrend(regionId, { from, to, bucketHours: bucketHours.value }),
+      // Purely for the KPI cards' own "vs previous period" delta - a
+      // failure here shouldn't surface as a visible page error for what's a
+      // secondary, non-essential comparison; previousStations just stays
+      // empty and the delta lines quietly don't render (see
+      // availabilityDelta/outagesDelta/recoveryDelta's own null-guards).
+      metricsApi.stations(regionId, { from: prevFrom, to: prevTo }),
     ]);
 
   if (myToken !== requestToken) return; // superseded by a newer call - discard
@@ -380,6 +461,8 @@ async function loadMetrics() {
     sectionErrors.value.recoveryTrend = describeFailure(recoveryTrendResult);
   }
 
+  previousStations.value = previousStationsResult.status === 'fulfilled' ? previousStationsResult.value.stations : [];
+
   loading.value = false;
 }
 
@@ -411,10 +494,12 @@ onMounted(async () => {
       <div class="form-row">
         <label>С</label>
         <input type="datetime-local" v-model="fromInput" :disabled="!regions.length" />
+        <span class="date-echo">{{ formatRuDateTime(fromMs) }}</span>
       </div>
       <div class="form-row">
         <label>По</label>
         <input type="datetime-local" v-model="toInput" :disabled="!regions.length" />
+        <span class="date-echo">{{ formatRuDateTime(toMs) }}</span>
       </div>
 
       <div class="presets">
@@ -437,6 +522,9 @@ onMounted(async () => {
         <div class="kpi-value">{{ formatPct(summary.overallAvailablePct) }}</div>
         <div class="kpi-label">Общая доступность</div>
         <div class="kpi-sublabel">АИ-92, АИ-95</div>
+        <div v-if="availabilityDelta !== null" class="kpi-delta" :class="availabilityDelta >= 0 ? 'good' : 'bad'">
+          {{ availabilityDelta >= 0 ? '↑' : '↓' }} {{ formatSignedPct(availabilityDelta) }} к пред. периоду
+        </div>
       </div>
       <div class="card kpi">
         <div class="kpi-value">{{ summary.stationCount }}</div>
@@ -445,48 +533,17 @@ onMounted(async () => {
       <div class="card kpi">
         <div class="kpi-value">{{ summary.totalOutages }}</div>
         <div class="kpi-label">Отключений за период</div>
+        <div v-if="outagesDelta !== null" class="kpi-delta" :class="outagesDelta <= 0 ? 'good' : 'bad'">
+          {{ outagesDelta > 0 ? '↑' : outagesDelta < 0 ? '↓' : '=' }} {{ formatSignedCount(outagesDelta) }} к пред. периоду
+        </div>
       </div>
       <div class="card kpi">
         <div class="kpi-value">{{ formatMinutes(summary.avgRecoveryMinutes) }}</div>
         <div class="kpi-label">Среднее время восстановления</div>
-      </div>
-    </div>
-
-    <div class="card section">
-      <h2>Картинка отчёта для шаринга</h2>
-      <p class="hint">
-        Собирает KPI, графики динамики и времени восстановления, топ-3 станции текущей вкладки
-        (лучшие/худшие) в одну картинку — удобно переслать в чат вместо ссылки на отчёт.
-      </p>
-
-      <template v-if="!cardUrl">
-        <button type="button" class="btn secondary" :disabled="cardGenerating" @click="generateReportCard">
-          {{ cardGenerating ? 'Генерация...' : '🖼 Сгенерировать картинку' }}
-        </button>
-      </template>
-      <template v-else>
-        <img :src="cardUrl" alt="Картинка отчёта" class="card-preview" />
-        <div class="card-actions">
-          <button type="button" class="btn secondary" @click="resetReportCard">Сгенерировать заново</button>
-          <button
-            v-if="clipboardSupported"
-            type="button"
-            class="btn secondary"
-            @click="copyReportCardToClipboard"
-          >
-            {{ copyFeedback === 'ok' ? 'Скопировано ✓' : 'Скопировать в буфер' }}
-          </button>
-          <button v-if="canShareCard" type="button" class="btn secondary" @click="shareReportCard">
-            Поделиться
-          </button>
-          <a :href="cardUrl" download="report-card.png" class="btn">Скачать</a>
+        <div v-if="recoveryDelta !== null" class="kpi-delta" :class="recoveryDelta <= 0 ? 'good' : 'bad'">
+          {{ recoveryDelta > 0 ? '↑' : recoveryDelta < 0 ? '↓' : '=' }} {{ formatSignedMinutes(recoveryDelta) }} к пред. периоду
         </div>
-        <p v-if="!clipboardSupported" class="hint small">
-          Этот браузер не поддерживает копирование картинки в буфер обмена — скачайте файл или
-          воспользуйтесь «Поделиться».
-        </p>
-      </template>
-      <p v-if="cardError" class="error-text">{{ cardError }}</p>
+      </div>
     </div>
 
     <AvailabilityRecoveryChart
@@ -547,6 +604,43 @@ onMounted(async () => {
       />
     </div>
 
+    <div class="card section">
+      <h2>Картинка отчёта для шаринга</h2>
+      <p class="hint">
+        Собирает KPI, графики динамики и времени восстановления, топ-3 станции текущей вкладки
+        (лучшие/худшие) в одну картинку — удобно переслать в чат вместо ссылки на отчёт.
+      </p>
+
+      <template v-if="!cardUrl">
+        <button type="button" class="btn secondary" :disabled="cardGenerating" @click="generateReportCard">
+          {{ cardGenerating ? 'Генерация...' : '🖼 Сгенерировать картинку' }}
+        </button>
+      </template>
+      <template v-else>
+        <img :src="cardUrl" alt="Картинка отчёта" class="card-preview" />
+        <div class="card-actions">
+          <button type="button" class="btn secondary" @click="resetReportCard">Сгенерировать заново</button>
+          <button
+            v-if="clipboardSupported"
+            type="button"
+            class="btn secondary"
+            @click="copyReportCardToClipboard"
+          >
+            {{ copyFeedback === 'ok' ? 'Скопировано ✓' : 'Скопировать в буфер' }}
+          </button>
+          <button v-if="canShareCard" type="button" class="btn secondary" @click="shareReportCard">
+            Поделиться
+          </button>
+          <a :href="cardUrl" download="report-card.png" class="btn">Скачать</a>
+        </div>
+        <p v-if="!clipboardSupported" class="hint small">
+          Этот браузер не поддерживает копирование картинки в буфер обмена — скачайте файл или
+          воспользуйтесь «Поделиться».
+        </p>
+      </template>
+      <p v-if="cardError" class="error-text">{{ cardError }}</p>
+    </div>
+
     <StationDetailModal
       v-if="showDetailModal && detailStation"
       :station="detailStation"
@@ -586,6 +680,37 @@ onMounted(async () => {
 .presets {
   display: flex;
   gap: 6px;
+}
+
+.date-echo {
+  font-size: 12px;
+  color: #667;
+}
+
+[data-theme='dark'] .date-echo {
+  color: #94a3b8;
+}
+
+.kpi-delta {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.kpi-delta.good {
+  color: #16a34a;
+}
+
+.kpi-delta.bad {
+  color: #dc2626;
+}
+
+[data-theme='dark'] .kpi-delta.good {
+  color: #4ade80;
+}
+
+[data-theme='dark'] .kpi-delta.bad {
+  color: #f87171;
 }
 
 /* .kpi-grid/.kpi/.kpi-value/.kpi-label moved to main.css - shared with the
