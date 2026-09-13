@@ -94,6 +94,15 @@ const previousStations = ref([]);
 const heatmapCells = ref([]);
 const recoveryTrendBuckets = ref([]);
 const stationsSort = ref('best');
+// Reported live: the full ~100-row stations table used to always render
+// inline, pushing the share-card section (and anyone who just wants to
+// generate/copy the report image) several screens down. Collapsed by
+// default - the top-5 highlight cards right above already cover "what's
+// good/bad at a glance"; this table's own job (see StationsTable.vue's
+// own doc comment) is a deliberate look-up, not something everyone needs
+// to scroll past every time. v-if (not v-show) below so the ~100-row
+// sort/search table isn't even built until someone actually opens it.
+const stationsTableOpen = ref(false);
 
 const sectionErrors = ref({
   trend: '',
@@ -639,9 +648,15 @@ onMounted(async () => {
     </div>
 
     <div class="card section">
-      <h2>Все станции</h2>
+      <div class="section-header">
+        <h2>Все станции <span class="hint small">({{ stations.length }})</span></h2>
+        <button type="button" class="btn secondary" @click="stationsTableOpen = !stationsTableOpen">
+          {{ stationsTableOpen ? 'Свернуть ▲' : 'Показать ▼' }}
+        </button>
+      </div>
       <p v-if="sectionErrors.stations" class="error-text">{{ sectionErrors.stations }}</p>
       <StationsTable
+        v-if="stationsTableOpen"
         :stations="stations"
         :loading-station-id="detailLoadingId"
         @select="openStationDetail"
