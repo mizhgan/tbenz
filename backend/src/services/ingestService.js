@@ -120,173 +120,241 @@ async function storeStation(parsed, region, polledAt) {
 }
 
 /**
+ * Phase 1: fetch tbank's current stations for the region's bbox and
+ * store/snapshot each one - see storeStation's own doc comment for what
+ * that write actually does. No try/catch around fetchStations/
+ * extractStationsArray themselves: a bad network response or unparseable
+ * payload here is a whole-tick failure, meant to propagate up to
+ * ingestRegion's own catch block (recordFailedPoll) rather than be
+ * swallowed - unlike a single station failing to store below, which just
+ * skips that one station.
+ */
+async function pollTbankAndStoreStations(region, polledAt, bbox) {
+  const { data: payload, requestUrl } = await fetchStations(bbox);
+  const rawStations = extractStationsArray(payload);
+
+  let stored = 0;
+  let skipped = 0;
+  // Each touched station's fuel statuses (raw and confirmed) from *before
+  // any write this tick* - the one true "previous" a transition
+  // notification should be compared against (see finalizeTouchedStations'
+  // own comment for why this has to be a single before/after comparison
+  // spanning both this tbank write and any secondary-source remerge later,
+  // rather than one comparison per write).
+  const previousByStationId = new Map();
+  const previousConfirmedByStationId = new Map();
+  for (const raw of rawStations) {
+    const parsed = parseStation(raw);
+    if (!parsed) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const { station, previousFuelStatuses, previousConfirmedFuelStatuses } = await storeStation(
+        parsed,
+        region,
+        polledAt
+      );
+      previousByStationId.set(String(station._id), previousFuelStatuses);
+      previousConfirmedByStationId.set(String(station._id), previousConfirmedFuelStatuses);
+      stored += 1;
+    } catch (err) {
+      logger.error(`Failed to store station for region ${region.name}:`, err.message);
+    }
+  }
+
+  return { payload, requestUrl, stored, skipped, previousByStationId, previousConfirmedByStationId };
+}
+
+// Phase 2: mark this tick's tbank poll as successful on the region document
+// and in the poll-attempt log - kept separate from pollTbankAndStoreStations
+// above since this is bookkeeping about the fetch, not the fetch/store
+// itself.
+async function recordSuccessfulPoll(region, polledAt, { requestUrl, payload, stored }) {
+  region.lastPolledAt = polledAt;
+  region.lastPollStatus = 'ok';
+  region.lastPollError = null;
+  region.lastPollStationCount = stored;
+  region.lastRequestUrl = requestUrl;
+  region.lastRawResponse = capRawResponse(payload);
+  await region.save();
+  await recordPollAttempt({ region, sourceKey: 'tbank', status: 'ok', error: null, stationCount: stored });
+}
+
+/**
+ * Phase 3: run every registered secondary source (see sourceRegistry.js)
+ * for this region, on the same tick as the tbank poll above rather than its
+ * own separate timer - see secondarySourceIngestService.js. Best-effort per
+ * source, same reasoning as notifyTelegram below: one source being down/
+ * slow/changed-shape must never break the primary tbank ingestion this
+ * function exists for, or any other source.
+ */
+async function ingestSecondarySources(region) {
+  const matchedStationIds = [];
+  for (const source of listSources()) {
+    try {
+      const result = await ingestSecondarySourceRegion(source, region);
+      matchedStationIds.push(...result.matchedStationIds);
+    } catch (err) {
+      logger.error(`${source.key} ingest failed for region ${region.name}:`, err.message);
+    }
+  }
+  return matchedStationIds;
+}
+
+// Phase 4: a station matched to a secondary source but not itself present
+// in tbank's response this tick has no entry in previousByStationId yet -
+// its true "before" values need capturing now, right before
+// remergeMatchedStations below becomes its only write this tick. Mutates
+// the two Maps in place rather than returning new ones, matching
+// pollTbankAndStoreStations' own population of the same two Maps.
+async function backfillPreviousForMatchedOnly(matchedStationIds, previousByStationId, previousConfirmedByStationId) {
+  const uniqueMatchedIds = [...new Set(matchedStationIds.map(String))];
+  for (const id of uniqueMatchedIds) {
+    if (!previousByStationId.has(id)) {
+      const existing = await Station.findById(id, { lastFuelStatuses: 1, confirmedFuelStatuses: 1 }).lean();
+      previousByStationId.set(id, existing?.lastFuelStatuses || []);
+      previousConfirmedByStationId.set(id, existing?.confirmedFuelStatuses || []);
+    }
+  }
+}
+
+/**
+ * Phase 5: one remerge per station touched by any source this tick (not one
+ * per source) - reuses this tick's own `polledAt` so it overwrites the
+ * StationSnapshot pollTbankAndStoreStations already wrote above instead of
+ * appending a duplicate. See remergeStationsForTick's doc comment for why: a
+ * second/third snapshot row per tick for matched stations was silently
+ * inflating their weight in every snapshot-driven aggregate (metrics
+ * percentages, outage streaks, hourly forecast profiles). Best-effort, same
+ * reasoning as ingestSecondarySources above.
+ */
+async function remergeMatchedStations(matchedStationIds, region, polledAt) {
+  if (!matchedStationIds.length) return;
+  try {
+    await remergeStationsForTick(matchedStationIds, region, polledAt);
+  } catch (err) {
+    logger.error(`Secondary-source merge failed for region ${region.name}:`, err.message);
+  }
+}
+
+/**
+ * Phase 6: for every station touched by either the tbank write or a
+ * secondary-source remerge this tick, compute its transition - comparing
+ * status from before ANY write this tick to its final, post-remerge status,
+ * once per station rather than once per write - and advance its per-region
+ * outage-streak state (which also needs the final, post-merge
+ * station.lastStatus, same reason). Comparing before/after in two separate
+ * hops instead (previous vs tbank-raw, then tbank-raw vs merged) used to
+ * silently drop real available -> not_available transitions whenever
+ * tbank's own raw reading was 'no_data' in between (common once a station's
+ * live signal comes from a secondary source rather than tbank itself):
+ * 'no_data' is neither 'available' nor 'not_available', so neither hop's
+ * strict comparison ever saw the true available -> not_available pair -
+ * "появилось" alerts kept firing (that event only needs "wasn't available
+ * before, is now") while "пропало" alerts (which need the *exact* prior
+ * state to be 'available') silently stopped.
+ *
+ * computeTransitions also compares against confirmedFuelStatuses (see its
+ * own doc comment and Station.js's), not just the raw previous poll - so
+ * this loop persists the returned nextConfirmedFuelStatuses back onto the
+ * station right away, keeping that memory current for next tick regardless
+ * of whether this tick produced an actual transition worth alerting on.
+ */
+async function finalizeTouchedStations(previousByStationId, previousConfirmedByStationId, region, polledAt) {
+  const touchedIds = [...previousByStationId.keys()];
+  if (!touchedIds.length) return [];
+
+  const stationEvents = [];
+  const finalStations = await Station.find({ _id: { $in: touchedIds } });
+  for (const station of finalStations) {
+    const previousFuelStatuses = previousByStationId.get(String(station._id)) || [];
+    const previousConfirmedFuelStatuses = previousConfirmedByStationId.get(String(station._id)) || [];
+    const { transitions, nextConfirmedFuelStatuses } = telegramNotifier.computeTransitions(
+      previousFuelStatuses,
+      previousConfirmedFuelStatuses,
+      station.lastFuelStatuses
+    );
+    station.confirmedFuelStatuses = nextConfirmedFuelStatuses;
+    await advanceOutageState(station, region, polledAt);
+    await station.save();
+    if (transitions.length) stationEvents.push({ station, transitions });
+  }
+  return stationEvents;
+}
+
+// Phase 7: best-effort Telegram notification for this tick's transitions,
+// batched into one message per chat instead of notifying the moment each
+// station is stored (a poll that changes several stations shouldn't turn
+// into a burst of near-simultaneous messages) - a Telegram hiccup must
+// never break ingestion.
+async function notifyTelegram(region, stationEvents) {
+  try {
+    await telegramNotifier.notifyRegionChanges(region, stationEvents);
+  } catch (err) {
+    logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
+  }
+}
+
+// Catch-all for any phase above throwing - in practice, almost always
+// pollTbankAndStoreStations' own fetchStations/extractStationsArray call,
+// since every other phase already swallows its own errors internally.
+// Marks this tick's tbank poll as failed on the region document and in the
+// poll-attempt log.
+async function recordFailedPoll(region, polledAt, bbox, err) {
+  region.lastPolledAt = polledAt;
+  region.lastPollStatus = 'error';
+  region.lastPollError = err.message;
+  // The request itself may never have gone out (or gone out and failed) -
+  // still worth showing/copying, so an admin can try it by hand. Doesn't
+  // touch lastRawResponse: a stale-but-real previous response is more
+  // useful to keep around than wiping it because this attempt had none.
+  try {
+    region.lastRequestUrl = tbankClient.buildRequestUrl(bbox);
+  } catch {
+    // Building the URL itself shouldn't ever throw, but this must never
+    // shadow the real ingest error below if it somehow does.
+  }
+  await region.save();
+  await recordPollAttempt({ region, sourceKey: 'tbank', status: 'error', error: err.message, stationCount: 0 });
+  logger.error(`Region "${region.name}": poll failed:`, err.message);
+}
+
+/**
  * Fetches current stations for a region's bounding box and appends a new
  * historical snapshot per station. Always updates the region's poll status,
  * even on failure, so the admin UI can surface it.
+ *
+ * One tick, seven phases run in this exact order (see each phase's own doc
+ * comment for why the order matters): fetch+store tbank's own reading,
+ * record that as a successful poll, run every secondary source, backfill
+ * "before" values for anything only a secondary source touched, remerge
+ * every touched station's final status, compute transitions and advance
+ * outage state per touched station, then notify Telegram.
  */
 async function ingestRegion(region) {
   const polledAt = new Date();
   const bbox = { minLat: region.minLat, maxLat: region.maxLat, minLon: region.minLon, maxLon: region.maxLon };
   try {
-    const { data: payload, requestUrl } = await fetchStations(bbox);
-    const rawStations = extractStationsArray(payload);
+    const { payload, requestUrl, stored, skipped, previousByStationId, previousConfirmedByStationId } =
+      await pollTbankAndStoreStations(region, polledAt, bbox);
 
-    let stored = 0;
-    let skipped = 0;
-    // Each touched station's fuel statuses (raw and confirmed) from *before
-    // any write this tick* - the one true "previous" a transition
-    // notification should be compared against (see the comment on the
-    // final notifyRegionChanges call below for why this has to be a single
-    // before/after comparison spanning both the tbank write and any
-    // secondary-source remerge, rather than one comparison per write).
-    const previousByStationId = new Map();
-    const previousConfirmedByStationId = new Map();
-    for (const raw of rawStations) {
-      const parsed = parseStation(raw);
-      if (!parsed) {
-        skipped += 1;
-        continue;
-      }
-      try {
-        const { station, previousFuelStatuses, previousConfirmedFuelStatuses } = await storeStation(
-          parsed,
-          region,
-          polledAt
-        );
-        previousByStationId.set(String(station._id), previousFuelStatuses);
-        previousConfirmedByStationId.set(String(station._id), previousConfirmedFuelStatuses);
-        stored += 1;
-      } catch (err) {
-        logger.error(`Failed to store station for region ${region.name}:`, err.message);
-      }
-    }
+    await recordSuccessfulPoll(region, polledAt, { requestUrl, payload, stored });
 
-    region.lastPolledAt = polledAt;
-    region.lastPollStatus = 'ok';
-    region.lastPollError = null;
-    region.lastPollStationCount = stored;
-    region.lastRequestUrl = requestUrl;
-    region.lastRawResponse = capRawResponse(payload);
-    await region.save();
-    await recordPollAttempt({ region, sourceKey: 'tbank', status: 'ok', error: null, stationCount: stored });
+    const matchedStationIds = await ingestSecondarySources(region);
+    await backfillPreviousForMatchedOnly(matchedStationIds, previousByStationId, previousConfirmedByStationId);
+    await remergeMatchedStations(matchedStationIds, region, polledAt);
 
-    // Best-effort, same reasoning as the Telegram notify below: a secondary
-    // source (see sourceRegistry.js) being down/slow/changed-shape must
-    // never break the primary tbank ingestion this function exists for.
-    // Runs on the same schedule as the tbank poll above (same region, same
-    // tick) rather than its own separate timer - see
-    // secondarySourceIngestService.js.
-    const matchedStationIds = [];
-    for (const source of listSources()) {
-      try {
-        const result = await ingestSecondarySourceRegion(source, region);
-        matchedStationIds.push(...result.matchedStationIds);
-      } catch (err) {
-        logger.error(`${source.key} ingest failed for region ${region.name}:`, err.message);
-      }
-    }
-
-    // A station matched to a secondary source but not itself present in
-    // tbank's response this tick (previousByStationId has no entry for it
-    // yet) still needs its true "before" values captured, from right before
-    // the remerge below is its only write this tick.
-    const uniqueMatchedIds = [...new Set(matchedStationIds.map(String))];
-    for (const id of uniqueMatchedIds) {
-      if (!previousByStationId.has(id)) {
-        const existing = await Station.findById(id, { lastFuelStatuses: 1, confirmedFuelStatuses: 1 }).lean();
-        previousByStationId.set(id, existing?.lastFuelStatuses || []);
-        previousConfirmedByStationId.set(id, existing?.confirmedFuelStatuses || []);
-      }
-    }
-
-    // One remerge per station touched by any source this tick (not one per
-    // source) - reuses this tick's own `polledAt` so it overwrites the
-    // StationSnapshot storeStation already wrote above instead of appending
-    // a duplicate. See remergeStationsForTick's doc comment for why: a
-    // second/third snapshot row per tick for matched stations was silently
-    // inflating their weight in every snapshot-driven aggregate (metrics
-    // percentages, outage streaks, hourly forecast profiles).
-    if (matchedStationIds.length) {
-      try {
-        await remergeStationsForTick(matchedStationIds, region, polledAt);
-      } catch (err) {
-        logger.error(`Secondary-source merge failed for region ${region.name}:`, err.message);
-      }
-    }
-
-    // Transitions computed once per touched station, comparing its status
-    // from before ANY write this tick to its final status after both the
-    // tbank write and (if matched) the remerge - and sent as one batch per
-    // chat, instead of notifying the moment each station is stored, since a
-    // poll that changes several stations shouldn't turn into a burst of
-    // near-simultaneous messages. Comparing before/after in two separate
-    // hops instead (previous vs tbank-raw, then tbank-raw vs merged) used to
-    // silently drop real available -> not_available transitions whenever
-    // tbank's own raw reading was 'no_data' in between (common once a
-    // station's live signal comes from a secondary source rather than
-    // tbank itself): 'no_data' is neither 'available' nor 'not_available',
-    // so neither hop's strict comparison ever saw the true
-    // available -> not_available pair - "появилось" alerts kept firing
-    // (that event only needs "wasn't available before, is now") while
-    // "пропало" alerts (which need the *exact* prior state to be
-    // 'available') silently stopped.
-    //
-    // computeTransitions also compares against confirmedFuelStatuses (see
-    // its own doc comment and Station.js's), not just the raw previous
-    // poll - so this loop persists the returned nextConfirmedFuelStatuses
-    // back onto the station right away, keeping that memory current for
-    // next tick regardless of whether this tick produced an actual
-    // transition worth alerting on.
-    const touchedIds = [...new Set([...previousByStationId.keys()])];
-    const stationEvents = [];
-    if (touchedIds.length) {
-      const finalStations = await Station.find({ _id: { $in: touchedIds } });
-      for (const station of finalStations) {
-        const previousFuelStatuses = previousByStationId.get(String(station._id)) || [];
-        const previousConfirmedFuelStatuses = previousConfirmedByStationId.get(String(station._id)) || [];
-        const { transitions, nextConfirmedFuelStatuses } = telegramNotifier.computeTransitions(
-          previousFuelStatuses,
-          previousConfirmedFuelStatuses,
-          station.lastFuelStatuses
-        );
-        station.confirmedFuelStatuses = nextConfirmedFuelStatuses;
-        await advanceOutageState(station, region, polledAt);
-        await station.save();
-        if (transitions.length) stationEvents.push({ station, transitions });
-      }
-    }
-
-    // Best-effort: a Telegram hiccup must never break ingestion.
-    try {
-      await telegramNotifier.notifyRegionChanges(region, stationEvents);
-    } catch (err) {
-      logger.error(`Telegram notify failed for region ${region.name}:`, err.message);
-    }
+    const stationEvents = await finalizeTouchedStations(previousByStationId, previousConfirmedByStationId, region, polledAt);
+    await notifyTelegram(region, stationEvents);
 
     if (skipped > 0) {
-      logger.warn(
-        `Region "${region.name}": skipped ${skipped} station(s) with unrecognized shape`
-      );
+      logger.warn(`Region "${region.name}": skipped ${skipped} station(s) with unrecognized shape`);
     }
     logger.info(`Region "${region.name}": stored ${stored} station snapshot(s)`);
     return { stationCount: stored, skipped };
   } catch (err) {
-    region.lastPolledAt = polledAt;
-    region.lastPollStatus = 'error';
-    region.lastPollError = err.message;
-    // The request itself may never have gone out (or gone out and failed) -
-    // still worth showing/copying, so an admin can try it by hand. Doesn't
-    // touch lastRawResponse: a stale-but-real previous response is more
-    // useful to keep around than wiping it because this attempt had none.
-    try {
-      region.lastRequestUrl = tbankClient.buildRequestUrl(bbox);
-    } catch {
-      // Building the URL itself shouldn't ever throw, but this must never
-      // shadow the real ingest error below if it somehow does.
-    }
-    await region.save();
-    await recordPollAttempt({ region, sourceKey: 'tbank', status: 'error', error: err.message, stationCount: 0 });
-    logger.error(`Region "${region.name}": poll failed:`, err.message);
+    await recordFailedPoll(region, polledAt, bbox, err);
     throw err;
   }
 }
