@@ -1,98 +1,81 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { regionsApi, stationsApi } from '../api/regions';
-import { metricsApi } from '../api/metrics';
 import { formatMinutes, formatPct } from '../utils/colorScale';
-import { computeStatusSegments, collapseIsolatedBlips } from '../utils/fuelStatus';
-import { renderRegionReportCard } from '../utils/regionReportCard';
-import { canCopyImageToClipboard } from '../utils/stationCard';
-import { canShareFile } from '../utils/mapExport';
 import AvailabilityRecoveryChart from '../components/AvailabilityRecoveryChart.vue';
 import AvailabilityHeatmap from '../components/AvailabilityHeatmap.vue';
 import StationHighlightCards from '../components/StationHighlightCards.vue';
 import StationsTable from '../components/StationsTable.vue';
 import StationDetailModal from '../components/StationDetailModal.vue';
-import { useAsyncAction } from '../composables/useAsyncAction';
+import { useReportPeriod } from '../composables/useReportPeriod';
+import { useReportMetrics } from '../composables/useReportMetrics';
+import { useReportSummary } from '../composables/useReportSummary';
+import { useStationDetail } from '../composables/useStationDetail';
+import { useReportCard } from '../composables/useReportCard';
 
 const route = useRoute();
 
-const regions = ref([]);
-const selectedRegionId = ref(route.query.region || '');
-const loading = ref(false);
-const errorMessage = ref('');
+// The selected date range/preset/bucket size - see useReportPeriod.js.
+// onChange (a preset click or a manual datetime-local edit) re-fetches for
+// the new range via useReportMetrics' loadMetrics below - referenced here
+// before it's declared, which is fine since onChange is only ever called
+// later (on user interaction), by which point loadMetrics already exists.
+const {
+  fromMs,
+  toMs,
+  fromIso,
+  toIso,
+  prevFromIso,
+  prevToIso,
+  bucketHours,
+  fromInput,
+  toInput,
+  activePresetHours,
+  setPreset,
+  formatRuDateTime,
+} = useReportPeriod({ onChange: () => loadMetrics() });
 
-// Station detail modal, opened from a station name in either table below.
-// The metrics endpoints that feed those tables only carry aggregate stats
-// (no lat/lon/live status/fuel breakdown), so opening the modal means
-// fetching the actual Station document and reshaping it into the same
-// snapshot-like shape MapView already passes in (status/fuelStatuses/
-// polledAt instead of the document's own lastStatus/lastFuelStatuses/
-// lastSeenAt field names).
-const detailStation = ref(null);
-const showDetailModal = ref(false);
-// Not useKeyedAsyncAction's Set - only one detail fetch is ever really in
-// flight (one click opens one modal), and the child tables' :loading-
-// station-id prop wants the specific id, not a has()-checkable collection.
-const detailLoadingId = ref(null);
-const { error: detailError, run: runOpenDetail } = useAsyncAction();
+// Region list/selection and the actual metrics fetch for the period above -
+// see useReportMetrics.js. onBeforeLoad similarly forward-references
+// reportCard.resetReportCard, constructed further below.
+const {
+  regions,
+  selectedRegionId,
+  selectedRegion,
+  loading,
+  errorMessage,
+  trendBuckets,
+  forecastBuckets,
+  forecastDirection,
+  stations,
+  previousStations,
+  heatmapCells,
+  recoveryTrendBuckets,
+  sectionErrors,
+  loadRegions,
+  loadMetrics,
+} = useReportMetrics({
+  fromIso,
+  toIso,
+  prevFromIso,
+  prevToIso,
+  bucketHours,
+  initialRegionId: route.query.region || '',
+  onBeforeLoad: () => resetReportCard(),
+});
 
-async function openStationDetail(stationId) {
-  detailLoadingId.value = stationId;
-  const doc = await runOpenDetail(() => stationsApi.get(stationId), { fallbackMessage: 'Не удалось загрузить данные станции' });
-  detailLoadingId.value = null;
-  if (doc) {
-    detailStation.value = {
-      stationId: doc._id,
-      name: doc.name,
-      address: doc.address,
-      lat: doc.lat,
-      lon: doc.lon,
-      status: doc.lastStatus,
-      fuelStatuses: doc.lastFuelStatuses || [],
-      overallLastTransactionAt: doc.overallLastTransactionAt,
-      polledAt: doc.lastSeenAt,
-    };
-    showDetailModal.value = true;
-  }
-}
+// The KPI cards' weighted-average summary (this period + previous, for the
+// delta lines) - see useReportSummary.js.
+const {
+  summary,
+  availabilityDelta,
+  outagesDelta,
+  recoveryDelta,
+  formatSignedPct,
+  formatSignedMinutes,
+  formatSignedCount,
+} = useReportSummary({ stations, previousStations });
 
-function closeDetailModal() {
-  showDetailModal.value = false;
-}
-
-const now = Date.now();
-const fromMs = ref(now - 7 * 24 * 60 * 60 * 1000);
-const toMs = ref(now);
-// Exposed as their own computed properties (not just local vars inside
-// loadMetrics) so the template can pass the page's actual selected period
-// down to StationHighlightCards' ribbons too - those used to always show a
-// fixed last-7-days regardless of what period was picked here.
-const fromIso = computed(() => new Date(fromMs.value).toISOString());
-const toIso = computed(() => new Date(toMs.value).toISOString());
-// The period immediately preceding the selected one, same length - lets the
-// KPI cards show "+3% vs previous period" instead of a bare number with no
-// sense of whether that's an improvement. Same length both sides so the
-// comparison is apples-to-apples (a 90-day count of outages is naturally
-// bigger than a 7-day one regardless of any real trend).
-const prevFromIso = computed(() => new Date(2 * fromMs.value - toMs.value).toISOString());
-const prevToIso = computed(() => fromIso.value);
-// Single source of truth for the period's chosen bucket size - loadMetrics
-// uses it for every bucketed API call, AvailabilityRecoveryChart.vue's own
-// recovery-trend tooltip and hint text use it to phrase "за день"/"за
-// неделю" instead of guessing independently (see bucketPeriodLabel's own
-// doc comment).
-const bucketHours = computed(() => pickBucketHours(toMs.value - fromMs.value));
-
-const trendBuckets = ref([]);
-const forecastBuckets = ref([]);
-const forecastDirection = ref('unknown');
-const stations = ref([]);
-// Previous-period stations, fetched purely to compute previousSummary below
-// (see summary's own delta computeds) - never rendered as its own table/list.
-const previousStations = ref([]);
-const heatmapCells = ref([]);
-const recoveryTrendBuckets = ref([]);
 const stationsSort = ref('best');
 // Reported live: the full ~100-row stations table used to always render
 // inline, pushing the share-card section (and anyone who just wants to
@@ -103,167 +86,6 @@ const stationsSort = ref('best');
 // to scroll past every time. v-if (not v-show) below so the ~100-row
 // sort/search table isn't even built until someone actually opens it.
 const stationsTableOpen = ref(false);
-
-const sectionErrors = ref({
-  trend: '',
-  forecast: '',
-  stations: '',
-  heatmap: '',
-  recoveryTrend: '',
-});
-
-function msToLocalInputValue(ms) {
-  const d = new Date(ms);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// A native <input type="datetime-local"> renders its own displayed text in
-// whatever format the visitor's OS locale gives Chromium - confirmed live,
-// that's US-style "MM/DD/YYYY, hh:mm AM/PM" even with the page (and even an
-// explicit Playwright browser-context locale) set to ru-RU, since it's tied
-// to the OS itself, something this app has no way to override. On a
-// Russian-language page that reads as ambiguous at best ("09/05" - which is
-// the month?) - this plain-text echo underneath is always formatted the
-// same way regardless of the visitor's own OS, so there's at least one
-// unambiguous confirmation of what's actually selected.
-function formatRuDateTime(ms) {
-  return new Date(ms).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-const fromInput = computed({
-  get: () => msToLocalInputValue(fromMs.value),
-  set: (v) => {
-    const parsed = new Date(v).getTime();
-    if (Number.isFinite(parsed)) {
-      fromMs.value = parsed;
-      loadMetrics();
-    }
-  },
-});
-const toInput = computed({
-  get: () => msToLocalInputValue(toMs.value),
-  set: (v) => {
-    const parsed = new Date(v).getTime();
-    if (Number.isFinite(parsed)) {
-      toMs.value = parsed;
-      loadMetrics();
-    }
-  },
-});
-
-function setPreset(hours) {
-  toMs.value = Date.now();
-  fromMs.value = toMs.value - hours * 60 * 60 * 1000;
-  loadMetrics();
-}
-
-// Reported live: with all four preset buttons always the same gray, there
-// was no way to tell at a glance whether "24ч"/"7д"/"30д"/"90д" (or none of
-// them - a manually-typed custom range) was actually the period currently
-// shown below. Compares the *selected span*, not just from/to against
-// "now" - the datetime-local inputs stay editable/pickable independently of
-// these buttons, so an active button reflects "this is a preset-sized
-// range" rather than tracking which control was last touched. A small
-// tolerance (not exact equality) covers datetime-local's own minute-only
-// precision: typing exactly one of these spans in by hand still lights up
-// the matching button instead of silently falling through to "custom".
-const PRESET_HOURS = [24, 24 * 7, 24 * 30, 24 * 90];
-const activePresetHours = computed(() => {
-  const spanHours = (toMs.value - fromMs.value) / 3600000;
-  return PRESET_HOURS.find((h) => Math.abs(spanHours - h) < 1 / 30) ?? null; // ~2 min tolerance
-});
-
-// Daily threshold raised from 14 to 90 days - at 14, a 30-day report (the
-// widest preset button) fell into weekly buckets and rendered as ~5 points,
-// most of the "Динамика доступности" chart empty past that. Chart.js
-// already auto-thins x-axis labels regardless of point count (see
-// AvailabilityRecoveryChart.vue), so 90 daily points renders fine - no need
-// for a fancier adaptive scheme, just moving the cliff somewhere the
-// still-fixed 30/7/90 preset buttons don't land right on top of it.
-function pickBucketHours(spanMs) {
-  const spanHours = spanMs / 3600000;
-  if (spanHours <= 48) return 1;
-  if (spanHours <= 24 * 90) return 24;
-  return 24 * 7;
-}
-
-// Shared by summary/previousSummary below so the two can't quietly drift
-// apart on how they weight/aggregate - previousSummary exists purely to
-// diff against, so it has to be computed exactly the same way.
-function summarize(stationList) {
-  let weightedAvailable = 0;
-  let weightForAvailable = 0;
-  let weightedRecovery = 0;
-  let outagesForRecovery = 0;
-  let totalOutages = 0;
-
-  for (const s of stationList) {
-    if (s.availablePct !== null) {
-      weightedAvailable += s.availablePct * s.totalPolls;
-      weightForAvailable += s.totalPolls;
-    }
-    totalOutages += s.outageCount;
-    if (s.avgOutageMinutes !== null) {
-      weightedRecovery += s.avgOutageMinutes * s.outageCount;
-      outagesForRecovery += s.outageCount;
-    }
-  }
-
-  return {
-    stationCount: stationList.length,
-    overallAvailablePct: weightForAvailable > 0 ? weightedAvailable / weightForAvailable : null,
-    totalOutages,
-    avgRecoveryMinutes: outagesForRecovery > 0 ? weightedRecovery / outagesForRecovery : null,
-  };
-}
-
-const summary = computed(() => summarize(stations.value));
-// Only ever read for the KPI cards' own delta line below - not otherwise
-// exposed (no "previous period" table/section of its own).
-const previousSummary = computed(() => summarize(previousStations.value));
-
-// null when either side has no comparable data (a period with zero known
-// polls, or the previous period predating the region's own history) - the
-// KPI card simply omits its delta line in that case rather than showing a
-// misleading comparison against nothing.
-const availabilityDelta = computed(() => {
-  if (summary.value.overallAvailablePct === null || previousSummary.value.overallAvailablePct === null) return null;
-  return summary.value.overallAvailablePct - previousSummary.value.overallAvailablePct;
-});
-const outagesDelta = computed(() => {
-  if (!previousStations.value.length) return null;
-  return summary.value.totalOutages - previousSummary.value.totalOutages;
-});
-const recoveryDelta = computed(() => {
-  if (summary.value.avgRecoveryMinutes === null || previousSummary.value.avgRecoveryMinutes === null) return null;
-  return summary.value.avgRecoveryMinutes - previousSummary.value.avgRecoveryMinutes;
-});
-
-// formatPct/formatMinutes both size their unit to the *magnitude* of the
-// number (60+ minutes becomes "X.X ч", not "60+ мин") - correct for a plain
-// reading, but applied directly to a *signed* delta it breaks for a
-// negative-but-large one (formatMinutes(-130) reads "minutes < 60" as true
-// and prints "-130 мин" instead of "-2.2 ч"). Formatting the magnitude and
-// prepending the sign here keeps the same unit-scaling these deltas'
-// non-delta siblings already use.
-function formatSignedPct(delta) {
-  const sign = delta > 0 ? '+' : delta < 0 ? '-' : '';
-  return `${sign}${formatPct(Math.abs(delta))}`;
-}
-function formatSignedMinutes(delta) {
-  const sign = delta > 0 ? '+' : delta < 0 ? '-' : '';
-  return `${sign}${formatMinutes(Math.abs(delta))}`;
-}
-function formatSignedCount(delta) {
-  return delta > 0 ? `+${delta}` : `${delta}`;
-}
 
 // Sorted/selected by rankScore (shrunk toward the region's own rate, so a
 // station with barely any evidence this period can't win "лучшая"/"худшая"
@@ -281,219 +103,39 @@ const highlightedStations = computed(() => {
     .slice(0, 5);
 });
 
-const selectedRegion = computed(() => regions.value.find((r) => r._id === selectedRegionId.value) || null);
-
 // Shareable report card - client-side canvas, same approach and UI pattern
 // (generate -> preview -> copy/download/share) as the station card in
-// StationDetailModal.vue.
-const cardUrl = ref(null);
-const copyFeedback = ref('');
-// Shared across generateReportCard/copyReportCardToClipboard/shareReportCard
-// below - see StationDetailModal.vue's identical grouping/rationale for its
-// own card flow.
-const { loading: cardGenerating, error: cardError, run: runCard } = useAsyncAction();
-const clipboardSupported = canCopyImageToClipboard();
-let cardBlob = null;
-let cardFile = null;
-const canShareCard = computed(() => !!cardFile && canShareFile(cardFile));
+// StationDetailModal.vue. See useReportCard.js.
+const {
+  cardUrl,
+  copyFeedback,
+  cardGenerating,
+  cardError,
+  clipboardSupported,
+  canShareCard,
+  resetReportCard,
+  generateReportCard,
+  copyReportCardToClipboard,
+  shareReportCard,
+} = useReportCard({
+  selectedRegion,
+  fromMs,
+  toMs,
+  fromIso,
+  toIso,
+  summary,
+  trendBuckets,
+  forecastBuckets,
+  recoveryTrendBuckets,
+  forecastDirection,
+  highlightedStations,
+  stationsSort,
+});
 
-function resetReportCard() {
-  if (cardUrl.value) {
-    URL.revokeObjectURL(cardUrl.value);
-    cardUrl.value = null;
-  }
-  cardBlob = null;
-  cardFile = null;
-  cardError.value = '';
-  copyFeedback.value = '';
-}
-
-async function generateReportCard() {
-  copyFeedback.value = '';
-  await runCard(
-    async () => {
-      const topStationsBase = highlightedStations.value.slice(0, 3);
-      // Best-of (default CORE_FUEL_TYPES) ribbon per top station, same real
-      // segments (not bucketed) StationReliabilityTimeline.vue itself draws -
-      // fetched here rather than inside regionReportCard.js since that file
-      // is a pure Canvas layout function with no API access of its own (same
-      // pattern generateCard() in StationDetailModal.vue already follows for
-      // its own card's history). Only 3 stations, so 3 parallel fetches.
-      const historyResults = await Promise.allSettled(
-        topStationsBase.map((s) => stationsApi.history(s.stationId, { from: fromIso.value, to: toIso.value, limit: 5000 }))
-      );
-      const topStations = topStationsBase.map((s, i) => {
-        const result = historyResults[i];
-        const history = result.status === 'fulfilled' ? result.value : [];
-        const ribbon = history.length ? collapseIsolatedBlips(computeStatusSegments(history)) : [];
-        return {
-          ...s,
-          ribbon,
-          ribbonRangeStart: history.length ? history[0].polledAt : null,
-          ribbonRangeEnd: history.length ? history[history.length - 1].polledAt : null,
-        };
-      });
-
-      const blob = await renderRegionReportCard({
-        region: selectedRegion.value || { name: 'Район' },
-        from: fromMs.value,
-        to: toMs.value,
-        summary: summary.value,
-        trendBuckets: trendBuckets.value,
-        forecastBuckets: forecastBuckets.value,
-        recoveryTrendBuckets: recoveryTrendBuckets.value,
-        direction: forecastDirection.value,
-        topStations,
-        stationsLabel: stationsSort.value === 'best' ? 'Лучшие станции' : 'Худшие станции',
-      });
-      if (cardUrl.value) URL.revokeObjectURL(cardUrl.value);
-      cardBlob = blob;
-      cardUrl.value = URL.createObjectURL(blob);
-      const safeName = (selectedRegion.value?.name || 'region').replace(/[^\p{L}\p{N}]+/gu, '-');
-      cardFile = new File([blob], `${safeName}-report.png`, { type: 'image/png' });
-    },
-    { formatError: (err) => `Не удалось создать картинку: ${err.message || 'неизвестная ошибка'}` }
-  );
-}
-
-async function copyReportCardToClipboard() {
-  if (!cardBlob) return;
-  copyFeedback.value = '';
-  const result = await runCard(() => navigator.clipboard.write([new ClipboardItem({ 'image/png': cardBlob })]), {
-    formatError: (err) => `Не удалось скопировать: ${err.message || 'неизвестная ошибка'}`,
-  });
-  copyFeedback.value = result !== undefined ? 'ok' : 'error';
-}
-
-async function shareReportCard() {
-  if (!cardFile) return;
-  await runCard(
-    () => navigator.share({ files: [cardFile], title: `Отчёт: ${selectedRegion.value?.name || 'Район'}` }),
-    {
-      formatError: (err) => (err.name === 'AbortError' ? null : `Не удалось поделиться: ${err.message || 'неизвестная ошибка'}`),
-    }
-  );
-}
-
-async function loadRegions() {
-  try {
-    regions.value = await regionsApi.list();
-    if (!selectedRegionId.value && regions.value.length) {
-      selectedRegionId.value = regions.value[0]._id;
-    }
-  } catch (err) {
-    errorMessage.value = err.response?.data?.error || 'Не удалось загрузить список районов';
-  }
-}
-
-function describeFailure(result) {
-  return result.reason?.response?.data?.error || result.reason?.message || 'Не удалось загрузить';
-}
-
-// Each metric endpoint is independent - one failing (or returning slowly)
-// must not blank out the others. Promise.all would reject as a whole and
-// silently leave every section showing stale data from the previous period
-// with no indication anything went wrong; Promise.allSettled lets each
-// section update (or report its own error) on its own.
-//
-// `requestToken` guards against a *slower older* call clobbering a *faster
-// newer* one - loadMetrics is re-triggered on region change, every preset
-// button, and every custom date edit, with no cancellation between calls.
-// Reported live: clicking a period preset shortly after the page's own
-// initial (default 7-day) load could still have that first call in flight;
-// whichever of the two happened to resolve *last* won the final
-// trendBuckets/recoveryTrendBuckets assignment regardless of which was
-// requested more recently - the generated report card then showed the
-// correct header/KPI/station-ribbon dates (those come from fresh reads at
-// generate time) next to trend/recovery charts still drawing the stale
-// period, reading as a jumble of mismatched dates on one image. Each call
-// captures its own token; a call whose token no longer matches the module-
-// level counter by the time its requests settle was superseded and skips
-// applying its (now-stale) results entirely.
-let requestToken = 0;
-
-async function loadMetrics() {
-  if (!selectedRegionId.value) return;
-  const myToken = ++requestToken;
-  loading.value = true;
-  errorMessage.value = '';
-  // A stale preview from a previous region/period would be misleading once
-  // the underlying data has moved on.
-  resetReportCard();
-
-  const regionId = selectedRegionId.value;
-  const from = fromIso.value;
-  const to = toIso.value;
-  const prevFrom = prevFromIso.value;
-  const prevTo = prevToIso.value;
-
-  const [trendResult, forecastResult, stationsResult, heatmapResult, recoveryTrendResult, previousStationsResult] =
-    await Promise.allSettled([
-      metricsApi.trend(regionId, { from, to, bucketHours: bucketHours.value }),
-      metricsApi.trendForecast(regionId, { from, to, bucketHours: bucketHours.value }),
-      metricsApi.stations(regionId, { from, to }),
-      metricsApi.heatmap(regionId, { from, to }),
-      metricsApi.recoveryTrend(regionId, { from, to, bucketHours: bucketHours.value }),
-      // Purely for the KPI cards' own "vs previous period" delta - a
-      // failure here shouldn't surface as a visible page error for what's a
-      // secondary, non-essential comparison; previousStations just stays
-      // empty and the delta lines quietly don't render (see
-      // availabilityDelta/outagesDelta/recoveryDelta's own null-guards).
-      metricsApi.stations(regionId, { from: prevFrom, to: prevTo }),
-    ]);
-
-  if (myToken !== requestToken) return; // superseded by a newer call - discard
-
-  if (trendResult.status === 'fulfilled') {
-    trendBuckets.value = trendResult.value.buckets;
-    sectionErrors.value.trend = '';
-  } else {
-    trendBuckets.value = [];
-    sectionErrors.value.trend = describeFailure(trendResult);
-  }
-
-  if (forecastResult.status === 'fulfilled') {
-    forecastBuckets.value = forecastResult.value.forecast;
-    forecastDirection.value = forecastResult.value.direction;
-    sectionErrors.value.forecast = '';
-  } else {
-    forecastBuckets.value = [];
-    forecastDirection.value = 'unknown';
-    sectionErrors.value.forecast = describeFailure(forecastResult);
-  }
-
-  if (stationsResult.status === 'fulfilled') {
-    stations.value = stationsResult.value.stations;
-    sectionErrors.value.stations = '';
-  } else {
-    stations.value = [];
-    sectionErrors.value.stations = describeFailure(stationsResult);
-  }
-
-  if (heatmapResult.status === 'fulfilled') {
-    heatmapCells.value = heatmapResult.value.cells;
-    sectionErrors.value.heatmap = '';
-  } else {
-    heatmapCells.value = [];
-    sectionErrors.value.heatmap = describeFailure(heatmapResult);
-  }
-
-  if (recoveryTrendResult.status === 'fulfilled') {
-    recoveryTrendBuckets.value = recoveryTrendResult.value.buckets;
-    sectionErrors.value.recoveryTrend = '';
-  } else {
-    recoveryTrendBuckets.value = [];
-    sectionErrors.value.recoveryTrend = describeFailure(recoveryTrendResult);
-  }
-
-  previousStations.value = previousStationsResult.status === 'fulfilled' ? previousStationsResult.value.stations : [];
-
-  loading.value = false;
-}
-
-async function handleRegionChange() {
-  await loadMetrics();
-}
+// Station detail modal, opened from a station name in either table below -
+// see useStationDetail.js.
+const { detailStation, showDetailModal, detailLoadingId, detailError, openStationDetail, closeDetailModal } =
+  useStationDetail();
 
 onMounted(async () => {
   await loadRegions();
@@ -510,7 +152,7 @@ onMounted(async () => {
     <div class="controls card">
       <div class="form-row region-select">
         <label>Район</label>
-        <select v-if="regions.length" v-model="selectedRegionId" @change="handleRegionChange">
+        <select v-if="regions.length" v-model="selectedRegionId" @change="loadMetrics">
           <option v-for="r in regions" :key="r._id" :value="r._id">{{ r.name }}</option>
         </select>
         <div v-else class="skeleton skeleton-select" aria-hidden="true"></div>
