@@ -48,6 +48,25 @@ let recoveryChart = null;
 // forecast slots on either chart, or the historical-only series once
 // hovering into the forecast region) are left out of the active set rather
 // than showing an empty tooltip row for them.
+// Shared by both render*Chart functions below - each builds its own history
+// series (trendBuckets vs recoveryBuckets) against the same forecastBuckets,
+// so the labels array (history + "(прогноз)"-suffixed forecast slots) was
+// duplicated between them.
+function buildLabels(historyBuckets, forecastBuckets) {
+  return [
+    ...historyBuckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU')),
+    ...forecastBuckets.map((b) => `${new Date(b.bucketStart).toLocaleString('ru-RU')} (прогноз)`),
+  ];
+}
+
+// Trailing null slots reserve space for the forecast region on a dataset
+// that has none of its own (every series here except the dashed forecast
+// line itself) - keeps every dataset's data array the same length as
+// buildLabels' shared labels array above.
+function pad(values, forecastLen) {
+  return [...values, ...new Array(forecastLen).fill(null)];
+}
+
 function setSyncedIndex(chart, index) {
   if (!chart) return;
   const active =
@@ -86,17 +105,12 @@ function renderTrendChart() {
   const histLen = props.trendBuckets.length;
   const forecastLen = props.forecastBuckets.length;
 
-  const labels = [
-    ...props.trendBuckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU')),
-    ...props.forecastBuckets.map((b) => `${new Date(b.bucketStart).toLocaleString('ru-RU')} (прогноз)`),
-  ];
-
-  const pad = (values) => [...values, ...new Array(forecastLen).fill(null)];
+  const labels = buildLabels(props.trendBuckets, props.forecastBuckets);
 
   const datasets = [
     {
       label: 'Доступно',
-      data: pad(props.trendBuckets.map((b) => b.availablePct)),
+      data: pad(props.trendBuckets.map((b) => b.availablePct), forecastLen),
       borderColor: '#16a34a',
       backgroundColor: 'rgba(22, 163, 74, 0.35)',
       fill: true,
@@ -106,7 +120,7 @@ function renderTrendChart() {
     },
     {
       label: 'Возможно доступно',
-      data: pad(props.trendBuckets.map((b) => b.maybeAvailablePct)),
+      data: pad(props.trendBuckets.map((b) => b.maybeAvailablePct), forecastLen),
       borderColor: '#d97706',
       backgroundColor: 'rgba(217, 119, 6, 0.3)',
       fill: true,
@@ -116,7 +130,7 @@ function renderTrendChart() {
     },
     {
       label: 'Недоступно',
-      data: pad(props.trendBuckets.map((b) => b.notAvailablePct)),
+      data: pad(props.trendBuckets.map((b) => b.notAvailablePct), forecastLen),
       borderColor: '#dc2626',
       backgroundColor: 'rgba(220, 38, 38, 0.3)',
       fill: true,
@@ -180,14 +194,11 @@ function renderRecoveryChart() {
   // same length - see metricsService.js's getSnapshotDataBounds doc comment
   // for the fuller alignment story this is one half of.
   const histLen = props.recoveryBuckets.length;
-  const labels = [
-    ...props.recoveryBuckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU')),
-    ...props.forecastBuckets.map((b) => `${new Date(b.bucketStart).toLocaleString('ru-RU')} (прогноз)`),
-  ];
-  const data = [
-    ...props.recoveryBuckets.map((b) => b.avgRecoveryMinutes),
-    ...new Array(props.forecastBuckets.length).fill(null),
-  ];
+  const labels = buildLabels(props.recoveryBuckets, props.forecastBuckets);
+  const data = pad(
+    props.recoveryBuckets.map((b) => b.avgRecoveryMinutes),
+    props.forecastBuckets.length
+  );
 
   if (recoveryChart) recoveryChart.destroy();
   recoveryChart = new Chart(recoveryCanvasRef.value, {

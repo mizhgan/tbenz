@@ -1,5 +1,13 @@
 import http from './http';
 
+// Shared by StationMatchingView.vue and StationSourcesModal.vue's own
+// confirm() before calling unmatch below - both used to carry their own
+// hand-typed copy of this text, which had quietly drifted apart (one said
+// "Объединённые данные", the other "Исторические данные") since nothing
+// forced them to stay in sync. One string instead of two copies.
+export const UNMATCH_CONFIRM_TEXT =
+  'Отменить сопоставление? Объединённые данные останутся в истории, новые опросы перестанут объединяться.';
+
 // Parameterized by sourceKey (see the backend's services/sourceRegistry.js)
 // instead of being hardcoded to gdebenz - matches backend/src/routes/
 // stationMatching.routes.js's :sourceKey-prefixed routes.

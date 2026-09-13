@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import L from 'leaflet';
 import { stationsApi } from '../api/regions';
-import { stationMatchingApi } from '../api/stationMatching';
+import { stationMatchingApi, UNMATCH_CONFIRM_TEXT } from '../api/stationMatching';
 import { statusMeta, fuelTypeLabel, formatRelativeAge } from '../utils/fuelStatus';
 import { useSourceFuelRows } from '../composables/useSourceFuelRows';
 import { useAsyncAction } from '../composables/useAsyncAction';
@@ -243,7 +243,7 @@ async function handleMatch(secondaryId) {
 
 async function handleUnmatch() {
   if (!matchedSource.value) return;
-  if (!confirm('Отменить сопоставление? Исторические данные останутся, новые опросы перестанут объединяться.')) return;
+  if (!confirm(UNMATCH_CONFIRM_TEXT)) return;
   const result = await runAction(() => stationMatchingApi.unmatch(SOURCE_KEY, matchedSource.value.id), {
     fallbackMessage: 'Не удалось отменить сопоставление',
   });

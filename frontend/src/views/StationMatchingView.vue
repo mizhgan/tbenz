@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { stationMatchingApi } from '../api/stationMatching';
+import { stationMatchingApi, UNMATCH_CONFIRM_TEXT } from '../api/stationMatching';
 import { statusMeta, fuelTypeLabel } from '../utils/fuelStatus';
 import { useKeyedAsyncAction } from '../composables/useAsyncAction';
 
@@ -127,7 +127,7 @@ async function handleIgnore(secondaryId) {
 }
 
 async function handleUnmatch(secondaryId) {
-  if (!confirm('Отменить сопоставление? Объединённые данные останутся в истории, новые опросы перестанут объединяться.')) return;
+  if (!confirm(UNMATCH_CONFIRM_TEXT)) return;
   const idx = matched.value.findIndex((g) => g.id === secondaryId);
   const removed = idx !== -1 ? matched.value.splice(idx, 1)[0] : null;
   const result = await runAction(
