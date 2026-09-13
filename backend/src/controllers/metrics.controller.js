@@ -1,6 +1,6 @@
-const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const { HttpError } = require('../middleware/errorHandler');
+const parseObjectIdParam = require('../utils/parseObjectIdParam');
 const metricsService = require('../services/metricsService');
 const { getRegionTrendForecast } = require('../services/forecastService');
 const { parseRange: parseRangeShared, MAX_SAFE_RANGE_MS } = require('../utils/dateRange');
@@ -32,7 +32,7 @@ function parseBucketHours(query) {
 const METRICS_MAX_AGE = 'public, max-age=300';
 
 const getTrend = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const { from, to } = parseRange(req.query);
   const bucketHours = parseBucketHours(req.query);
   const tz = req.query.tz || undefined;
@@ -42,7 +42,7 @@ const getTrend = asyncHandler(async (req, res) => {
 });
 
 const getStations = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const { from, to } = parseRange(req.query);
   const stations = await metricsService.getStationMetrics(regionId, { from, to });
   res.set('Cache-Control', METRICS_MAX_AGE);
@@ -50,7 +50,7 @@ const getStations = asyncHandler(async (req, res) => {
 });
 
 const getHeatmap = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const { from, to } = parseRange(req.query);
   const tz = req.query.tz || undefined;
   const cells = await metricsService.getHeatmap(regionId, { from, to, tz });
@@ -59,7 +59,7 @@ const getHeatmap = asyncHandler(async (req, res) => {
 });
 
 const getRecoveryTrend = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const { from, to } = parseRange(req.query);
   const bucketHours = parseBucketHours(req.query);
   const buckets = await metricsService.getRecoveryTrend(regionId, { from, to, bucketHours });
@@ -68,7 +68,7 @@ const getRecoveryTrend = asyncHandler(async (req, res) => {
 });
 
 const getTrendForecast = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const { from, to } = parseRange(req.query);
   const bucketHours = parseBucketHours(req.query);
   const tz = req.query.tz || undefined;

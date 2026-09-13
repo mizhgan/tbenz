@@ -1,6 +1,6 @@
-const mongoose = require('mongoose');
 const asyncHandler = require('../utils/asyncHandler');
 const { HttpError } = require('../middleware/errorHandler');
+const parseObjectIdParam = require('../utils/parseObjectIdParam');
 const Region = require('../models/Region');
 const Station = require('../models/Station');
 const StationSnapshot = require('../models/StationSnapshot');
@@ -189,7 +189,7 @@ const getRawResponse = asyncHandler(async (req, res) => {
 });
 
 const getHistoryRange = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const [range] = await StationSnapshot.aggregate([
     { $match: { region: regionId } },
     { $group: { _id: null, min: { $min: '$polledAt' }, max: { $max: '$polledAt' } } },
@@ -203,7 +203,7 @@ const getHistoryRange = asyncHandler(async (req, res) => {
 // useful for building an animation from real data instead of interpolating
 // at arbitrary evenly-spaced timestamps.
 const getSnapshotTimes = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
   const match = { region: regionId };
   if (req.query.from || req.query.to) {
     match.polledAt = {};
@@ -218,7 +218,7 @@ const getSnapshotTimes = asyncHandler(async (req, res) => {
 const LIVE_SNAPSHOT_BUCKET_MS = 60 * 1000;
 
 const getRegionSnapshot = asyncHandler(async (req, res) => {
-  const regionId = new mongoose.Types.ObjectId(req.params.id);
+  const regionId = parseObjectIdParam(req, 'id');
 
   let at;
   if (req.query.at) {

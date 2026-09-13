@@ -538,7 +538,6 @@ async function getRegionTrendForecast(regionId, { from, to, bucketHours = 24, bu
 
 module.exports = {
   getStationForecast,
-  getStationForecastUncached,
   getRegionTrendForecast,
   getBulkHourlyProfiles,
   getStationHourProfile,
@@ -548,6 +547,5 @@ module.exports = {
   blendHourForecast,
   currentCoreStatusToPct,
   linearRegression,
-  isoWeekdayAndHour,
   resolveBucketsAhead,
 };
