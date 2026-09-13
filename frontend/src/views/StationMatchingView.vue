@@ -19,6 +19,12 @@ const { busyIds, error: actionError, run: runAction } = useKeyedAsyncAction();
 
 const searchQuery = ref('');
 const onlyWithCandidates = ref(false);
+// The confirmed-matches table had no search at all, unlike the unmatched
+// queue right above it (filteredUnmatched below) - the same gap the
+// reports page's own stations table had before it got one. Matches on
+// either side of the pairing (the source's own name/address, or the
+// tbank station it's matched to) since a lookup might start from either.
+const matchedSearchQuery = ref('');
 
 // Guards against a slower/older call's response landing after and
 // overwriting a faster/newer one's - loadAll is re-triggered by mount and
@@ -76,6 +82,18 @@ const filteredUnmatched = computed(() => {
     list = list.filter((g) => g.suggestions.length > 0);
   }
   return [...list].sort((a, b) => (a.suggestions.length > 0 ? 0 : 1) - (b.suggestions.length > 0 ? 0 : 1));
+});
+
+const filteredMatched = computed(() => {
+  const q = matchedSearchQuery.value.trim().toLowerCase();
+  if (!q) return matched.value;
+  return matched.value.filter(
+    (g) =>
+      (g.name || '').toLowerCase().includes(q) ||
+      (g.address || '').toLowerCase().includes(q) ||
+      (g.station?.name || '').toLowerCase().includes(q) ||
+      (g.station?.address || '').toLowerCase().includes(q)
+  );
 });
 
 // Every action below updates local state immediately instead of reloading
@@ -137,6 +155,7 @@ const selectedSourceLabel = computed(
 
 async function handleSourceChange() {
   searchQuery.value = '';
+  matchedSearchQuery.value = '';
   await loadAll();
 }
 
@@ -246,51 +265,62 @@ onMounted(loadSourcesAndAll);
       </div>
 
       <div class="card section">
-        <h2>Подтверждённые сопоставления ({{ matched.length }})</h2>
-        <p v-if="!matched.length" class="hint">Пока ни одна станция не сопоставлена.</p>
-        <div v-else class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{{ selectedSourceLabel || 'Источник' }}</th>
-                <th>Станция tbank</th>
-                <th>Статус станции (объединённый)</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="g in matched" :key="g.id">
-                <td>
-                  {{ g.name || 'Без названия' }}
-                  <div class="hint small">{{ g.address }}</div>
-                </td>
-                <td>
-                  <template v-if="g.station">
-                    {{ g.station.name || 'АЗС' }}
-                    <div class="hint small">{{ g.station.address }}</div>
-                  </template>
-                  <span v-else class="hint small">станция удалена</span>
-                </td>
-                <td>
-                  <template v-if="g.station">
-                    <span class="badge-dot" :style="{ background: statusMeta(g.station.lastStatus).color }"></span>
-                    {{ statusMeta(g.station.lastStatus).label }}
-                  </template>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    class="btn secondary"
-                    :disabled="busyIds.has(g.id)"
-                    @click="handleUnmatch(g.id)"
-                  >
-                    Отменить сопоставление
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="section-header">
+          <h2>Подтверждённые сопоставления ({{ matched.length }})</h2>
+          <div class="filters" v-if="matched.length">
+            <input v-model="matchedSearchQuery" type="text" placeholder="Поиск по названию/адресу" />
+          </div>
         </div>
+        <p v-if="!matched.length" class="hint">Пока ни одна станция не сопоставлена.</p>
+        <template v-else>
+          <p v-if="!filteredMatched.length" class="hint">Ничего не найдено по этому фильтру.</p>
+          <p v-else-if="filteredMatched.length !== matched.length" class="hint small">
+            Показано {{ filteredMatched.length }} из {{ matched.length }}.
+          </p>
+          <div v-if="filteredMatched.length" class="table-wrap scroll-shadow-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>{{ selectedSourceLabel || 'Источник' }}</th>
+                  <th>Станция tbank</th>
+                  <th>Статус станции (объединённый)</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="g in filteredMatched" :key="g.id">
+                  <td>
+                    {{ g.name || 'Без названия' }}
+                    <div class="hint small">{{ g.address }}</div>
+                  </td>
+                  <td>
+                    <template v-if="g.station">
+                      {{ g.station.name || 'АЗС' }}
+                      <div class="hint small">{{ g.station.address }}</div>
+                    </template>
+                    <span v-else class="hint small">станция удалена</span>
+                  </td>
+                  <td>
+                    <template v-if="g.station">
+                      <span class="badge-dot" :style="{ background: statusMeta(g.station.lastStatus).color }"></span>
+                      {{ statusMeta(g.station.lastStatus).label }}
+                    </template>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn secondary"
+                      :disabled="busyIds.has(g.id)"
+                      @click="handleUnmatch(g.id)"
+                    >
+                      Отменить сопоставление
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
     </template>
   </div>

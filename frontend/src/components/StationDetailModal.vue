@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
         <template v-else-if="sourceDoc">
           <p v-if="!sourceDoc.sources.length" class="hint small">Второй источник не сопоставлен.</p>
 
-          <div class="table-wrap">
+          <div class="table-wrap scroll-shadow-x">
             <table class="fuel-table">
               <thead>
                 <tr>

@@ -220,7 +220,7 @@ onBeforeUnmount(() => {
     <div class="card">
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="!regions.length">Пока нет ни одного района. Добавьте первый.</p>
-      <div v-else class="table-wrap">
+      <div v-else class="table-wrap scroll-shadow-x">
         <table>
           <thead>
             <tr>
@@ -364,11 +364,20 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #f1f5f9;
 }
 
+/* Was a straight flex-nowrap row (plus white-space: nowrap on top) - label,
+   status badge, optional warn badge, stats hint and 3 link-buttons all
+   fighting to stay on one line made this the single widest thing on the
+   page, forcing .table-wrap's own horizontal scroll range far past what
+   every other column needed. A max-width (roomy on desktop, where this
+   rarely even approaches it; a real constraint on a narrow viewport)
+   forces the row to actually wrap onto 2-3 lines instead of just
+   overflowing sideways. */
 .source-status-line {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  white-space: nowrap;
+  max-width: min(70vw, 480px);
 }
 
 .hint.small {

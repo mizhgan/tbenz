@@ -262,6 +262,48 @@ th {
   font-weight: 600;
 }
 
+/* CSS-only "scroll shadow": a fade only shows at whichever edge still has
+   more horizontally-scrollable content, no JS. background-attachment:
+   local scrolls the two solid-to-transparent fade layers WITH the
+   content (so once fully scrolled to an edge, that edge's own fade
+   scrolls off past it and disappears); :scroll pins the two darker
+   edge-shadow layers to the *viewport* edge so they stay visible as long
+   as any fade layer is still in view on that side. Originated on
+   AvailabilityHeatmap.vue/StationsTable.vue (reports page), then rolled
+   out app-wide to every other horizontally-scrolling table - promoted
+   here as one shared class instead of copy-pasting this block into every
+   .table-wrap, since the colors must match .card's own background
+   exactly (a mismatch shows as a visible seam) and that's one invariant
+   worth keeping in one place, not N.
+   Apply directly to whichever element has `overflow-x: auto` and the
+   actual scrolling content (this app's .table-wrap/.heatmap containers).
+   https://css-tricks.com/scroll-shadows-with-background-attachment-local/ */
+.scroll-shadow-x {
+  background:
+    linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)),
+    linear-gradient(to right, rgba(255, 255, 255, 0), #fff 70%) 100% 0,
+    linear-gradient(to right, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: #fff;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
+}
+
+[data-theme='dark'] .scroll-shadow-x {
+  background:
+    linear-gradient(to right, #0f172a 30%, rgba(15, 23, 42, 0)),
+    linear-gradient(to right, rgba(15, 23, 42, 0), #0f172a 70%) 100% 0,
+    linear-gradient(to right, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)),
+    linear-gradient(to left, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: #0f172a;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
+}
+
 button {
   cursor: pointer;
 }

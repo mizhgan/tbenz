@@ -82,7 +82,7 @@ const sortedStations = computed(() => {
       class="station-search"
       placeholder="Поиск по названию или адресу..."
     />
-    <div class="table-wrap">
+    <div class="table-wrap scroll-shadow-x">
       <p v-if="!stations.length" class="hint">Нет данных за выбранный период.</p>
       <p v-else-if="!sortedStations.length" class="hint">Ничего не найдено по запросу «{{ searchQuery }}».</p>
       <table v-else>
@@ -139,35 +139,13 @@ const sortedStations = computed(() => {
 }
 
 /* Same "fade edge only shows while there's more to scroll to" trick as
-   AvailabilityHeatmap.vue's own .heatmap (see its doc comment for how/why) -
+   every other scrollable table in the app - shared as main.css's
+   .scroll-shadow-x (applied in the template, see its own doc comment) -
    with 6 columns plus wrapping multi-line addresses, a phone screen shows
    barely more than the station-name column before this needed it just as
    much. */
 .table-wrap {
   overflow-x: auto;
-  background:
-    linear-gradient(to right, #fff 30%, rgba(255, 255, 255, 0)),
-    linear-gradient(to right, rgba(255, 255, 255, 0), #fff 70%) 100% 0,
-    linear-gradient(to right, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)),
-    linear-gradient(to left, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0)) 100% 0;
-  background-repeat: no-repeat;
-  background-color: #fff;
-  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
-  background-position: 0 0, 100% 0, 0 0, 100% 0;
-  background-attachment: local, local, scroll, scroll;
-}
-
-[data-theme='dark'] .table-wrap {
-  background:
-    linear-gradient(to right, #0f172a 30%, rgba(15, 23, 42, 0)),
-    linear-gradient(to right, rgba(15, 23, 42, 0), #0f172a 70%) 100% 0,
-    linear-gradient(to right, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)),
-    linear-gradient(to left, rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0)) 100% 0;
-  background-repeat: no-repeat;
-  background-color: #0f172a;
-  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
-  background-position: 0 0, 100% 0, 0 0, 100% 0;
-  background-attachment: local, local, scroll, scroll;
 }
 
 .sortable {

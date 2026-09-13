@@ -105,7 +105,7 @@ onMounted(loadProxies);
     <div class="card">
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="!proxies.length">Прокси не настроены — запросы идут напрямую.</p>
-      <div v-else class="table-wrap">
+      <div v-else class="table-wrap scroll-shadow-x">
         <table>
           <thead>
             <tr>

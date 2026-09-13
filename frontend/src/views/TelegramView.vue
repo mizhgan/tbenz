@@ -127,7 +127,7 @@ onMounted(loadAll);
       <p v-else-if="!chats.length">
         Пока нет ни одного чата. Добавьте бота в Telegram-чат и напишите ему что-нибудь.
       </p>
-      <div v-else class="table-wrap">
+      <div v-else class="table-wrap scroll-shadow-x">
         <table>
           <thead>
             <tr>

@@ -59,7 +59,7 @@ onMounted(load);
         <p v-if="loading" class="hint">Загрузка...</p>
         <p v-else-if="errorMessage" class="error-text">{{ errorMessage }}</p>
         <p v-else-if="!logs.length" class="hint">Пока нет записей журнала для этого источника.</p>
-        <div v-else class="table-wrap">
+        <div v-else class="table-wrap scroll-shadow-x">
           <table>
             <thead>
               <tr>

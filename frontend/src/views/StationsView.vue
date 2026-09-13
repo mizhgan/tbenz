@@ -151,7 +151,7 @@ onMounted(async () => {
     <div class="card">
       <p v-if="loading">Загрузка...</p>
       <p v-else-if="!stations.length">Станции не найдены по заданным фильтрам.</p>
-      <div v-else class="table-wrap">
+      <div v-else class="table-wrap scroll-shadow-x">
         <table>
           <thead>
             <tr>

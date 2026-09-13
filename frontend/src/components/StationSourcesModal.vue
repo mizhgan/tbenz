@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
 
           <h4>По видам топлива</h4>
           <p v-if="!station.sources.length" class="hint small">Второй источник не сопоставлен.</p>
-          <div class="table-wrap">
+          <div class="table-wrap scroll-shadow-x">
             <table class="fuel-table">
               <thead>
                 <tr>

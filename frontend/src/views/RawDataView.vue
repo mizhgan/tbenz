@@ -134,32 +134,34 @@ onMounted(loadCollections);
           <div class="dup-group-title">
             yandexOrgId: <code>{{ group._id }}</code> — {{ group.count }} записи(-ей)
           </div>
-          <table class="dup-table">
-            <thead>
-              <tr>
-                <th>name</th>
-                <th>address</th>
-                <th>externalId</th>
-                <th>lat, lon</th>
-                <th>firstSeenAt</th>
-                <th>lastSeenAt</th>
-                <th>lastStatus</th>
-                <th>sourceLinks</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="s in group.stations" :key="s._id">
-                <td>{{ s.name }}</td>
-                <td>{{ s.address }}</td>
-                <td>{{ s.externalId }}</td>
-                <td>{{ s.lat }}, {{ s.lon }}</td>
-                <td>{{ s.firstSeenAt }}</td>
-                <td>{{ s.lastSeenAt }}</td>
-                <td>{{ s.lastStatus }}</td>
-                <td>{{ (s.sourceLinks || []).map((l) => `${l.sourceKey}:${l.refId}`).join(', ') || '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-wrap scroll-shadow-x">
+            <table class="dup-table">
+              <thead>
+                <tr>
+                  <th>name</th>
+                  <th>address</th>
+                  <th>externalId</th>
+                  <th>lat, lon</th>
+                  <th>firstSeenAt</th>
+                  <th>lastSeenAt</th>
+                  <th>lastStatus</th>
+                  <th>sourceLinks</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in group.stations" :key="s._id">
+                  <td>{{ s.name }}</td>
+                  <td>{{ s.address }}</td>
+                  <td>{{ s.externalId }}</td>
+                  <td>{{ s.lat }}, {{ s.lon }}</td>
+                  <td>{{ s.firstSeenAt }}</td>
+                  <td>{{ s.lastSeenAt }}</td>
+                  <td>{{ s.lastStatus }}</td>
+                  <td>{{ (s.sourceLinks || []).map((l) => `${l.sourceKey}:${l.refId}`).join(', ') || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </template>
     </div>
@@ -265,6 +267,14 @@ onMounted(loadCollections);
   background: #f1f5f9;
   padding: 1px 5px;
   border-radius: 4px;
+}
+
+/* 8 columns, every cell forced nowrap (raw ids/timestamps that shouldn't
+   break mid-value) - the widest table in the app, and previously the only
+   one of the app's scrollable tables with no wrapper at all, so it just
+   overflowed .dup-card sideways with no scroll affordance whatsoever. */
+.table-wrap {
+  overflow-x: auto;
 }
 
 .dup-table {
