@@ -4,28 +4,9 @@ const { mergeStationFuelStatuses, mergeStationOverallStatus } = require('./merge
 const { getSource } = require('./sourceRegistry');
 const telegramNotifier = require('./telegramNotifier');
 const { recordPollAttempt } = require('./pollLogService');
+const { setSourcePollStatus } = require('./regionPollStatus');
 const { capRawResponse } = require('../utils/rawResponseCap');
 const logger = require('../utils/logger');
-
-// Dual-write helper for Region.sourcePollStatus (see the field's doc comment
-// on the model) - upserts this source's entry in place rather than pushing a
-// duplicate every poll tick. requestUrl/rawResponse are optional: the error
-// path below always has a URL (built independently of the failed request)
-// but never a response, and omitting rawResponse there (rather than passing
-// null) leaves whatever real response is already stored from this source's
-// last success in place instead of wiping it.
-function setSourcePollStatus(region, sourceKey, { lastPolledAt, status, error, stationCount, requestUrl, rawResponse }) {
-  const patch = { lastPolledAt, status, error, stationCount };
-  if (requestUrl !== undefined) patch.requestUrl = requestUrl;
-  if (rawResponse !== undefined) patch.rawResponse = rawResponse;
-
-  const entry = region.sourcePollStatus.find((s) => s.sourceKey === sourceKey);
-  if (entry) {
-    Object.assign(entry, patch);
-  } else {
-    region.sourcePollStatus.push({ sourceKey, ...patch });
-  }
-}
 
 async function storeSecondaryStation(sourceConfig, parsed, region, polledAt) {
   return sourceConfig.model.findOneAndUpdate(

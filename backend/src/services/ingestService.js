@@ -8,6 +8,7 @@ const telegramNotifier = require('./telegramNotifier');
 const { ingestSecondarySourceRegion, remergeStationsForTick } = require('./secondarySourceIngestService');
 const { listSources } = require('./sourceRegistry');
 const { recordPollAttempt } = require('./pollLogService');
+const { setSourcePollStatus } = require('./regionPollStatus');
 const { capRawResponse } = require('../utils/rawResponseCap');
 const logger = require('../utils/logger');
 const { advanceOutageStreak } = require('./metricsService');
@@ -166,17 +167,20 @@ async function pollTbankAndStoreStations(region, polledAt, bbox) {
   return { payload, requestUrl, stored, skipped, previousByStationId, previousConfirmedByStationId };
 }
 
-// Phase 2: mark this tick's tbank poll as successful on the region document
-// and in the poll-attempt log - kept separate from pollTbankAndStoreStations
-// above since this is bookkeeping about the fetch, not the fetch/store
-// itself.
+// Phase 2: mark this tick's tbank poll as successful in the region's own
+// sourcePollStatus entry (tbank's sourceKey, same shared write path every
+// other source uses - see regionPollStatus.js) and in the poll-attempt log -
+// kept separate from pollTbankAndStoreStations above since this is
+// bookkeeping about the fetch, not the fetch/store itself.
 async function recordSuccessfulPoll(region, polledAt, { requestUrl, payload, stored }) {
-  region.lastPolledAt = polledAt;
-  region.lastPollStatus = 'ok';
-  region.lastPollError = null;
-  region.lastPollStationCount = stored;
-  region.lastRequestUrl = requestUrl;
-  region.lastRawResponse = capRawResponse(payload);
+  setSourcePollStatus(region, 'tbank', {
+    lastPolledAt: polledAt,
+    status: 'ok',
+    error: null,
+    stationCount: stored,
+    requestUrl,
+    rawResponse: capRawResponse(payload),
+  });
   await region.save();
   await recordPollAttempt({ region, sourceKey: 'tbank', status: 'ok', error: null, stationCount: stored });
 }
@@ -299,22 +303,31 @@ async function notifyTelegram(region, stationEvents) {
 // Catch-all for any phase above throwing - in practice, almost always
 // pollTbankAndStoreStations' own fetchStations/extractStationsArray call,
 // since every other phase already swallows its own errors internally.
-// Marks this tick's tbank poll as failed on the region document and in the
-// poll-attempt log.
+// Marks this tick's tbank poll as failed in the region's own
+// sourcePollStatus entry and in the poll-attempt log.
 async function recordFailedPoll(region, polledAt, bbox, err) {
-  region.lastPolledAt = polledAt;
-  region.lastPollStatus = 'error';
-  region.lastPollError = err.message;
   // The request itself may never have gone out (or gone out and failed) -
-  // still worth showing/copying, so an admin can try it by hand. Doesn't
-  // touch lastRawResponse: a stale-but-real previous response is more
-  // useful to keep around than wiping it because this attempt had none.
+  // still worth showing/copying, so an admin can try it by hand. Left
+  // undefined (not set to a fresh request-less URL) if building it somehow
+  // throws too - setSourcePollStatus then leaves whatever URL is already
+  // stored from a previous attempt in place rather than wiping it. Doesn't
+  // pass rawResponse at all, same reasoning: a stale-but-real previous
+  // response is more useful to keep around than clearing it because this
+  // attempt had none.
+  let requestUrl;
   try {
-    region.lastRequestUrl = tbankClient.buildRequestUrl(bbox);
+    requestUrl = tbankClient.buildRequestUrl(bbox);
   } catch {
     // Building the URL itself shouldn't ever throw, but this must never
     // shadow the real ingest error below if it somehow does.
   }
+  setSourcePollStatus(region, 'tbank', {
+    lastPolledAt: polledAt,
+    status: 'error',
+    error: err.message,
+    stationCount: 0,
+    requestUrl,
+  });
   await region.save();
   await recordPollAttempt({ region, sourceKey: 'tbank', status: 'error', error: err.message, stationCount: 0 });
   logger.error(`Region "${region.name}": poll failed:`, err.message);

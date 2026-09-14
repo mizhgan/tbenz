@@ -58,25 +58,46 @@ function validateRegionInput(body, { partial = false } = {}) {
   return out;
 }
 
-// Raw response bodies (lastRawResponse / sourcePollStatus[].rawResponse) are
-// excluded here and from getRegion below - the Regions admin page polls
-// these every 15s, and a raw payload can be sizeable (see
-// utils/rawResponseCap.js); fetched on demand instead via
-// GET /regions/:id/raw-response. requestUrl (a short string) stays included
-// so the "copy URL" button works without an extra round-trip.
-const RAW_RESPONSE_EXCLUDE = '-lastRawResponse -sourcePollStatus.rawResponse';
+// LEGACY_POLL_FIELDS: the 6 top-level poll-status fields tbank used to write
+// directly (lastPolledAt/lastPollStatus/lastPollError/lastPollStationCount/
+// lastRequestUrl/lastRawResponse), before the poll-status unification moved
+// tbank onto sourcePollStatus like every other source (see Region.js's own
+// doc comment). No longer in the schema, but Mongoose still returns any
+// field physically present in a document regardless of whether it's
+// currently declared in the schema - removing a path from the schema does
+// NOT retroactively strip it from documents already carrying it in MongoDB,
+// and does NOT stop a plain find()/findById() from surfacing it. Confirmed
+// live: dropping these from the select-exclude strings below (on the
+// assumption removing them from the schema was enough) leaked a 70KB raw
+// tbank response - including sourcePollStatus/lastPollStatus/lastPollError -
+// straight onto the public /api/regions response, until
+// backfillDropLegacyPollFields.js physically $unsets them from existing
+// documents (run once after deploying this fix - a brand new region never
+// gets these fields at all, only ones created before the unification).
+// Keeping this explicit list is the safety net for however long that takes
+// to land everywhere.
+const LEGACY_POLL_FIELDS =
+  '-lastPolledAt -lastPollStatus -lastPollError -lastPollStationCount -lastRequestUrl -lastRawResponse';
+
+// Raw response bodies (sourcePollStatus[].rawResponse) are excluded here and
+// from getRegion below - the Regions admin page polls these every 15s, and a
+// raw payload can be sizeable (see utils/rawResponseCap.js); fetched on
+// demand instead via GET /regions/:id/raw-response. requestUrl (a short
+// string) stays included so the "copy URL" button works without an extra
+// round-trip.
+const RAW_RESPONSE_EXCLUDE = `-sourcePollStatus.rawResponse ${LEGACY_POLL_FIELDS}`;
 
 // An anonymous visitor (the public map/reports pages, see optionalAuth on
-// these routes) gets this instead - on top of RAW_RESPONSE_EXCLUDE, also
-// drops every operationally-sensitive poll-status field (scraper target
-// URLs, source error text, poll timestamps/counts) that has no business
-// going to the public internet. bbox/name/active/pollIntervalMinutes stay -
-// not sensitive, and the map/reports pages only ever read `_id`/`name`
-// anyway. Logged-in callers (any role) keep getting RAW_RESPONSE_EXCLUDE's
-// full set unchanged, since RegionsView.vue reads sourcePollStatus/
-// lastPollStatus/lastRequestUrl directly off this same response.
-const PUBLIC_REGION_EXCLUDE =
-  '-lastRawResponse -sourcePollStatus -lastPollStatus -lastPollError -lastPollStationCount -lastRequestUrl -lastPolledAt';
+// these routes) gets this instead - drops the whole operationally-sensitive
+// sourcePollStatus array (scraper target URLs, source error text, poll
+// timestamps/counts - tbank included, it's just another entry in there
+// since the poll-status unification, see Region.js's own doc comment) that
+// has no business going to the public internet. bbox/name/active/
+// pollIntervalMinutes stay - not sensitive, and the map/reports pages only
+// ever read `_id`/`name` anyway. Logged-in callers (any role) keep getting
+// RAW_RESPONSE_EXCLUDE's full set unchanged, since RegionsView.vue reads
+// sourcePollStatus directly off this same response.
+const PUBLIC_REGION_EXCLUDE = `-sourcePollStatus ${LEGACY_POLL_FIELDS}`;
 
 const listRegions = asyncHandler(async (req, res) => {
   const select = req.user ? RAW_RESPONSE_EXCLUDE : PUBLIC_REGION_EXCLUDE;
@@ -145,8 +166,8 @@ const pollRegionNow = asyncHandler(async (req, res) => {
 
 // 24h attempt/error counts per source (tbank + every registered secondary
 // source) - see pollLogService.js's doc comment for why this needs its own
-// log instead of reading Region.lastPollStatus/sourcePollStatus, which only
-// ever holds the single latest attempt.
+// log instead of reading Region.sourcePollStatus, which only ever holds the
+// single latest attempt.
 const getPollStats = asyncHandler(async (req, res) => {
   const region = await Region.findById(req.params.id);
   if (!region) throw new HttpError(404, 'Region not found');
@@ -166,20 +187,12 @@ const getPollLogs = asyncHandler(async (req, res) => {
 
 // The one field deliberately left out of listRegions/getRegion above -
 // fetched on its own, on demand, when an admin actually wants to inspect a
-// source's last raw response.
+// source's last raw response. Uniform across every source (tbank included,
+// as just another sourcePollStatus entry) since the poll-status
+// unification - see Region.js's own doc comment on sourcePollStatus.
 const getRawResponse = asyncHandler(async (req, res) => {
   const sourceKey = req.query.sourceKey;
   if (!sourceKey) throw new HttpError(400, 'sourceKey is required');
-
-  if (sourceKey === 'tbank') {
-    const region = await Region.findById(req.params.id, { lastRequestUrl: 1, lastRawResponse: 1, lastPolledAt: 1 });
-    if (!region) throw new HttpError(404, 'Region not found');
-    return res.json({
-      requestUrl: region.lastRequestUrl,
-      rawResponse: region.lastRawResponse,
-      capturedAt: region.lastPolledAt,
-    });
-  }
 
   const region = await Region.findById(req.params.id, { sourcePollStatus: 1 });
   if (!region) throw new HttpError(404, 'Region not found');

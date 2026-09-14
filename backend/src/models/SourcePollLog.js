@@ -3,11 +3,10 @@ const { Schema, model } = require('mongoose');
 // One row per poll attempt per source (tbank or a registered secondary
 // source, see services/sourceRegistry.js) - lets the admin Regions page show
 // actual error trends/counts over time instead of only ever seeing the
-// single latest attempt (Region.lastPollStatus/sourcePollStatus, which a
-// subsequent successful poll silently overwrites), and catch a source that
-// "succeeds" but returns 0 stations - the shape a silent block/rate-limit
-// takes, indistinguishable from a real error without a history to compare
-// against.
+// single latest attempt (Region.sourcePollStatus, which a subsequent
+// successful poll silently overwrites), and catch a source that "succeeds"
+// but returns 0 stations - the shape a silent block/rate-limit takes,
+// indistinguishable from a real error without a history to compare against.
 const sourcePollLogSchema = new Schema({
   region: { type: Schema.Types.ObjectId, ref: 'Region', required: true, index: true },
   sourceKey: { type: String, required: true },

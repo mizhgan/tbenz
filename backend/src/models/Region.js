@@ -9,22 +9,27 @@ const regionSchema = new Schema(
     maxLon: { type: Number, required: true },
     pollIntervalMinutes: { type: Number, required: true, default: 10, min: 1 },
     active: { type: Boolean, default: true },
-    lastPolledAt: { type: Date, default: null },
-    lastPollStatus: { type: String, enum: ['ok', 'error', 'never'], default: 'never' },
-    lastPollError: { type: String, default: null },
-    lastPollStationCount: { type: Number, default: 0 },
-    // The exact URL tbank's last poll attempt hit (built even on failure -
-    // see tbankClient.buildRequestUrl) and the raw response body from its
-    // last *successful* poll (capped, see utils/rawResponseCap.js) - lets an
-    // admin copy the request to test manually, or see exactly what came back
-    // before parsing, from the Regions page. Deliberately excluded from the
+    // One entry per source this region is polled from, tbank included (see
+    // services/regionPollStatus.js's setSourcePollStatus, the one write
+    // path for this field - used by both ingestService.js for tbank and
+    // secondarySourceIngestService.js for every other registered source,
+    // see services/sourceRegistry.js). tbank isn't a distinguished first
+    // entry here - it's upserted into this same array like any other
+    // source key, in whatever position it first gets written to (the
+    // frontend sorts it first for display, see RegionsView.vue's own
+    // sourceRows). Used to be two different shapes - tbank on its own
+    // dedicated top-level Region fields (lastPolledAt/lastPollStatus/
+    // lastPollError/lastPollStationCount/lastRequestUrl/lastRawResponse),
+    // every other source here - unified onto this one shape since the two
+    // were the exact same concept with no real difference beyond history.
+    //
+    // requestUrl/rawResponse (the exact URL a poll attempt hit, built even
+    // on failure - see tbankClient.buildRequestUrl/sourceConfig.buildRequestUrl
+    // - and the raw response body from the last *successful* poll, capped,
+    // see utils/rawResponseCap.js) are deliberately excluded from the
     // default list/get projections (regions.controller.js) since the admin
     // page polls those every 15s and a raw payload can be sizeable; fetched
     // on demand via GET /regions/:id/raw-response instead.
-    lastRequestUrl: { type: String, default: null },
-    lastRawResponse: { type: Schema.Types.Mixed, default: null },
-    // One entry per registered secondary source (see services/
-    // sourceRegistry.js), written by secondarySourceIngestService.js.
     sourcePollStatus: [
       {
         _id: false,

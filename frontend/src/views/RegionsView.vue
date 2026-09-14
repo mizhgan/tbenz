@@ -61,10 +61,11 @@ async function loadRegions() {
   }
 }
 
-// tbank's own poll status has dedicated fields directly on Region (it's the
-// primary source every region always has); every other registered source
-// (see backend's sourceRegistry.js) only shows up in region.sourcePollStatus,
-// which otherwise has no label attached to it beyond a bare sourceKey.
+// Every registered source (see backend's sourceRegistry.js), tbank included,
+// shows up in region.sourcePollStatus with nothing but a bare sourceKey -
+// this fetches the label list for every source *except* tbank (which
+// sourceLabel below special-cases directly, since it isn't a registered
+// secondary source at all - see sourceRegistry.js's own doc comment on why).
 async function loadSources() {
   try {
     sources.value = await stationMatchingApi.listSources();
@@ -78,32 +79,27 @@ function sourceLabel(key) {
   return sources.value.find((s) => s.key === key)?.label || key;
 }
 
-// One row per source (tbank + every entry in region.sourcePollStatus),
-// combining each source's own "current state" fields with its 24h
-// attempt/error stats (loaded separately, see loadPollStats) - lets the
-// template render tbank and every secondary source through the same list
-// instead of duplicating markup for tbank's dedicated fields.
+// One row per entry in region.sourcePollStatus (tbank included - it's just
+// another sourceKey in there since the backend's poll-status unification,
+// see Region.js's own doc comment on sourcePollStatus), combined with each
+// source's 24h attempt/error stats (loaded separately, see loadPollStats).
+// tbank is sorted first regardless of its actual position in the array
+// (wherever it first got upserted into - see backend's
+// regionPollStatus.js) since it's the primary source every region always
+// has, and admins expect to find it in the same spot every time.
 function sourceRows(region) {
   const statsByKey = new Map((pollStatsByRegion.value.get(region._id) || []).map((s) => [s.sourceKey, s]));
-  const rows = [
-    {
-      sourceKey: 'tbank',
-      status: region.lastPollStatus,
-      lastPolledAt: region.lastPolledAt,
-      stationCount: region.lastPollStationCount,
-      error: region.lastPollError,
-      requestUrl: region.lastRequestUrl,
-    },
-    ...(region.sourcePollStatus || []).map((s) => ({
-      sourceKey: s.sourceKey,
-      status: s.status,
-      lastPolledAt: s.lastPolledAt,
-      stationCount: s.stationCount,
-      error: s.error,
-      requestUrl: s.requestUrl,
-    })),
-  ];
-  return rows.map((r) => ({ ...r, label: sourceLabel(r.sourceKey), stats: statsByKey.get(r.sourceKey) || null }));
+  const rows = (region.sourcePollStatus || []).map((s) => ({
+    sourceKey: s.sourceKey,
+    status: s.status,
+    lastPolledAt: s.lastPolledAt,
+    stationCount: s.stationCount,
+    error: s.error,
+    requestUrl: s.requestUrl,
+    label: sourceLabel(s.sourceKey),
+    stats: statsByKey.get(s.sourceKey) || null,
+  }));
+  return rows.sort((a, b) => (a.sourceKey === 'tbank' ? -1 : b.sourceKey === 'tbank' ? 1 : 0));
 }
 
 async function copyUrl(region, row) {
