@@ -20,7 +20,6 @@ import { formatMinutes, bucketPeriodLabel } from '../utils/colorScale';
 // both without any date-matching).
 const props = defineProps({
   trendBuckets: { type: Array, default: () => [] },
-  forecastBuckets: { type: Array, default: () => [] },
   recoveryBuckets: { type: Array, default: () => [] },
   bucketHours: { type: Number, default: 24 },
   direction: { type: String, default: 'unknown' },
@@ -44,27 +43,10 @@ let recoveryChart = null;
 
 // Drives `chart`'s own hover/tooltip to the given category index (or clears
 // it for index === null) - reused as the target side of both onHover
-// callbacks below. Datasets with no value at this index (the padded
-// forecast slots on either chart, or the historical-only series once
-// hovering into the forecast region) are left out of the active set rather
-// than showing an empty tooltip row for them.
-// Shared by both render*Chart functions below - each builds its own history
-// series (trendBuckets vs recoveryBuckets) against the same forecastBuckets,
-// so the labels array (history + "(прогноз)"-suffixed forecast slots) was
-// duplicated between them.
-function buildLabels(historyBuckets, forecastBuckets) {
-  return [
-    ...historyBuckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU')),
-    ...forecastBuckets.map((b) => `${new Date(b.bucketStart).toLocaleString('ru-RU')} (прогноз)`),
-  ];
-}
-
-// Trailing null slots reserve space for the forecast region on a dataset
-// that has none of its own (every series here except the dashed forecast
-// line itself) - keeps every dataset's data array the same length as
-// buildLabels' shared labels array above.
-function pad(values, forecastLen) {
-  return [...values, ...new Array(forecastLen).fill(null)];
+// callbacks below. Datasets with no value at this index are left out of the
+// active set rather than showing an empty tooltip row for them.
+function buildLabels(historyBuckets) {
+  return historyBuckets.map((b) => new Date(b.bucketStart).toLocaleString('ru-RU'));
 }
 
 function setSyncedIndex(chart, index) {
@@ -102,15 +84,12 @@ function renderTrendChart() {
     return;
   }
 
-  const histLen = props.trendBuckets.length;
-  const forecastLen = props.forecastBuckets.length;
-
-  const labels = buildLabels(props.trendBuckets, props.forecastBuckets);
+  const labels = buildLabels(props.trendBuckets);
 
   const datasets = [
     {
       label: 'Доступно',
-      data: pad(props.trendBuckets.map((b) => b.availablePct), forecastLen),
+      data: props.trendBuckets.map((b) => b.availablePct),
       borderColor: '#16a34a',
       backgroundColor: 'rgba(22, 163, 74, 0.35)',
       fill: true,
@@ -120,7 +99,7 @@ function renderTrendChart() {
     },
     {
       label: 'Возможно доступно',
-      data: pad(props.trendBuckets.map((b) => b.maybeAvailablePct), forecastLen),
+      data: props.trendBuckets.map((b) => b.maybeAvailablePct),
       borderColor: '#d97706',
       backgroundColor: 'rgba(217, 119, 6, 0.3)',
       fill: true,
@@ -130,7 +109,7 @@ function renderTrendChart() {
     },
     {
       label: 'Недоступно',
-      data: pad(props.trendBuckets.map((b) => b.notAvailablePct), forecastLen),
+      data: props.trendBuckets.map((b) => b.notAvailablePct),
       borderColor: '#dc2626',
       backgroundColor: 'rgba(220, 38, 38, 0.3)',
       fill: true,
@@ -139,24 +118,6 @@ function renderTrendChart() {
       spanGaps: true,
     },
   ];
-
-  if (forecastLen > 0) {
-    const forecastLine = new Array(histLen).fill(null);
-    if (histLen > 0) forecastLine[histLen - 1] = props.trendBuckets[histLen - 1].availablePct;
-    forecastLine.push(...props.forecastBuckets.map((b) => b.availablePct));
-    datasets.push({
-      label: 'Прогноз доступности',
-      data: forecastLine,
-      borderColor: '#2563eb',
-      backgroundColor: 'transparent',
-      borderDash: [6, 4],
-      fill: false,
-      stack: 'forecast-line',
-      tension: 0.2,
-      spanGaps: true,
-      pointRadius: (ctx) => (ctx.dataIndex >= histLen ? 3 : 0),
-    });
-  }
 
   if (trendChart) trendChart.destroy();
   trendChart = new Chart(trendCanvasRef.value, {
@@ -189,16 +150,8 @@ function renderRecoveryChart() {
     return;
   }
 
-  // Padded with as many trailing (unlabeled-as-such, undrawn) slots as the
-  // trend chart has forecast points, so both charts' category axes stay the
-  // same length - see metricsService.js's getSnapshotDataBounds doc comment
-  // for the fuller alignment story this is one half of.
-  const histLen = props.recoveryBuckets.length;
-  const labels = buildLabels(props.recoveryBuckets, props.forecastBuckets);
-  const data = pad(
-    props.recoveryBuckets.map((b) => b.avgRecoveryMinutes),
-    props.forecastBuckets.length
-  );
+  const labels = buildLabels(props.recoveryBuckets);
+  const data = props.recoveryBuckets.map((b) => b.avgRecoveryMinutes);
 
   if (recoveryChart) recoveryChart.destroy();
   recoveryChart = new Chart(recoveryCanvasRef.value, {
@@ -228,12 +181,7 @@ function renderRecoveryChart() {
         tooltip: {
           callbacks: {
             label: (ctx) => {
-              // ctx.dataIndex can land in the padded forecast region above
-              // (no real bucket there, just reserved space) - those never
-              // have a non-null value, so Chart.js shouldn't invoke this at
-              // all for them, but this guards it explicitly rather than
-              // relying on that.
-              const bucket = ctx.dataIndex < histLen ? props.recoveryBuckets[ctx.dataIndex] : null;
+              const bucket = props.recoveryBuckets[ctx.dataIndex];
               if (!bucket) return [];
               return [
                 `${formatMinutes(bucket.avgRecoveryMinutes)} в среднем`,
@@ -266,8 +214,8 @@ onMounted(() => {
   renderTrendChart();
   renderRecoveryChart();
 });
-watch(() => [props.trendBuckets, props.forecastBuckets], renderTrendChart, { deep: true });
-watch(() => [props.recoveryBuckets, props.bucketHours, props.forecastBuckets], renderRecoveryChart, { deep: true });
+watch(() => props.trendBuckets, renderTrendChart, { deep: true });
+watch(() => [props.recoveryBuckets, props.bucketHours], renderRecoveryChart, { deep: true });
 onBeforeUnmount(() => {
   if (trendChart) trendChart.destroy();
   if (recoveryChart) recoveryChart.destroy();
@@ -292,10 +240,6 @@ onBeforeUnmount(() => {
         <canvas ref="trendCanvasRef"></canvas>
       </div>
     </div>
-    <p class="hint small">
-      Пунктир — простая линейная экстраполяция последних данных, а не точный прогноз: это грубая
-      оценка направления тренда, без учёта сезонности.
-    </p>
 
     <div class="combo-divider"></div>
 

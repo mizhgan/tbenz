@@ -45,7 +45,6 @@ const {
   loading,
   errorMessage,
   trendBuckets,
-  forecastBuckets,
   forecastDirection,
   stations,
   previousStations,
@@ -125,7 +124,6 @@ const {
   toIso,
   summary,
   trendBuckets,
-  forecastBuckets,
   recoveryTrendBuckets,
   forecastDirection,
   highlightedStations,
@@ -243,7 +241,6 @@ onMounted(async () => {
 
     <AvailabilityRecoveryChart
       :trend-buckets="trendBuckets"
-      :forecast-buckets="forecastBuckets"
       :recovery-buckets="recoveryTrendBuckets"
       :bucket-hours="bucketHours"
       :direction="forecastDirection"

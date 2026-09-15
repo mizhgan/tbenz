@@ -32,8 +32,10 @@ function formatDateRange(from, to) {
 }
 
 // Change from the first to the last bucket that actually has data - "how
-// did it move over the period", not a statistically fitted trend (that's
-// what the dashed forecast line on the page itself is for).
+// did it move over the period", a plain start-vs-end read rather than a
+// statistically fitted trend (that's what the direction badge above the
+// chart is for, driven by the backend's own linear-regression forecast
+// endpoint - see ReportsView.vue's forecastDirection).
 function computeTrendDelta(buckets) {
   const known = (buckets || []).filter((b) => b.availablePct !== null && b.availablePct !== undefined);
   if (known.length < 2) return null;
@@ -48,7 +50,6 @@ const STATUS_COLORS = {
   maybe_available: '#d97706',
   not_available: '#dc2626',
 };
-const FORECAST_COLOR = '#2563eb';
 
 // Carries the nearest known value forward (then back-fills any leading
 // gap) instead of leaving a hole - a simple stand-in for Chart.js's
@@ -121,20 +122,18 @@ function drawBucketAxisLabels(ctx, buckets, labels, xAt, step, y, chartX, chartW
 }
 
 // Stacked-area mini chart (available/maybe/not_available bands, bottom to
-// top) plus a dashed forecast continuation - the compact equivalent of
-// AvailabilityRecoveryChart.vue's full chart, not a single arbitrary-colored trend line:
-// the graph shows *availability*, so it should use the app's own
-// green/amber/red for that, not a color chosen by whether the trend is
-// currently improving or worsening (a different, and previously
-// conflated, piece of information - that's still shown separately as the
-// direction badge and the delta line below the chart).
-function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, height, draw) {
+// top) - the compact equivalent of AvailabilityRecoveryChart.vue's full
+// chart, not a single arbitrary-colored trend line: the graph shows
+// *availability*, so it should use the app's own green/amber/red for that,
+// not a color chosen by whether the trend is currently improving or
+// worsening (a different, and previously conflated, piece of information -
+// that's still shown separately as the direction badge and the delta line
+// below the chart).
+function drawStackedTrend(ctx, trendBuckets, x, y, width, height, draw) {
   if (!draw || trendBuckets.length < 2) return;
 
   const histLen = trendBuckets.length;
-  const forecastLen = forecastBuckets.length;
-  const totalPoints = histLen + forecastLen;
-  const xStep = width / Math.max(1, totalPoints - 1);
+  const xStep = width / Math.max(1, histLen - 1);
   const xAt = (i) => x + i * xStep;
 
   ctx.strokeStyle = '#e5e7eb';
@@ -179,28 +178,8 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
   drawBand(topMaybe, topAvail, STATUS_COLORS.maybe_available);
   drawBand(topNotAvail, topMaybe, STATUS_COLORS.not_available);
 
-  // Forecast continuation - only projects availability itself (not the
-  // full breakdown), so it's drawn as a dashed line picking up from where
-  // the green band's own top edge left off, not another stacked area.
-  if (forecastLen > 0) {
-    const forecastAvail = fillGaps(forecastBuckets.map((b) => b.availablePct));
-    ctx.save();
-    ctx.setLineDash([6, 5]);
-    ctx.strokeStyle = FORECAST_COLOR;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(xs[xs.length - 1], topAvail[topAvail.length - 1]);
-    for (let i = 0; i < forecastLen; i++) {
-      ctx.lineTo(xAt(histLen + i), toY(forecastAvail[i]));
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Time-axis labels below the chart, positioned at each historical
-  // bucket's own xAt(i) - see drawBucketAxisLabels's own doc comment for
-  // why (not the forecast portion: it's already visually set apart by the
-  // dashing/color, and doesn't need its own ticks to read clearly).
+  // Time-axis labels below the chart, positioned at each bucket's own
+  // xAt(i) - see drawBucketAxisLabels's own doc comment for why.
   const axisFont = '14px -apple-system, "Segoe UI", Roboto, sans-serif';
   ctx.font = axisFont;
   const tickLabels = bucketTickLabels(trendBuckets);
@@ -219,17 +198,9 @@ function drawStackedTrend(ctx, trendBuckets, forecastBuckets, x, y, width, heigh
 // doc comment) rather than trying to caption every single bar - with up to
 // ~30 for a 30-day/daily selection there still isn't room for all of them
 // individually, but a readable handful beats none.
-//
-// `forecastLen` reserves that many extra trailing slots in the width/spacing
-// math (no bar ever drawn there) purely so this chart's bars land at the
-// same per-slot width as drawStackedTrend's own buckets+forecast above -
-// otherwise the two charts (bare bucket count here vs. buckets+forecast
-// there) stretch across the same card width at different densities and the
-// same date ends up at two different x positions, reported live as the two
-// charts visibly not lining up.
-function drawRecoveryBars(ctx, buckets, forecastLen, x, y, width, height, draw) {
+function drawRecoveryBars(ctx, buckets, x, y, width, height, draw) {
   if (!draw || !buckets.length) return;
-  const totalSlots = buckets.length + forecastLen;
+  const totalSlots = buckets.length;
   const gap = Math.min(8, width / totalSlots / 4);
   const barWidth = (width - gap * (totalSlots - 1)) / totalSlots;
   const perBucketWidth = barWidth + gap;
@@ -292,7 +263,7 @@ function drawRecoveryBars(ctx, buckets, forecastLen, x, y, width, height, draw) 
 // empty space below a fixed height).
 function layoutCard(
   ctx,
-  { region, from, to, summary, trendBuckets, forecastBuckets, recoveryTrendBuckets, direction, topStations, stationsLabel },
+  { region, from, to, summary, trendBuckets, recoveryTrendBuckets, direction, topStations, stationsLabel },
   draw
 ) {
   const contentWidth = WIDTH - PADDING * 2;
@@ -406,7 +377,7 @@ function layoutCard(
     const sparkHeight = 90;
     const delta = computeTrendDelta(trendBuckets);
     const sparkColor = delta === null ? '#6b7280' : delta > 1 ? '#16a34a' : delta < -1 ? '#dc2626' : '#6b7280';
-    drawStackedTrend(ctx, trendBuckets, forecastBuckets || [], PADDING, y, contentWidth, sparkHeight, draw);
+    drawStackedTrend(ctx, trendBuckets, PADDING, y, contentWidth, sparkHeight, draw);
     // +24 over the old spacing to fit the new time-axis label row drawn
     // just below the chart (see drawStackedTrend's own call to
     // drawBucketAxisLabels) before the delta text below it.
@@ -457,7 +428,7 @@ function layoutCard(
   const recoveryBucketsWithData = recoveryTrendBuckets.filter((b) => b.outageCount > 0);
   if (recoveryBucketsWithData.length) {
     const barsHeight = 90;
-    drawRecoveryBars(ctx, recoveryTrendBuckets, forecastBuckets.length, PADDING, y, contentWidth, barsHeight, draw);
+    drawRecoveryBars(ctx, recoveryTrendBuckets, PADDING, y, contentWidth, barsHeight, draw);
     // Same +24 as drawStackedTrend above, for its own new time-axis label row.
     y += barsHeight + 52;
 
@@ -625,7 +596,6 @@ export function renderRegionReportCard({
   to,
   summary,
   trendBuckets,
-  forecastBuckets,
   recoveryTrendBuckets,
   direction,
   topStations,
@@ -637,7 +607,6 @@ export function renderRegionReportCard({
     to,
     summary,
     trendBuckets: trendBuckets || [],
-    forecastBuckets: forecastBuckets || [],
     recoveryTrendBuckets: recoveryTrendBuckets || [],
     direction,
     topStations: topStations || [],

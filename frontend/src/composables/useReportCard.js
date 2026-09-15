@@ -14,11 +14,11 @@ import { useAsyncAction } from './useAsyncAction';
  *
  * Every param here is a ref/computed owned by another composable
  * (useReportPeriod.js's fromMs/toMs/fromIso/toIso, useReportMetrics.js's
- * selectedRegion/trendBuckets/forecastBuckets/recoveryTrendBuckets/
- * forecastDirection, useReportSummary.js's summary) or by ReportsView.vue
- * itself (highlightedStations/stationsSort, the "лучшие/худшие" toggle) -
- * read live via .value when generateReportCard actually runs, not captured
- * once at construction.
+ * selectedRegion/trendBuckets/recoveryTrendBuckets/forecastDirection,
+ * useReportSummary.js's summary) or by ReportsView.vue itself
+ * (highlightedStations/stationsSort, the "лучшие/худшие" toggle) - read live
+ * via .value when generateReportCard actually runs, not captured once at
+ * construction.
  */
 export function useReportCard({
   selectedRegion,
@@ -28,7 +28,6 @@ export function useReportCard({
   toIso,
   summary,
   trendBuckets,
-  forecastBuckets,
   recoveryTrendBuckets,
   forecastDirection,
   highlightedStations,
@@ -88,7 +87,6 @@ export function useReportCard({
           to: toMs.value,
           summary: summary.value,
           trendBuckets: trendBuckets.value,
-          forecastBuckets: forecastBuckets.value,
           recoveryTrendBuckets: recoveryTrendBuckets.value,
           direction: forecastDirection.value,
           topStations,

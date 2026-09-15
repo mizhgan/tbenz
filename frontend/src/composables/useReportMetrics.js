@@ -27,7 +27,11 @@ export function useReportMetrics({ fromIso, toIso, prevFromIso, prevToIso, bucke
   const errorMessage = ref('');
 
   const trendBuckets = ref([]);
-  const forecastBuckets = ref([]);
+  // The forecast line itself is no longer drawn (see
+  // AvailabilityRecoveryChart.vue's own history - removed live, not much
+  // use for the extra chart width it cost) - only the trend endpoint's own
+  // computed direction still gets used, for the "Улучшается/Ухудшается"
+  // badge.
   const forecastDirection = ref('unknown');
   const stations = ref([]);
   // Previous-period stations, fetched purely to compute previousSummary
@@ -118,11 +122,9 @@ export function useReportMetrics({ fromIso, toIso, prevFromIso, prevToIso, bucke
     }
 
     if (forecastResult.status === 'fulfilled') {
-      forecastBuckets.value = forecastResult.value.forecast;
       forecastDirection.value = forecastResult.value.direction;
       sectionErrors.value.forecast = '';
     } else {
-      forecastBuckets.value = [];
       forecastDirection.value = 'unknown';
       sectionErrors.value.forecast = describeFailure(forecastResult);
     }
@@ -163,7 +165,6 @@ export function useReportMetrics({ fromIso, toIso, prevFromIso, prevToIso, bucke
     loading,
     errorMessage,
     trendBuckets,
-    forecastBuckets,
     forecastDirection,
     stations,
     previousStations,
