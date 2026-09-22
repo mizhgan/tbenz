@@ -6,16 +6,18 @@ function msToLocalInputValue(ms) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Hourly threshold raised from 48h to 7 days (the "7д" preset's own span) -
+// 168 hourly points is still nothing for Chart.js to auto-thin (same as the
+// daily threshold below, already tuned for a far bigger 90 daily points).
 // Daily threshold raised from 14 to 90 days - at 14, a 30-day report (the
 // widest preset button) fell into weekly buckets and rendered as ~5 points,
-// most of the "Динамика доступности" chart empty past that. Chart.js
-// already auto-thins x-axis labels regardless of point count (see
-// AvailabilityRecoveryChart.vue), so 90 daily points renders fine - no need
-// for a fancier adaptive scheme, just moving the cliff somewhere the
-// still-fixed 30/7/90 preset buttons don't land right on top of it.
+// most of the "Динамика доступности" chart empty past that. No need for a
+// fancier adaptive scheme than these two thresholds - just moving each cliff
+// somewhere the still-fixed 24ч/7д/30д/90д preset buttons don't land right
+// on top of it.
 function pickBucketHours(spanMs) {
   const spanHours = spanMs / 3600000;
-  if (spanHours <= 48) return 1;
+  if (spanHours <= 24 * 7) return 1;
   if (spanHours <= 24 * 90) return 24;
   return 24 * 7;
 }
